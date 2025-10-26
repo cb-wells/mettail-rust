@@ -1,0 +1,15 @@
+[package]
+name = "mettail-runtime"
+version = "0.1.0"
+edition = "2021"
+authors = ["MeTTaIL Contributors"]
+license = "MIT"
+description = "Runtime support library for MeTTaIL - provides variable binding and substitution utilities"
+repository = "https://github.com/your-username/mettail-rust"
+homepage = "https://github.com/your-username/mettail-rust"
+keywords = ["language", "runtime", "binding", "substitution"]
+categories = ["development-tools"]
+readme = "../README.md"
+
+[dependencies]
+moniker = { version = "0.5.0", features = ["moniker-derive"] }

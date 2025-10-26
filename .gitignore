@@ -1,0 +1,56 @@
+# Rust
+/target/
+**/*.rs.bk
+*.pdb
+
+# Cargo
+Cargo.lock
+# For libraries, uncomment Cargo.lock to ignore it
+# For binaries/applications, commit Cargo.lock
+# Since this is a workspace with both, we ignore it by default
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+.project
+.classpath
+.settings/
+*.sublime-*
+
+# CI/CD
+*.log
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Testing
+*.profraw
+*.profdata
+
+# Backup files
+*.bak
+*.tmp
+
+# Rust-specific
+*.rlib
+*.rmeta
+*.so
+*.dylib
+*.dll
+
+# Generated files
+*.generated.rs
+
+# trybuild artifacts
+target/tests/trybuild/
+
+# Work-in-progress directories
+**/wip/
+
