@@ -1,16 +1,17 @@
 # MeTTaIL: Meta-Language for Theory-Based Language Implementation
 
-**Status:** Phase 1 Complete ✅ | Phase 2 Starting 🎯
+**Status:** Phase 1 Complete ✅ | Phase 2 Complete ✅ | Phase 3 Next 🎯
 
 ---
 
 ## 📖 Quick Links
 
 - **[Roadmap](docs/ROADMAP.md)** - Long-term vision and phases
-- **[Phase 1 Plan](docs/phase-1/PHASE-1-PLAN.md)** - Foundation implementation (COMPLETE)
+- **[Phase 1 Complete](docs/phase-1/PHASE-1-PLAN.md)** - Foundation (AST, types, binders) ✅
+- **[Phase 2 Complete](docs/phase-2/PHASE-2-COMPLETE.md)** - Parser generation (LALRPOP) ✅
+- **[Phase 3 Design](docs/design/THEORY-COMPOSITION-DESIGN.md)** - Theory composition (NEXT)
 - **[Progress](docs/phase-1/PROGRESS.md)** - Detailed progress and metrics
 - **[Remaining Issues](docs/design/REMAINING-ISSUES.md)** - Known problems and priorities
-- **[Theory Composition Design](docs/design/THEORY-COMPOSITION-DESIGN.md)** - Phase 3 design
 
 ---
 
@@ -34,7 +35,7 @@ theory! {
         POutput . Proc ::= Name "!" "(" Proc ")" ;
         PPar . Proc ::= Proc "|" Proc ;
         PDrop . Proc ::= "*" Name ;
-        NQuote . Name ::= "@" Proc ;
+        NQuote . Name ::= "@" "(" Proc ")" ;
         NVar . Name ::= Var ;
     }
     
@@ -72,51 +73,68 @@ From a theory definition, MeTTaIL generates:
 - **AST enums** - Clean, type-safe data structures
 - **Substitution methods** - Capture-avoiding, cross-category
 - **Type derivations** - `Debug`, `Clone`, `PartialEq`, `Eq`, `BoundTerm`
-- **Parser stubs** - Currently broken, Phase 2 will fix with LALRPOP
+- **LALRPOP grammars** - Full parser generation with precedence handling
 
-### Example Generated Code
+---
+
+## ✅ Phase 2: Parser Generation (COMPLETE)
+
+### What We Built
+- ✅ **Precedence-Aware Grammars** - Automatic handling of infix operators
+- ✅ **Binder Parsing** - Direct parsing into `Scope` structures
+- ✅ **Parentheses Support** - Override precedence with grouping
+- ✅ **Left-Associativity** - Correct parsing of `a | b | c` as `((a | b) | c)`
+- ✅ **Full Rho Calculus** - Parse complex terms like `a!(0) | b!(c!(0)) | for(a x){*x}`
+
+### Generated Grammar Example
+```lalrpop
+pub Proc: Proc = { <ProcInfix> };
+
+ProcInfix: Proc = {
+    <left:ProcInfix> "|" <right:ProcAtom> => Proc::PPar(Box::new(left), Box::new(right)),
+    <ProcAtom>
+};
+
+ProcAtom: Proc = {
+    "(" <Proc> ")",  // Parentheses for grouping
+    "0" => Proc::PZero,
+    "for" "(" <f0:Name> <x_1:Ident> ")" "{" <body_2:Proc> "}" => {
+        let binder = Binder(FreeVar::fresh_named(x_1));
+        let scope = Scope::new(binder, Box::new(body_2));
+        Proc::PInput(Box::new(f0), scope)
+    },
+    // ... more rules
+};
+```
+
+### Parsing Tests (11/11 passing)
 ```rust
-pub enum Proc {
-    PZero,
-    PInput(Box<Name>, Scope<Binder<String>, Box<Proc>>),
-    POutput(Box<Name>, Box<Proc>),
-    PPar(Box<Proc>, Box<Proc>),
-    PDrop(Box<Name>),
-}
-
-impl Proc {
-    pub fn substitute_name(
-        &self, 
-        var: &FreeVar<String>, 
-        replacement: &Name
-    ) -> Self {
-        // Automatic capture-avoiding substitution
-        // Recurses into all fields correctly ✅
-    }
-}
+✓ Parse "0"
+✓ Parse "*x"
+✓ Parse "@(0)"
+✓ Parse "a!(0)"
+✓ Parse "b!(c!(0))"
+✓ Parse "for(a x){*x}"
+✓ Parse "a!(0) | b!(0)"
+✓ Parse "(a!(0))"
+✓ Parse "a!(0) | b!(0) | c!(0)" with correct left-associativity
+✓ Parse "a!(0) | (b!(0) | c!(0))" with parentheses overriding
+✓ Parse "a!(0) | b!(c!(0)) | for(a x){*x}" 🎉
 ```
 
 ---
 
-## 🎯 Phase 2: What's Next (3-4 months)
+## 🎯 Phase 3: What's Next (Theory Composition)
 
 ### Immediate Priorities
-1. **Parser Generation** (Weeks 1-2) - LALRPOP integration
-2. **Pattern Matching** (Weeks 3-4) - Match rewrite LHS against terms
-3. **Rewrite Application** (Weeks 5-6) - Apply rewrites to transform terms
-4. **Reduction Engine** (Weeks 7-8) - Multi-step reduction strategies
-5. **Simple Interpreter** (Weeks 9-10) - End-to-end CLI tool
+1. **Theory Imports** - Import and reuse other theories
+2. **Theory Parameters** - Generic theories (e.g., `List<T>`)
+3. **Extension Syntax** - Extend existing theories with new rules
+4. **Module System** - Proper namespacing and visibility
 
-### Deliverable
-```bash
-$ mettail run rhocalc.theory "for(ch x){*x} | ch!(0)"
-*@0
-
-$ mettail reduce rhocalc.theory "0 | for(ch x){*x | *x} | ch!(0)" --trace
-Step 1: 0 | for(ch x){*x | *x} | ch!(0)
-Step 2: 0 | (*@0 | *@0)
-Step 3: *@0 | *@0
-```
+### Remaining Phase 2 Tasks
+- **Pretty-Printing** - Generate `Display` implementations
+- **Round-Trip Testing** - Verify `parse(display(ast)) == ast`
 
 ---
 
@@ -288,5 +306,5 @@ This is an active research project. We're working out the goals together as we g
 
 ---
 
-**Last Updated:** After Phase 1 completion and substitution fix  
+**Last Updated:** After Phase 1 completion - Beginning Phase 2 (Parser Generation)  
 **Next Milestone:** LALRPOP parser integration (Week 2)

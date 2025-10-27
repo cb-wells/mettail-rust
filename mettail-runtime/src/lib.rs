@@ -7,6 +7,9 @@ pub use moniker::{
     Var, FreeVar, Binder, Scope, BoundTerm, BoundPattern,
 };
 
+// Re-export LALRPOP utilities for generated parsers
+pub use lalrpop_util::ParseError as LalrpopParseError;
+
 use std::fmt;
 
 /// Base trait for all generated AST nodes

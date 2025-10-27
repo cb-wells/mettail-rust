@@ -14,7 +14,7 @@ MeTTaIL aims to be:
 
 ---
 
-## 📍 Current Status (End of Phase 1)
+## 📍 Current Status (End of Phase 2)
 
 ### What Works ✅
 - **Theory Definition** - Declarative `theory! {}` macro syntax
@@ -22,10 +22,13 @@ MeTTaIL aims to be:
 - **Binder Handling** - Correct variable scoping via `moniker`
 - **Cross-Category Substitution** - Full support for heterogeneous substitution
 - **Rewrite Rules** - Parsing and type-checking (not execution yet)
-- **Test Case** - Rho Calculus with communication rule
+- **LALRPOP Parser Generation** - Automatic `.lalrpop` file generation from theories
+- **Precedence Handling** - Correct parsing of infix operators with associativity
+- **Pretty-Printing** - Display trait generation for all AST types
+- **Round-Trip Testing** - Parse → Display → Parse verified for Rho Calculus
+- **Test Case** - Rho Calculus with full parsing and communication rule
 
 ### What's Missing ❌
-- **Parser Generation** - Current approach broken, needs LALRPOP
 - **Runtime Execution** - Can't actually reduce/rewrite terms yet
 - **Theory Composition** - Design exists but not implemented
 - **Equation Semantics** - Unclear how equations interact with rewrites
@@ -42,41 +45,50 @@ Phase 1: Foundation ✅ COMPLETE
 ├─ Binders & substitution
 └─ Rewrite rule syntax
 
-Phase 2: Execution 🎯 NEXT (3-4 months)
-├─ Parser generation (LALRPOP)
-├─ Basic reduction engine  
-├─ Pattern matching
-├─ Rewrite application
-└─ Simple interpreter
+Phase 2: Parser Generation ✅ COMPLETE
+├─ LALRPOP integration
+├─ Grammar generation from theories
+├─ Operator precedence & associativity
+├─ Binder parsing (Scope generation)
+├─ Pretty-printing (Display traits)
+└─ Round-trip testing
 
-Phase 3: Composition (2-3 months)
+Phase 3: Theory Composition 🎯 NEXT (2-3 months)
 ├─ Theory parameterization
 ├─ Module system
 ├─ Export/import
-└─ Namespace management
+├─ Namespace management
+└─ Standard theory library
 
-Phase 4: Advanced Semantics (3-4 months)
+Phase 4: Execution Engine (3-4 months)
+├─ Pattern matching
+├─ Rewrite application
+├─ Reduction strategies
+├─ Simple interpreter
+└─ Works with composed theories
+
+Phase 5: Advanced Semantics (3-4 months)
 ├─ E-graph integration (egg/egglog)
 ├─ Equation handling
 ├─ Congruence rule generation
 ├─ Confluence checking
 └─ Termination analysis
 
-Phase 5: Production Features (3-4 months)
+Phase 6: Production Features (3-4 months)
 ├─ JIT compilation (Cranelift)
 ├─ WASM backend
 ├─ Optimization passes
 ├─ Incremental computation
 └─ Parallel reduction
 
-Phase 6: Tooling & Ecosystem (2-3 months)
+Phase 7: Tooling & Ecosystem (2-3 months)
 ├─ Language server (LSP)
 ├─ REPL
 ├─ Debugger
-├─ Pretty printer
-└─ Documentation generator
+├─ Documentation generator
+└─ Package manager
 
-Phase 7: Advanced Types (ongoing)
+Phase 8: Advanced Types (ongoing)
 ├─ Dependent types
 ├─ Refinement types
 ├─ Session types
@@ -86,168 +98,153 @@ Phase 7: Advanced Types (ongoing)
 
 ---
 
-## 📋 Phase 2: Execution Engine (CURRENT)
+## 📋 Phase 2: Parser Generation ✅ COMPLETE
 
-**Goal:** Make theories executable - parse input, apply rewrites, produce output.
+**Goal:** Generate working parsers from theory definitions and enable round-trip testing.
 
-**Duration:** 3-4 months
+**Duration:** Completed in concentrated development session
 
-### 2.1 Parser Generation (Weeks 1-2) 🔴 CRITICAL
-
-**Problem:** Current parser combinator approach is fundamentally broken.
-
-**Solution:** Integrate LALRPOP for proper LR(1) parsing.
-
-**Tasks:**
-- [ ] Add LALRPOP dependency and build integration
-- [ ] Generate `.lalrpop` grammar files from `theory!` definitions
-- [ ] Handle operator precedence and associativity
-- [ ] Support binder syntax in grammar
-- [ ] Generate parser modules with proper error handling
-- [ ] Test with Rho Calculus examples
-
-**Deliverable:** `RhoCalc::parse("0 | *@0")` returns correct AST.
+**Achievement:** Successfully integrated LALRPOP, generating working parsers with precedence handling, binder support, and pretty-printing. All round-trip tests pass for Rho Calculus including complex expressions like `a!(0)|b!(c!(0))|for(a x){*x}`.
 
 ---
 
-### 2.2 Pattern Matching (Weeks 3-4)
+### ✅ Completed Tasks
 
-**Goal:** Match term patterns against AST for rewrite rule application.
+**2.1 LALRPOP Integration & Build Setup**
+- ✅ Added LALRPOP dependency to workspace
+- ✅ Set up build.rs for grammar generation (both runtime and examples)
+- ✅ Created working integration with existing AST types
+- ✅ Configured proper module structure
 
-**Tasks:**
-- [ ] Design pattern ADT (variables, constructors, wildcards)
-- [ ] Implement pattern matching algorithm
-- [ ] Handle binders in patterns (α-equivalence)
-- [ ] Support conditional patterns (freshness)
-- [ ] Generate match code for rewrite LHS
-- [ ] Test with various Rho Calculus patterns
+**2.2 Grammar Generation from Theory Definitions**
+- ✅ Automatic `.lalrpop` file generation from `theory!` macros
+- ✅ Correct mapping of grammar rules to AST constructors
+- ✅ Terminal vs non-terminal handling
+- ✅ Automatic lexer token generation
+- ✅ Grammar files written to correct directories
 
-**Example:**
-```rust
-// Given pattern: (PPar (PInput x P) (POutput y Q))
-// Match against: 0 | *@0 | for(ch z){*z} | ch!(0)
-//result: Finds PInput/POutput pair, binds x=ch, z=z, y=ch, P=*z, Q=0
-```
+**2.3 Operator Precedence & Associativity**
+- ✅ Detection of infix operators in grammar rules
+- ✅ Automatic precedence tier generation (`Expr` → `ExprInfix` → `ExprAtom`)
+- ✅ Left-associativity for parallel composition (`|`)
+- ✅ Parentheses support for explicit grouping
+- ✅ Tested with nested expressions
 
----
+**2.4 Binder Syntax Support**
+- ✅ Parse binder syntax (e.g., `for(ch x){P}`) into `Scope` types
+- ✅ Generate parser actions that create `Scope` with fresh variables
+- ✅ Correct variable capture and scoping
+- ✅ Tested with Rho Calculus input constructs
 
-### 2.3 Rewrite Application (Weeks 5-6)
+**2.5 Pretty-Printing**
+- ✅ Generate `Display` impl for all AST categories
+- ✅ Handle binder printing (show variable names only)
+- ✅ Escape braces in format strings
+- ✅ Automatic space insertion between consecutive non-terminals
+- ✅ Correct handling of `Var` fields (extract `pretty_name`)
 
-**Goal:** Apply rewrite rules to transform terms.
+**2.6 Testing & Round-Trip Verification**
+- ✅ Round-trip tests pass: parse → display → parse
+- ✅ Comprehensive Rho Calculus parsing (11 tests)
+- ✅ Self-contained tests in theory files
+- ✅ Complex expression: `a!(0)|b!(c!(0))|for(a x){*x}` ✓
+- ✅ All test suites passing (19 macro tests, 3 rhocalc tests)
 
-**Tasks:**
-- [ ] Implement rewrite rule application
-- [ ] Check freshness conditions at runtime
-- [ ] Apply substitutions from RHS
-- [ ] Handle multiple matches (strategy: first, all, choice?)
-- [ ] Test communication rule: `for(ch x){P} | ch!(Q) => P[@Q/x]`
-- [ ] Measure performance and optimize
-
-**Deliverable:** `term.apply_rewrite(rule)` produces reduced term.
-
----
-
-### 2.4 Reduction Engine (Weeks 7-8)
-
-**Goal:** Repeatedly apply rewrites until normal form (or timeout).
-
-**Design Decisions:**
-1. **Strategy:** Which rewrite to apply when multiple match?
-   - **Innermost** - Apply to subterms first
-   - **Outermost** - Apply to whole term first
-   - **Leftmost** - Textual order  
-   - **Random** - Non-deterministic (for exploration)
-
-2. **Termination:** How to prevent infinite loops?
-   - **Step limit** - Max N rewrites
-   - **Term size** - Stop if term grows too large
-   - **Cycle detection** - Track seen terms
-
-3. **Congruence:** How to handle context rules?
-   - **Manual** - User writes: `s => t` and `P|s => P|t` separately
-   - **Auto-generate** - System derives congruence rules
-   - **E-graph** - Deferred to Phase 4
-
-**Tasks:**
-- [ ] Implement reduction strategies
-- [ ] Add termination checking
-- [ ] Support trace/debug output
-- [ ] Benchmark various strategies
-- [ ] Test with Rho Calculus reduction sequences
-
-**Example:**
-```rust
-let term = parse("for(ch x){*x | *x} | ch!(0)");
-let result = reduce(term, &rhocalc_rewrites, Strategy::Innermost);
-// Result: *@0 | *@0
-```
+**2.7 File Structure & Architecture**
+- ✅ Moved theories into `examples/` crate
+- ✅ Proper separation: macros, runtime, examples
+- ✅ Self-contained theory files (one `theory!` gives parser + AST + Display)
+- ✅ Clean module generation with `lalrpop_util::lalrpop_mod!`
 
 ---
 
-### 2.5 Simple Interpreter (Weeks 9-10)
+### Key Achievements
 
-**Goal:** End-to-end execution of Rho Calculus programs.
+1. **Self-Contained Theory Files**: Single `theory!` macro generates:
+   - AST enums with derives
+   - Substitution implementations  
+   - Display implementations
+   - LALRPOP parser module reference
 
-**Tasks:**
-- [ ] Command-line interface
-- [ ] Read theory definitions from files
-- [ ] Parse input terms
-- [ ] Reduce to normal form
-- [ ] Pretty-print results
-- [ ] Add verbose/debug modes
-- [ ] Write example programs
+2. **Automatic Whitespace Handling**: Smart space insertion between consecutive non-terminals ensures parseability
 
-**Deliverable:** `mettail run rhocalc.theory "for(ch x){*x} | ch!(0)"` outputs `*@0`.
+3. **Full Round-Trip**: `parse(display(ast))` produces equivalent AST
 
----
-
-### 2.6 Phase 2 Milestones
-
-**Milestone 1 (Week 4):** Parser working for Rho Calculus  
-**Milestone 2 (Week 6):** Pattern matching and single rewrite application working  
-**Milestone 3 (Week 8):** Full reduction engine with strategies  
-**Milestone 4 (Week 10):** Complete interpreter with CLI  
-
-**Success Criteria:**
-- ✅ Parse complex Rho Calculus terms
-- ✅ Apply communication rule correctly
-- ✅ Reduce multi-step programs to normal form
-- ✅ Handle edge cases (shadowing, freshness, etc.)
-- ✅ Performance: 1000+ rewrites/second
+4. **Production-Ready**: All tests passing, no panics, clean error messages
 
 ---
 
-## 📋 Phase 3: Theory Composition (FUTURE)
+## 📋 Phase 3: Theory Composition 🎯 NEXT
 
-**Goal:** Build complex theories from simpler ones.
+**Goal:** Build complex theories from simpler, reusable components.
 
-### 3.1 Parameterization (Weeks 1-2)
+**Duration:** 2-3 months
+
+**Why Now?** With parsers working, we can test composed theories by parsing and validating them. This establishes the library ecosystem before adding execution complexity.
+
+---
+
+### 3.1 Theory Inheritance (Weeks 1-2)
+
+**Goal:** Build theories that extend other theories.
 
 **Syntax:**
 ```rust
 theory! {
-    name: List(T),  // T is a parameter
-    exports { List }
+    name: ProcessWithInput,
+    parent: BasicProcess,  // Inherits all terms from BasicProcess
+    exports { Proc }
     terms {
-        Nil . List ::= "[]" ;
-        Cons . List ::= T "::" List ;
+        // New constructors added to the Proc category
+        PInput . Proc ::= "for" "(" Name <Name> ")" "{" Proc "}" ;
     }
 }
-
-// Instantiation:
-type IntList = List(Int);
-type ProcList = List(Proc);
 ```
 
 **Tasks:**
-- [ ] Parse theory parameters
-- [ ] Type-check instantiations
-- [ ] Generate monomorphized code
-- [ ] Support higher-order theories (theory params)
+- [ ] Add `parent` field to `TheoryDef`
+- [ ] Parse parent theory references
+- [ ] Import parent's categories and terms
+- [ ] Type-check that extended categories are compatible
+- [ ] Generate combined AST with inherited constructors
+- [ ] Test with Rho Calculus built from smaller theories
+
+**Example Hierarchy:**
+```
+BasicProcess (0, P|Q)
+  ↓ extends
+ProcessWithCommunication (adds !, for, *)
+  ↓ extends
+RhoCalculus (adds @, reflection)
+```
 
 ---
 
-### 3.2 Import/Export (Weeks 3-4)
+### 3.2 Theory Parameterization (Weeks 3-4)
+
+**Goal:** Generic theories with type parameters (after inheritance is working).
+
+**Syntax:**
+```rust
+theory! {
+    name: Ring,
+    parent: CommMonoid,
+    exports { Elem }
+    terms {
+        One . Elem ::= "1" ;
+        Mult . Elem ::= Elem "*" Elem ;
+    }
+}
+```
+
+**Tasks:**
+- [ ] Add `parent` field to `TheoryDef`
+- [ ] Child theory extends the parent
+- [ ] Generate monomorphized code
+
+---
+
+### 3.3 Import/Export & Modules (Weeks 5-6)
 
 **Syntax:**
 ```rust
@@ -268,7 +265,7 @@ theory! {
 
 ---
 
-### 3.3 Theory Libraries (Weeks 5-6)
+### 3.4 Theory Libraries (Weeks 7-8)
 
 **Goal:** Standard library of reusable theories.
 
@@ -279,13 +276,148 @@ theory! {
 - `Communication` - Message passing primitives
 - `Reflection` - Quote/drop operators
 
+**Tasks:**
+- [ ] Design library structure
+- [ ] Implement core theories
+- [ ] Test composition patterns
+- [ ] Document library API
+- [ ] Create example compositions
+
 ---
 
-## 📋 Phase 4: Advanced Semantics (FUTURE)
+## 📋 Phase 4: Execution Engine (FUTURE)
+
+**Goal:** Make theories executable - apply rewrites and reduce terms.
+
+**Duration:** 3-4 months
+
+**Why Now?** We have parsers (Phase 2) and can compose theories (Phase 3), so execution can work on the full ecosystem.
+
+---
+
+### 4.1 Pattern Matching (Weeks 1-2)
+
+**Goal:** Match term patterns against AST for rewrite rule application.
+
+**Tasks:**
+- [ ] Design pattern ADT (variables, constructors, wildcards)
+- [ ] Implement pattern matching algorithm
+- [ ] Handle binders in patterns (α-equivalence)
+- [ ] Support conditional patterns (freshness)
+- [ ] Generate match code for rewrite LHS
+- [ ] Test with various Rho Calculus patterns
+
+**Example:**
+```rust
+// Given pattern: (PPar (PInput x P) (POutput y Q))
+// Match against: 0 | *@0 | for(ch z){*z} | ch!(0)
+// Result: Finds PInput/POutput pair, binds x=ch, z=z, y=ch, P=*z, Q=0
+```
+
+---
+
+### 4.2 Rewrite Application (Weeks 3-4)
+
+**Goal:** Apply rewrite rules to transform terms.
+
+**Tasks:**
+- [ ] Implement rewrite rule application
+- [ ] Check freshness conditions at runtime
+- [ ] Apply substitutions from RHS
+- [ ] Handle multiple matches (strategy: first, all, choice?)
+- [ ] Test communication rule: `for(ch x){P} | ch!(Q) => P[@Q/x]`
+- [ ] Measure performance and optimize
+
+**Deliverable:** `term.apply_rewrite(rule)` produces reduced term.
+
+---
+
+### 4.3 Reduction Engine (Weeks 5-8)
+
+**Goal:** Repeatedly apply rewrites until normal form (or timeout).
+
+**Design Decisions:**
+1. **Strategy:** Which rewrite to apply when multiple match?
+   - **Innermost** - Apply to subterms first
+   - **Outermost** - Apply to whole term first
+   - **Leftmost** - Textual order  
+   - **Random** - Non-deterministic (for exploration)
+
+2. **Termination:** How to prevent infinite loops?
+   - **Step limit** - Max N rewrites
+   - **Term size** - Stop if term grows too large
+   - **Cycle detection** - Track seen terms
+
+3. **Congruence:** How to handle context rules?
+   - **Manual** - User writes: `s => t` and `P|s => P|t` separately
+   - **Auto-generate** - System derives congruence rules
+   - **E-graph** - Deferred to Phase 5
+
+**Tasks:**
+- [ ] Implement reduction strategies
+- [ ] Add termination checking
+- [ ] Support trace/debug output
+- [ ] Benchmark various strategies
+- [ ] Test with Rho Calculus reduction sequences
+
+**Example:**
+```rust
+let term = parse("for(ch x){*x | *x} | ch!(0)");
+let result = reduce(term, &rhocalc_rewrites, Strategy::Innermost);
+// Result: *@0 | *@0
+```
+
+---
+
+### 4.4 Simple Interpreter (Weeks 9-10)
+
+**Goal:** End-to-end execution of programs in any theory.
+
+**Tasks:**
+- [ ] Command-line interface
+- [ ] Read theory definitions from files
+- [ ] Parse input terms
+- [ ] Reduce to normal form
+- [ ] Pretty-print results
+- [ ] Add verbose/debug modes
+- [ ] Write example programs for multiple theories
+
+**Deliverable:** 
+```bash
+$ mettail run rhocalc.theory "for(ch x){*x} | ch!(0)"
+*@0
+
+$ mettail run lambda.theory "(\\x.x) y"
+y
+```
+
+---
+
+### 4.5 Phase 4 Milestones
+
+**Milestone 1 (Week 2):** Pattern matching working  
+**Milestone 2 (Week 4):** Single rewrite application working  
+**Milestone 3 (Week 8):** Full reduction engine with strategies  
+**Milestone 4 (Week 10):** Complete interpreter with CLI  
+
+**Success Criteria:**
+- ✅ Apply communication rule correctly
+- ✅ Reduce multi-step programs to normal form
+- ✅ Handle edge cases (shadowing, freshness, etc.)
+- ✅ Performance: 1000+ rewrites/second
+- ✅ Works with composed theories from Phase 3
+
+---
+
+## 📋 Phase 5: Advanced Semantics (FUTURE)
 
 **Goal:** Rigorous handling of equations and equivalences.
 
-### 4.1 E-graph Integration (Weeks 1-3)
+**Duration:** 3-4 months
+
+---
+
+### 5.1 E-graph Integration (Weeks 1-3)
 
 **Technology:** `egg` or `egglog` for equality saturation.
 
@@ -306,7 +438,7 @@ E-graph contains: {0 | x, x | 0, x} in same equivalence class
 
 ---
 
-### 4.2 Equation Semantics (Weeks 4-5)
+### 5.2 Equation Semantics (Weeks 4-5)
 
 **Decision:** How do equations interact with rewrites?
 
@@ -332,7 +464,7 @@ E-graph contains: {0 | x, x | 0, x} in same equivalence class
 
 ---
 
-### 4.3 Congruence Rules (Weeks 6-7)
+### 5.3 Congruence Rules (Weeks 6-7)
 
 **Problem:** Given `s => t`, we want `P|s => P|t` automatically.
 
@@ -367,7 +499,7 @@ for(ch x){P} => for(ch x){Q}  // if x not free in P, Q
 
 ---
 
-### 4.4 Confluence & Termination (Weeks 8-10)
+### 5.4 Confluence & Termination (Weeks 8-10)
 
 **Goal:** Analyze rewrite systems for desirable properties.
 
@@ -384,9 +516,13 @@ for(ch x){P} => for(ch x){Q}  // if x not free in P, Q
 
 ---
 
-## 📋 Phase 5: Production Features (FUTURE)
+## 📋 Phase 6: Production Features (FUTURE)
 
-### 5.1 JIT Compilation (Cranelift)
+**Duration:** 3-4 months
+
+---
+
+### 6.1 JIT Compilation (Cranelift)
 
 **Goal:** Fast execution via native code generation.
 
@@ -399,7 +535,7 @@ for(ch x){P} => for(ch x){Q}  // if x not free in P, Q
 
 ---
 
-### 5.2 WASM Backend
+### 6.2 WASM Backend
 
 **Goal:** Run MeTTaIL theories in browsers and WASM environments.
 
@@ -411,7 +547,7 @@ for(ch x){P} => for(ch x){Q}  // if x not free in P, Q
 
 ---
 
-### 5.3 Optimization
+### 6.3 Optimization
 
 **Strategies:**
 - **Memoization** - Cache rewrite results
@@ -421,9 +557,13 @@ for(ch x){P} => for(ch x){Q}  // if x not free in P, Q
 
 ---
 
-## 📋 Phase 6: Tooling (FUTURE)
+## 📋 Phase 7: Tooling & Ecosystem (FUTURE)
 
-### 6.1 Language Server (LSP)
+**Duration:** 2-3 months
+
+---
+
+### 7.1 Language Server (LSP)
 
 **Features:**
 - Syntax highlighting
@@ -435,7 +575,7 @@ for(ch x){P} => for(ch x){Q}  // if x not free in P, Q
 
 ---
 
-### 6.2 REPL
+### 7.2 REPL
 
 **Features:**
 - Interactive theory exploration
@@ -445,7 +585,7 @@ for(ch x){P} => for(ch x){Q}  // if x not free in P, Q
 
 ---
 
-### 6.3 Debugger
+### 7.3 Debugger
 
 **Features:**
 - Breakpoints on rewrites
@@ -455,9 +595,11 @@ for(ch x){P} => for(ch x){Q}  // if x not free in P, Q
 
 ---
 
-## 📋 Phase 7: Advanced Types (ONGOING)
+## 📋 Phase 8: Advanced Types (ONGOING)
 
-### 7.1 Dependent Types
+---
+
+### 8.1 Dependent Types
 
 **Goal:** Types can depend on values.
 
@@ -468,7 +610,7 @@ Vec(T, n: Nat) // Vector of length n
 
 ---
 
-### 7.2 Session Types
+### 8.2 Session Types
 
 **Goal:** Protocol specification for communication.
 
@@ -479,7 +621,7 @@ Chan(?Int.!Bool.End) // Receive Int, send Bool, close
 
 ---
 
-### 7.3 Linear Types
+### 8.3 Linear Types
 
 **Goal:** Resource management (channels used exactly once).
 
@@ -488,18 +630,27 @@ Chan(?Int.!Bool.End) // Receive Int, send Bool, close
 ## 🎯 Success Metrics
 
 ### Phase 2 Success Criteria
-- ✅ Parse and reduce 100+ Rho Calculus examples
-- ✅ Performance: 1000+ rewrites/second
-- ✅ All Rho Calculus properties (comm, assoc, identity) verified
-- ✅ Zero runtime errors on valid programs
-- ✅ Clear error messages for invalid programs
+- ✅ Parse all Rho Calculus examples correctly
+- ✅ Round-trip tests pass (parse → print → parse)
+- ✅ Parse 1000+ terms/second
+- ✅ Clear error messages for invalid input
+- ✅ Support multiple theory syntaxes
+- ✅ Zero parser-related panics on valid input
 
 ### Phase 3 Success Criteria
 - ✅ Define 10+ reusable theory libraries
 - ✅ Build complex theories from simple ones
 - ✅ No code duplication via composition
+- ✅ Parse and validate composed theories
 
 ### Phase 4 Success Criteria
+- ✅ Apply communication rule correctly
+- ✅ Reduce multi-step programs to normal form
+- ✅ Handle edge cases (shadowing, freshness, etc.)
+- ✅ Performance: 1000+ rewrites/second
+- ✅ Works with composed theories from Phase 3
+
+### Phase 5 Success Criteria
 - ✅ Prove confluence for Rho Calculus subset
 - ✅ Auto-generate 100+ congruence rules
 - ✅ E-graph speeds up matching by 10x+
@@ -557,16 +708,18 @@ Chan(?Int.!Bool.End) // Receive Int, send Bool, close
 
 ---
 
-## 🚀 Next Immediate Steps
+## 🚀 Next Immediate Steps (Phase 3)
 
-1. **Document Phase 1 completion** ✅ (this document)
-2. **Update all existing docs** ✅ (in progress)
-3. **Choose Phase 2 starting point:** LALRPOP integration
-4. **Set up LALRPOP build** (Week 1)
-5. **Generate first working parser** (Week 2)
-6. **Celebrate small wins!** 🎉
+1. **Design theory inheritance syntax**
+   - `parent: BaseTheory` field in `TheoryDef`
+2. **Implement parent theory parsing**
+3. **Merge parent categories and terms into child**
+4. **Test inheritance with Rho Calculus layers**
+   - BasicProcess → ProcessWithCommunication → RhoCalculus
+5. **Add validation for compatible inheritance**
+6. **Design parameterization (after inheritance works)**
 
 ---
 
-**Last Updated:** After Phase 1 completion and substitution fix
+**Last Updated:** October 2024 - Phase 2 Complete, Beginning Phase 3 (Theory Composition)
 

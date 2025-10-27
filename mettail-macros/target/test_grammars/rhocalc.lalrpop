@@ -1,0 +1,38 @@
+// Generated LALRPOP grammar for theory: RhoCalc
+// This file is auto-generated - do not edit manually
+
+use mettail_runtime::{Var, FreeVar, Binder, Scope};
+use super::{Proc, Name};
+
+grammar;
+
+Ident: String = {
+    r"[a-zA-Z_][a-zA-Z0-9_]*" => <>.to_string(),
+};
+
+pub Proc: Proc = {
+    <ProcInfix>
+};
+
+ProcInfix: Proc = {
+    <left:ProcInfix> "|" <right:ProcAtom> => Proc::PPar(Box::new(left), Box::new(right)),
+    <ProcAtom>
+};
+
+ProcAtom: Proc = {
+    "(" <Proc> ")",
+    "0" => Proc::PZero,
+    "for" "(" <f0:Name> <x_1:Ident> ")" "{" <body_2:Proc> "}" => {
+        let binder = Binder(FreeVar::fresh_named(x_1));
+        let scope = Scope::new(binder, Box::new(body_2));
+        Proc::PInput(Box::new(f0), scope)
+    },
+    <f0:Name> "!" "(" <f1:Proc> ")" => Proc::POutput(Box::new(f0), Box::new(f1)),
+    "*" <f0:Name> => Proc::PDrop(Box::new(f0))
+};
+
+pub Name: Name = {
+    "@" <f0:Proc> => Name::NQuote(Box::new(f0)),
+    <v:Ident> => Name::NVar(Var::Free(FreeVar::fresh_named(v)))
+};
+

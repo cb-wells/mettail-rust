@@ -5,9 +5,13 @@ edition = "2021"
 
 [[bin]]
 name = "rhocalc"
-path = "../theories/rhocalc.rs"
+path = "rhocalc.rs"
 
 [dependencies]
 mettail-macros = { path = "../mettail-macros" }
 mettail-runtime = { path = "../mettail-runtime" }
 moniker = { version = "0.5.0", features = ["moniker-derive"] }
+lalrpop-util = { workspace = true, features = ["lexer"] }
+
+[build-dependencies]
+lalrpop = { workspace = true }
