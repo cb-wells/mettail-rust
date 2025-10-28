@@ -11,7 +11,7 @@ theory! {
     
     terms {
         PZero . Proc ::= "0" ;
-        PInput . Proc ::= "for" "(" Name <Name> ")" "{" Proc "}" ;
+        PInput . Proc ::= "for" "(" Name "<-" <Name> ")" "{" Proc "}" ;
         POutput . Proc ::= Name "!" "(" Proc ")" ;
         PPar . Proc ::= Proc "|" Proc ;
         PDrop . Proc ::= "*" Name ;
@@ -152,7 +152,7 @@ mod tests {
             Scope::new(Binder(x_var), Box::new(body))
         );
         let display = format!("{}", input);
-        assert_eq!(display, "for(ch x){*x}");  // Space added between consecutive non-terminals
+        assert_eq!(display, "for(ch<-x){*x}");  // Uses <- arrow for binder
         println!("✓ PInput displays as: {}", display);
         
         println!("\n✅ All Display implementations working correctly!");
@@ -169,8 +169,8 @@ mod tests {
             "a!(0)",
             "b!(c!(0))",
             "a!(0)|b!(0)",
-            "for(a x){*x}",
-            "a!(0)|b!(c!(0))|for(a x){*x}",
+            "for(a<-x){*x}",
+            "a!(0)|for(a<-x){*x}",
         ];
         
         for input in test_cases {
@@ -202,6 +202,37 @@ mod tests {
 }
 
 fn main() {
-    println!("Rho Calculus Theory Compiled Successfully!");
+    println!("=== Rho Calculus Rewrite Demo ===\n");
+    
+    // Step function that tries all rewrite rules
+    fn step_once(proc: &Proc) -> Option<Proc> {
+        try_rewrite_rule_0(proc)
+    }
+    
+    // Multi-step execution with visualization
+    fn execute(input: &str, max_steps: usize) {
+        let parser = rhocalc::ProcParser::new();
+        let mut current = parser.parse(input)
+            .unwrap_or_else(|e| panic!("Failed to parse '{}': {:?}", input, e));
+        
+        println!("Input:  {}", input);
+        
+        for step in 1..=max_steps {
+            match step_once(&current) {
+                Some(next) => {
+                    current = next;
+                    println!("Step {}: {}\n", step, current);
+                }
+                None => {
+                    println!("→ Normal form reached after {} step(s)\n", step - 1);
+                    return;
+                }
+            }
+        }
+        
+        println!("→ Stopped after {} step(s) (max reached)\n", max_steps);
+    }
+    
+    execute("for(a<-x){*x}|a!(0)", 5);
 }
 

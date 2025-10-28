@@ -3,6 +3,8 @@
 **/*.rs.bk
 *.pdb
 
+/k/
+
 # Cargo
 Cargo.lock
 # For libraries, uncomment Cargo.lock to ignore it

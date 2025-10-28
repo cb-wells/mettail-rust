@@ -632,7 +632,7 @@ impl std::fmt::Display for Proc {
                     .as_ref()
                     .map(|s| s.as_str())
                     .unwrap_or("_");
-                f.write_fmt(format_args!("for({0} {1}){{{2}}}", f0, binder_name, body))
+                f.write_fmt(format_args!("for({0}<-{1}){{{2}}}", f0, binder_name, body))
             }
             Proc::POutput(f0, f3) => f.write_fmt(format_args!("{0}!({1})", f0, f3)),
             Proc::PPar(f0, f2) => f.write_fmt(format_args!("{0}|{1}", f0, f2)),
@@ -713,38 +713,6 @@ pub mod rhocalc {
             0,
             0,
             0,
-            12,
-            0,
-            0,
-            0,
-            0,
-            13,
-            0,
-            3,
-            0,
-            4,
-            18,
-            12,
-            19,
-            0,
-            0,
-            0,
-            13,
-            0,
-            3,
-            0,
-            4,
-            18,
-            12,
-            19,
-            0,
-            0,
-            0,
-            13,
-            0,
-            0,
-            0,
-            0,
             0,
             12,
             0,
@@ -757,12 +725,26 @@ pub mod rhocalc {
             0,
             4,
             18,
+            0,
             12,
             19,
             0,
             0,
             0,
             13,
+            0,
+            3,
+            0,
+            4,
+            18,
+            0,
+            12,
+            19,
+            0,
+            0,
+            0,
+            13,
+            0,
             0,
             0,
             0,
@@ -779,12 +761,38 @@ pub mod rhocalc {
             0,
             4,
             18,
+            0,
             12,
             19,
             0,
             0,
             0,
             13,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            12,
+            0,
+            0,
+            0,
+            0,
+            13,
+            0,
+            3,
+            0,
+            4,
+            18,
+            0,
+            12,
+            19,
+            0,
+            0,
+            0,
+            13,
+            0,
             0,
             0,
             0,
@@ -801,6 +809,7 @@ pub mod rhocalc {
             0,
             4,
             18,
+            0,
             12,
             19,
             0,
@@ -812,12 +821,14 @@ pub mod rhocalc {
             -3,
             0,
             0,
+            -3,
             0,
             0,
             0,
             -3,
             -3,
-            -3,
+            0,
+            0,
             0,
             0,
             0,
@@ -840,18 +851,21 @@ pub mod rhocalc {
             0,
             0,
             0,
-            -1,
             0,
             -1,
             0,
+            -1,
             0,
+            0,
+            -1,
             0,
             0,
             0,
             -1,
             -1,
-            -1,
+            0,
             20,
+            0,
             0,
             0,
             0,
@@ -875,7 +889,9 @@ pub mod rhocalc {
             0,
             0,
             0,
+            0,
             -11,
+            0,
             0,
             0,
             0,
@@ -887,6 +903,7 @@ pub mod rhocalc {
             0,
             0,
             -4,
+            0,
             0,
             0,
             0,
@@ -898,6 +915,7 @@ pub mod rhocalc {
             0,
             0,
             -6,
+            0,
             0,
             0,
             0,
@@ -918,6 +936,7 @@ pub mod rhocalc {
             0,
             0,
             0,
+            0,
             7,
             0,
             0,
@@ -928,17 +947,19 @@ pub mod rhocalc {
             0,
             0,
             0,
-            -2,
             0,
             -2,
             0,
+            -2,
             0,
+            0,
+            -2,
             0,
             0,
             0,
             -2,
             -2,
-            -2,
+            0,
             0,
             0,
             25,
@@ -952,7 +973,9 @@ pub mod rhocalc {
             0,
             0,
             0,
+            0,
             -9,
+            0,
             0,
             0,
             0,
@@ -969,6 +992,7 @@ pub mod rhocalc {
             0,
             0,
             0,
+            0,
             -10,
             -10,
             0,
@@ -980,8 +1004,21 @@ pub mod rhocalc {
             0,
             0,
             0,
+            0,
             -5,
             -5,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            8,
+            0,
+            0,
+            0,
+            0,
+            0,
             0,
             0,
             0,
@@ -996,16 +1033,6 @@ pub mod rhocalc {
             0,
             0,
             0,
-            29,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
             0,
             -8,
             0,
@@ -1013,8 +1040,22 @@ pub mod rhocalc {
             0,
             0,
             0,
+            0,
             -8,
             -8,
+            0,
+            0,
+            0,
+            30,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
             0,
             0,
             0,
@@ -1036,11 +1077,13 @@ pub mod rhocalc {
             0,
             0,
             0,
-            31,
+            0,
+            32,
             0,
             0,
             0,
             -7,
+            0,
             0,
             0,
             0,
@@ -1051,7 +1094,7 @@ pub mod rhocalc {
             0,
         ];
         fn __action(state: i8, integer: usize) -> i8 {
-            __ACTION[(state as usize) * 11 + integer]
+            __ACTION[(state as usize) * 12 + integer]
         }
         const __EOF_ACTION: &[i8] = &[
             0,
@@ -1085,28 +1128,29 @@ pub mod rhocalc {
             0,
             0,
             0,
+            0,
         ];
         fn __goto(state: i8, nt: usize) -> i8 {
             match nt {
                 0 => {
                     match state {
-                        7 => 26,
+                        7 => 28,
                         _ => 9,
                     }
                 }
                 1 => {
                     match state {
-                        5 => 7,
                         0 => 10,
                         3 => 22,
+                        5 => 25,
                         _ => 13,
                     }
                 }
                 2 => {
                     match state {
                         2 => 21,
-                        6 => 25,
-                        8 => 29,
+                        6 => 26,
+                        8 => 30,
                         _ => 14,
                     }
                 }
@@ -1126,6 +1170,7 @@ pub mod rhocalc {
             r###"")""###,
             r###""*""###,
             r###""0""###,
+            r###""<-""###,
             r###""@""###,
             r###""for""###,
             r###""{""###,
@@ -1201,7 +1246,7 @@ pub mod rhocalc {
             }
             #[inline]
             fn error_action(&self, state: i8) -> i8 {
-                __action(state, 11 - 1)
+                __action(state, 12 - 1)
             }
             #[inline]
             fn eof_action(&self, state: i8) -> i8 {
@@ -1283,7 +1328,8 @@ pub mod rhocalc {
                 Token(8, _) if true => Some(7),
                 Token(9, _) if true => Some(8),
                 Token(10, _) if true => Some(9),
-                Token(0, _) if true => Some(10),
+                Token(11, _) if true => Some(10),
+                Token(0, _) if true => Some(11),
                 _ => None,
             }
         }
@@ -1294,7 +1340,7 @@ pub mod rhocalc {
         ) -> __Symbol<'input> {
             #[allow(clippy::manual_range_patterns)]
             match __token_index {
-                0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 => {
+                0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 => {
                     match __token {
                         Token(1, __tok0)
                         | Token(2, __tok0)
@@ -1306,6 +1352,7 @@ pub mod rhocalc {
                         | Token(8, __tok0)
                         | Token(9, __tok0)
                         | Token(10, __tok0)
+                        | Token(11, __tok0)
                         | Token(0, __tok0) if true => __Symbol::Variant0(__tok0),
                         _ => {
                             ::core::panicking::panic(
@@ -1360,7 +1407,7 @@ pub mod rhocalc {
                 }
                 6 => {
                     __state_machine::SimulatedReduce::Reduce {
-                        states_to_pop: 8,
+                        states_to_pop: 9,
                         nonterminal_produced: 3,
                     }
                 }
@@ -1735,19 +1782,20 @@ pub mod rhocalc {
             __symbols: &mut alloc::vec::Vec<(usize, __Symbol<'input>, usize)>,
             _: core::marker::PhantomData<(&'input ())>,
         ) -> (usize, usize) {
-            if !(__symbols.len() >= 8) {
-                ::core::panicking::panic("assertion failed: __symbols.len() >= 8")
+            if !(__symbols.len() >= 9) {
+                ::core::panicking::panic("assertion failed: __symbols.len() >= 9")
             }
-            let __sym7 = __pop_Variant0(__symbols);
-            let __sym6 = __pop_Variant3(__symbols);
+            let __sym8 = __pop_Variant0(__symbols);
+            let __sym7 = __pop_Variant3(__symbols);
+            let __sym6 = __pop_Variant0(__symbols);
             let __sym5 = __pop_Variant0(__symbols);
-            let __sym4 = __pop_Variant0(__symbols);
-            let __sym3 = __pop_Variant1(__symbols);
+            let __sym4 = __pop_Variant1(__symbols);
+            let __sym3 = __pop_Variant0(__symbols);
             let __sym2 = __pop_Variant2(__symbols);
             let __sym1 = __pop_Variant0(__symbols);
             let __sym0 = __pop_Variant0(__symbols);
             let __start = __sym0.0;
-            let __end = __sym7.2;
+            let __end = __sym8.2;
             let __nt = super::__action8(
                 input,
                 __sym0,
@@ -1758,9 +1806,10 @@ pub mod rhocalc {
                 __sym5,
                 __sym6,
                 __sym7,
+                __sym8,
             );
             __symbols.push((__start, __Symbol::Variant3(__nt), __end));
-            (8, 3)
+            (9, 3)
         }
         fn __reduce7<'input>(
             input: &'input str,
@@ -1885,6 +1934,7 @@ pub mod rhocalc {
             0,
             3,
             15,
+            0,
             16,
             17,
             0,
@@ -1896,6 +1946,7 @@ pub mod rhocalc {
             0,
             3,
             15,
+            0,
             16,
             17,
             0,
@@ -1903,38 +1954,6 @@ pub mod rhocalc {
             0,
             18,
             0,
-            0,
-            0,
-            0,
-            0,
-            16,
-            0,
-            0,
-            0,
-            0,
-            18,
-            0,
-            2,
-            0,
-            3,
-            15,
-            16,
-            17,
-            0,
-            0,
-            0,
-            18,
-            0,
-            2,
-            0,
-            3,
-            15,
-            16,
-            17,
-            0,
-            0,
-            0,
-            18,
             0,
             0,
             0,
@@ -1951,12 +1970,50 @@ pub mod rhocalc {
             0,
             3,
             15,
+            0,
             16,
             17,
             0,
             0,
             0,
             18,
+            0,
+            2,
+            0,
+            3,
+            15,
+            0,
+            16,
+            17,
+            0,
+            0,
+            0,
+            18,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            16,
+            0,
+            0,
+            0,
+            0,
+            18,
+            0,
+            2,
+            0,
+            3,
+            15,
+            0,
+            16,
+            17,
+            0,
+            0,
+            0,
+            18,
+            0,
             0,
             0,
             0,
@@ -1973,6 +2030,7 @@ pub mod rhocalc {
             0,
             3,
             15,
+            0,
             16,
             17,
             0,
@@ -1984,12 +2042,13 @@ pub mod rhocalc {
             -3,
             0,
             0,
+            -3,
             0,
             0,
             0,
             -3,
             -3,
-            -3,
+            0,
             19,
             0,
             0,
@@ -2014,7 +2073,10 @@ pub mod rhocalc {
             0,
             0,
             0,
+            0,
+            0,
             -11,
+            0,
             0,
             0,
             0,
@@ -2026,6 +2088,7 @@ pub mod rhocalc {
             0,
             0,
             -4,
+            0,
             0,
             0,
             0,
@@ -2037,6 +2100,7 @@ pub mod rhocalc {
             0,
             0,
             -6,
+            0,
             0,
             0,
             0,
@@ -2057,6 +2121,7 @@ pub mod rhocalc {
             0,
             0,
             0,
+            0,
             6,
             0,
             0,
@@ -2067,19 +2132,22 @@ pub mod rhocalc {
             0,
             0,
             0,
-            -1,
             0,
             -1,
             0,
+            -1,
             0,
+            0,
+            -1,
             0,
             0,
             0,
             -1,
             -1,
-            -1,
+            0,
             0,
             7,
+            0,
             0,
             0,
             0,
@@ -2102,7 +2170,9 @@ pub mod rhocalc {
             0,
             0,
             0,
+            0,
             -9,
+            0,
             0,
             0,
             0,
@@ -2119,6 +2189,7 @@ pub mod rhocalc {
             0,
             0,
             0,
+            0,
             -10,
             -10,
             0,
@@ -2130,14 +2201,28 @@ pub mod rhocalc {
             0,
             0,
             0,
+            0,
             -5,
             -5,
             0,
             0,
             0,
-            26,
+            27,
             0,
             0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            8,
             0,
             0,
             0,
@@ -2155,27 +2240,18 @@ pub mod rhocalc {
             0,
             0,
             0,
-            -2,
             0,
             -2,
             0,
+            -2,
             0,
+            0,
+            -2,
             0,
             0,
             0,
             -2,
             -2,
-            -2,
-            0,
-            0,
-            29,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
             0,
             0,
             0,
@@ -2185,8 +2261,22 @@ pub mod rhocalc {
             0,
             0,
             0,
+            0,
             -8,
             -8,
+            0,
+            0,
+            0,
+            30,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
             0,
             0,
             0,
@@ -2208,11 +2298,13 @@ pub mod rhocalc {
             0,
             0,
             0,
-            31,
+            0,
+            32,
             0,
             0,
             0,
             -7,
+            0,
             0,
             0,
             0,
@@ -2223,7 +2315,7 @@ pub mod rhocalc {
             0,
         ];
         fn __action(state: i8, integer: usize) -> i8 {
-            __ACTION[(state as usize) * 11 + integer]
+            __ACTION[(state as usize) * 12 + integer]
         }
         const __EOF_ACTION: &[i8] = &[
             0,
@@ -2251,9 +2343,10 @@ pub mod rhocalc {
             -5,
             0,
             0,
-            -2,
             0,
+            -2,
             -8,
+            0,
             0,
             0,
             -7,
@@ -2262,14 +2355,14 @@ pub mod rhocalc {
             match nt {
                 0 => {
                     match state {
-                        7 => 26,
+                        7 => 28,
                         _ => 9,
                     }
                 }
                 1 => {
                     match state {
-                        5 => 7,
                         2 => 20,
+                        5 => 24,
                         _ => 10,
                     }
                 }
@@ -2277,8 +2370,8 @@ pub mod rhocalc {
                     match state {
                         1 => 19,
                         4 => 23,
-                        6 => 24,
-                        8 => 29,
+                        6 => 25,
+                        8 => 30,
                         _ => 11,
                     }
                 }
@@ -2298,6 +2391,7 @@ pub mod rhocalc {
             r###"")""###,
             r###""*""###,
             r###""0""###,
+            r###""<-""###,
             r###""@""###,
             r###""for""###,
             r###""{""###,
@@ -2373,7 +2467,7 @@ pub mod rhocalc {
             }
             #[inline]
             fn error_action(&self, state: i8) -> i8 {
-                __action(state, 11 - 1)
+                __action(state, 12 - 1)
             }
             #[inline]
             fn eof_action(&self, state: i8) -> i8 {
@@ -2455,7 +2549,8 @@ pub mod rhocalc {
                 Token(8, _) if true => Some(7),
                 Token(9, _) if true => Some(8),
                 Token(10, _) if true => Some(9),
-                Token(0, _) if true => Some(10),
+                Token(11, _) if true => Some(10),
+                Token(0, _) if true => Some(11),
                 _ => None,
             }
         }
@@ -2466,7 +2561,7 @@ pub mod rhocalc {
         ) -> __Symbol<'input> {
             #[allow(clippy::manual_range_patterns)]
             match __token_index {
-                0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 => {
+                0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 => {
                     match __token {
                         Token(1, __tok0)
                         | Token(2, __tok0)
@@ -2478,6 +2573,7 @@ pub mod rhocalc {
                         | Token(8, __tok0)
                         | Token(9, __tok0)
                         | Token(10, __tok0)
+                        | Token(11, __tok0)
                         | Token(0, __tok0) if true => __Symbol::Variant0(__tok0),
                         _ => {
                             ::core::panicking::panic(
@@ -2532,7 +2628,7 @@ pub mod rhocalc {
                 }
                 6 => {
                     __state_machine::SimulatedReduce::Reduce {
-                        states_to_pop: 8,
+                        states_to_pop: 9,
                         nonterminal_produced: 3,
                     }
                 }
@@ -2907,19 +3003,20 @@ pub mod rhocalc {
             __symbols: &mut alloc::vec::Vec<(usize, __Symbol<'input>, usize)>,
             _: core::marker::PhantomData<(&'input ())>,
         ) -> (usize, usize) {
-            if !(__symbols.len() >= 8) {
-                ::core::panicking::panic("assertion failed: __symbols.len() >= 8")
+            if !(__symbols.len() >= 9) {
+                ::core::panicking::panic("assertion failed: __symbols.len() >= 9")
             }
-            let __sym7 = __pop_Variant0(__symbols);
-            let __sym6 = __pop_Variant3(__symbols);
+            let __sym8 = __pop_Variant0(__symbols);
+            let __sym7 = __pop_Variant3(__symbols);
+            let __sym6 = __pop_Variant0(__symbols);
             let __sym5 = __pop_Variant0(__symbols);
-            let __sym4 = __pop_Variant0(__symbols);
-            let __sym3 = __pop_Variant1(__symbols);
+            let __sym4 = __pop_Variant1(__symbols);
+            let __sym3 = __pop_Variant0(__symbols);
             let __sym2 = __pop_Variant2(__symbols);
             let __sym1 = __pop_Variant0(__symbols);
             let __sym0 = __pop_Variant0(__symbols);
             let __start = __sym0.0;
-            let __end = __sym7.2;
+            let __end = __sym8.2;
             let __nt = super::__action8(
                 input,
                 __sym0,
@@ -2930,9 +3027,10 @@ pub mod rhocalc {
                 __sym5,
                 __sym6,
                 __sym7,
+                __sym8,
             );
             __symbols.push((__start, __Symbol::Variant3(__nt), __end));
-            (8, 3)
+            (9, 3)
         }
         fn __reduce7<'input>(
             input: &'input str,
@@ -3037,6 +3135,7 @@ pub mod rhocalc {
                 ("\\)", false),
                 ("\\*", false),
                 ("0", false),
+                ("(?:<\\-)", false),
                 ("@", false),
                 ("(?:for)", false),
                 ("\\{", false),
@@ -3147,6 +3246,7 @@ pub mod rhocalc {
         (_, _, _): (usize, &'input str, usize),
         (_, _, _): (usize, &'input str, usize),
         (_, f0, _): (usize, Name, usize),
+        (_, _, _): (usize, &'input str, usize),
         (_, x_1, _): (usize, String, usize),
         (_, _, _): (usize, &'input str, usize),
         (_, _, _): (usize, &'input str, usize),
@@ -3154,7 +3254,16 @@ pub mod rhocalc {
         (_, _, _): (usize, &'input str, usize),
     ) -> Proc {
         {
-            let binder = Binder(FreeVar::fresh_named(x_1));
+            use mettail_runtime::BoundTerm;
+            let free_vars = body_2.free_vars();
+            let binder = if let Some(fv) = free_vars
+                .iter()
+                .find(|fv| fv.pretty_name.as_deref() == Some(&x_1))
+            {
+                Binder((*fv).clone())
+            } else {
+                Binder(FreeVar::fresh_named(x_1))
+            };
             let scope = Scope::new(binder, Box::new(body_2));
             Proc::PInput(Box::new(f0), scope)
         }
@@ -3253,8 +3362,95 @@ pub mod rhocalc {
         }
     }
 }
+fn is_fresh<T>(binder: &mettail_runtime::Binder<String>, term: &T) -> bool
+where
+    T: mettail_runtime::BoundTerm<String>,
+{
+    use mettail_runtime::BoundTerm;
+    let mut is_fresh = true;
+    term.visit_vars(
+        &mut |v| {
+            if let mettail_runtime::Var::Free(fv) = v {
+                if fv == &binder.0 {
+                    is_fresh = false;
+                }
+            }
+        },
+    );
+    is_fresh
+}
+pub fn try_rewrite_rule_0(term: &Proc) -> Option<Proc> {
+    if let Proc::PPar(field_0, field_1) = term {
+        let field_0_inner = &(**field_0);
+        if let Proc::PInput(field_0, scope_field) = field_0_inner {
+            let (binder, body) = scope_field.clone().unbind();
+            let field_1_inner = &(**field_1);
+            if let Proc::POutput(field_1_inner_0, field_1_inner_1) = field_1_inner {
+                if !is_fresh(&binder.clone(), &(**field_1_inner_1).clone()) {
+                    return None;
+                }
+                return Some(
+                    ((*body).clone())
+                        .substitute_name(
+                            &(binder.clone()).0,
+                            &Name::NQuote(Box::new((**field_1_inner_1).clone())),
+                        ),
+                );
+            }
+        }
+    }
+    None
+}
 fn main() {
     {
-        ::std::io::_print(format_args!("Rho Calculus Theory Compiled Successfully!\n"));
+        ::std::io::_print(format_args!("=== Rho Calculus Rewrite Demo ===\n\n"));
     };
+    fn step_once(proc: &Proc) -> Option<Proc> {
+        try_rewrite_rule_0(proc)
+    }
+    fn execute(input: &str, max_steps: usize) {
+        let parser = rhocalc::ProcParser::new();
+        let mut current = parser
+            .parse(input)
+            .unwrap_or_else(|e| {
+                ::core::panicking::panic_fmt(
+                    format_args!("Failed to parse \'{0}\': {1:?}", input, e),
+                );
+            });
+        {
+            ::std::io::_print(format_args!("Input:  {0}\n", input));
+        };
+        for step in 1..=max_steps {
+            match step_once(&current) {
+                Some(next) => {
+                    current = next;
+                    {
+                        ::std::io::_print(
+                            format_args!("Step {0}: {1}\n\n", step, current),
+                        );
+                    };
+                }
+                None => {
+                    {
+                        ::std::io::_print(
+                            format_args!(
+                                "→ Normal form reached after {0} step(s)\n\n",
+                                step - 1,
+                            ),
+                        );
+                    };
+                    return;
+                }
+            }
+        }
+        {
+            ::std::io::_print(
+                format_args!(
+                    "→ Stopped after {0} step(s) (max reached)\n\n",
+                    max_steps,
+                ),
+            );
+        };
+    }
+    execute("for(a<-x){*x}|a!(0)", 5);
 }

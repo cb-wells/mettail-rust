@@ -357,8 +357,16 @@ fn generate_binder_alternative(rule: &GrammarRule) -> String {
     }
     
     // Generate the action code that creates Scope
+    // We need to extract the free variable from the body that matches the binder name
+    // and use it as the binder, so moniker can properly bind it
     let mut action = format!(" => {{\n");
-    action.push_str(&format!("        let binder = Binder(FreeVar::fresh_named({}));\n", binder_var));
+    action.push_str("        use mettail_runtime::BoundTerm;\n");
+    action.push_str(&format!("        let free_vars = {}.free_vars();\n", body_var));
+    action.push_str(&format!("        let binder = if let Some(fv) = free_vars.iter().find(|fv| fv.pretty_name.as_deref() == Some(&{})) {{\n", binder_var));
+    action.push_str("            Binder((*fv).clone())\n");
+    action.push_str("        } else {\n");
+    action.push_str(&format!("            Binder(FreeVar::fresh_named({}))\n", binder_var));
+    action.push_str("        };\n");
     action.push_str(&format!("        let scope = Scope::new(binder, Box::new({}));\n", body_var));
     
     // Build constructor call

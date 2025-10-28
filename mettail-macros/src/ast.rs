@@ -75,6 +75,7 @@ pub struct GrammarRule {
 }
 
 /// Item in a grammar rule
+#[derive(Debug, Clone, PartialEq)]
 pub enum GrammarItem {
     Terminal(String),      // "0"
     NonTerminal(Ident),    // Elem

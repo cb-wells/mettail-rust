@@ -348,7 +348,43 @@ fn generate_scope_substitution_arm(category: &Ident, rule: &GrammarRule, replace
 fn generate_regular_substitution_arm(category: &Ident, rule: &GrammarRule, replacement_cat: &Ident) -> TokenStream {
     let label = &rule.label;
     
-    // Count total non-terminal fields for pattern matching
+    // Check if this constructor has a Var field
+    let has_var_field = rule.items.iter().any(|item| {
+        matches!(item, GrammarItem::NonTerminal(ident) if ident.to_string() == "Var")
+    });
+    
+    // For constructors with Var fields, we need special handling
+    if has_var_field {
+        // NVar case - substitute directly at the Var level
+        let category_str = category.to_string();
+        let replacement_cat_str = replacement_cat.to_string();
+        
+        if category_str == replacement_cat_str {
+            // Same category - use moniker's built-in substitution
+            return quote! {
+                #category::#label(var_field) => {
+                    use mettail_runtime::{Var, FreeVar};
+                    match var_field {
+                        Var::Bound(b) => #category::#label(Var::Bound(b.clone())),
+                        Var::Free(ref fv) => {
+                            if fv == var {
+                                replacement.clone()
+                            } else {
+                                self.clone()
+                            }
+                        }
+                    }
+                }
+            };
+        } else {
+            // Cross-category - no substitution possible in Var
+            return quote! {
+                #category::#label(_) => self.clone()
+            };
+        }
+    }
+    
+    // Count total non-terminal fields for pattern matching (excluding Var)
     let total_fields: Vec<_> = rule.items
         .iter()
         .filter_map(|item| match item {

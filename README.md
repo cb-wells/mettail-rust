@@ -1,6 +1,6 @@
-# MeTTaIL: Meta-Language for Theory-Based Language Implementation
+# MeTTaIL: Metalanguage for language implementation
 
-**Status:** Phase 1 Complete ✅ | Phase 2 Complete ✅ | Phase 3 Next 🎯
+**Status:** Phase 1 Complete ✅ | Phase 2 Complete ✅ | **Rewrite Engine Complete** ✅ | Phase 3 Next 🎯
 
 ---
 
@@ -11,14 +11,13 @@
 - **[Phase 2 Complete](docs/phase-2/PHASE-2-COMPLETE.md)** - Parser generation (LALRPOP) ✅
 - **[Phase 3 Design](docs/design/THEORY-COMPOSITION-DESIGN.md)** - Theory composition (NEXT)
 - **[Progress](docs/phase-1/PROGRESS.md)** - Detailed progress and metrics
-- **[Remaining Issues](docs/design/REMAINING-ISSUES.md)** - Known problems and priorities
 
 ---
 
 ## 🎯 What is MeTTaIL?
 
 MeTTaIL is a **meta-language framework** for defining formal languages through:
-1. **Grammars** - BNF-like syntax with binders
+1. **Operations** - BNF-like syntax with binders
 2. **Equations** - Structural equivalences
 3. **Rewrites** - Computational rules with substitution
 
@@ -54,11 +53,11 @@ theory! {
 }
 ```
 
-**Generated:** Type-safe AST, parser, substitution, and more!
+**Generated:** Type-safe AST, parser, substitution, **rewrite engine**, and more!
 
 ---
 
-## ✅ Phase 1: What Works Now
+## ✅ What Works Now
 
 ### Core Features
 - ✅ **Theory Definition** - Declarative syntax with macros
@@ -66,60 +65,70 @@ theory! {
 - ✅ **Binders & Variables** - Correct scoping via `moniker`
 - ✅ **Cross-Category Substitution** - Full support for heterogeneous substitution
 - ✅ **Rewrite Rule Syntax** - Parsing and validation
-- ✅ **Test Case** - Rho Calculus with communication
+- ✅ **Rewrite Engine** - Pattern matching, freshness checking, and execution
+- ✅ **Test Case** - Rho Calculus with full communication reduction
 
 ### Code Generation
 From a theory definition, MeTTaIL generates:
 - **AST enums** - Clean, type-safe data structures
-- **Substitution methods** - Capture-avoiding, cross-category
-- **Type derivations** - `Debug`, `Clone`, `PartialEq`, `Eq`, `BoundTerm`
 - **LALRPOP grammars** - Full parser generation with precedence handling
+- **Substitution methods** - Capture-avoiding, cross-category
+- **Rewrite engine** - Pattern matching with nested binders and freshness checks
+- **Type derivations** - `Debug`, `Clone`, `PartialEq`, `Eq`, `BoundTerm`, `Display`
 
 ---
 
-## ✅ Phase 2: Parser Generation (COMPLETE)
+## ✅ Phase 2: Parser & Rewrite Engine (COMPLETE)
 
 ### What We Built
 - ✅ **Precedence-Aware Grammars** - Automatic handling of infix operators
-- ✅ **Binder Parsing** - Direct parsing into `Scope` structures
+- ✅ **Binder Parsing** - Direct parsing into `Scope` structures with proper variable binding
 - ✅ **Parentheses Support** - Override precedence with grouping
 - ✅ **Left-Associativity** - Correct parsing of `a | b | c` as `((a | b) | c)`
-- ✅ **Full Rho Calculus** - Parse complex terms like `a!(0) | b!(c!(0)) | for(a x){*x}`
+- ✅ **Rewrite Pattern Matching** - Nested patterns with binder extraction
+- ✅ **Freshness Checking** - Automatic generation of `x # Q` checks
+- ✅ **Capture-Avoiding Substitution** - Full integration with generated rewrite engine
 
-### Generated Grammar Example
-```lalrpop
-pub Proc: Proc = { <ProcInfix> };
+### Demo: Execution
+```bash
+$ cargo run --bin rhocalc
 
-ProcInfix: Proc = {
-    <left:ProcInfix> "|" <right:ProcAtom> => Proc::PPar(Box::new(left), Box::new(right)),
-    <ProcAtom>
-};
+=== Rho Calculus Rewrite Demo ===
 
-ProcAtom: Proc = {
-    "(" <Proc> ")",  // Parentheses for grouping
-    "0" => Proc::PZero,
-    "for" "(" <f0:Name> <x_1:Ident> ")" "{" <body_2:Proc> "}" => {
-        let binder = Binder(FreeVar::fresh_named(x_1));
-        let scope = Scope::new(binder, Box::new(body_2));
-        Proc::PInput(Box::new(f0), scope)
-    },
-    // ... more rules
-};
+Input:  for(a<-x){*x}|a!(0)
+
+Step 1: *@(0)
+
+→ Normal form reached after 1 step(s)
+
+✅ Rho Calculus Theory Compiled Successfully!
 ```
 
-### Parsing Tests (11/11 passing)
+### Generated Rewrite Engine Example
 ```rust
-✓ Parse "0"
-✓ Parse "*x"
-✓ Parse "@(0)"
-✓ Parse "a!(0)"
-✓ Parse "b!(c!(0))"
-✓ Parse "for(a x){*x}"
-✓ Parse "a!(0) | b!(0)"
-✓ Parse "(a!(0))"
-✓ Parse "a!(0) | b!(0) | c!(0)" with correct left-associativity
-✓ Parse "a!(0) | (b!(0) | c!(0))" with parentheses overriding
-✓ Parse "a!(0) | b!(c!(0)) | for(a x){*x}" 🎉
+pub fn try_rewrite_rule_0(term: &Proc) -> Option<Proc> {
+    if let Proc::PPar(field_0, field_1) = term {
+        let field_0_inner = &(**field_0);
+        if let Proc::PInput(field_0, scope_field) = field_0_inner {
+            let (binder, body) = scope_field.clone().unbind();
+            let field_1_inner = &(**field_1);
+            if let Proc::POutput(field_1_inner_0, field_1_inner_1) = field_1_inner {
+                // Freshness check: x # Q
+                if !is_fresh(&binder.clone(), &(**field_1_inner_1).clone()) {
+                    return None;
+                }
+                // Apply substitution: P[@Q/x]
+                return Some(
+                    (*body).clone().substitute_name(
+                        &(binder.clone()).0,
+                        &Name::NQuote(Box::new((**field_1_inner_1).clone()))
+                    )
+                );
+            }
+        }
+    }
+    None
+}
 ```
 
 ---
@@ -131,22 +140,6 @@ ProcAtom: Proc = {
 2. **Theory Parameters** - Generic theories (e.g., `List<T>`)
 3. **Extension Syntax** - Extend existing theories with new rules
 4. **Module System** - Proper namespacing and visibility
-
-### Remaining Phase 2 Tasks
-- **Pretty-Printing** - Generate `Display` implementations
-- **Round-Trip Testing** - Verify `parse(display(ast)) == ast`
-
----
-
-## 🌟 Key Innovations
-
-### 1. Cross-Category Substitution
-**Problem:** Process calculi bind variables of one type (Name) in terms of another type (Proc).
-
-**Solution:** Generate multiple substitution methods:
-- `Proc.substitute(var, Proc)` - Same-category
-- `Proc.substitute_name(var, Name)` - Cross-category
-- Always recurse into all fields
 
 ### 2. Theory Composition (Phase 3)
 **Vision:** Build complex theories from simpler ones.
@@ -177,11 +170,11 @@ Match rewrites modulo equivalence
 
 ## 📊 Current Stats
 
-- **~3500 LOC** - Core implementation
+- **~4000 LOC** - Core implementation
 - **15+ tests** - All passing ✅
-- **7 examples** - Including Rho Calculus
+- **Working demos** - Rho Calculus with execution
 - **0.7s compile** - For Rho Calculus theory
-- **~700 LOC** - Generated for Rho Calculus
+- **~3400 LOC** - Generated for Rho Calculus (AST + parser + substitution + rewrite engine)
 
 ---
 
@@ -198,16 +191,6 @@ PInput . Proc ::= "for" "(" Name <Name> ")" "{" Proc "}" ;
 PInput(Box<Name>, Scope<Binder<String>, Box<Proc>>)
 //     ^^^^^^^^   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 //     channel    automatically handles capture-avoidance
-```
-
-### Type Safety
-```rust
-// Compile-time error if types don't match:
-theory! {
-    terms {
-        Wrong . Proc ::= Name "|" Name ;  // ❌ PPar expects Proc, not Name
-    }
-}
 ```
 
 ---
@@ -253,9 +236,18 @@ cargo test --bin rhocalc
 cargo expand -p mettail-examples --bin rhocalc > output.rs
 ```
 
-### Run Example
+### Run Rewrite Demo
 ```bash
 cargo run --bin rhocalc
+
+# Output:
+# === Rho Calculus Rewrite Demo ===
+# 
+# Input:  for(a<-x){*x}|a!(0)
+# 
+# Step 1: *@(0)
+# 
+# → Normal form reached after 1 step(s)
 ```
 
 ---
@@ -298,13 +290,6 @@ cargo run --bin rhocalc
 
 ---
 
-## 📬 Contact & Collaboration
+**Current Focus:** Phase 3 - Theory composition and imports.
 
-This is an active research project. We're working out the goals together as we go!
-
-**Current Focus:** Phase 2 - Making theories executable.
-
----
-
-**Last Updated:** After Phase 1 completion - Beginning Phase 2 (Parser Generation)  
-**Next Milestone:** LALRPOP parser integration (Week 2)
+**Latest Achievement:** Generated rewrite engine with pattern matching, freshness checking, and capture-avoiding substitution! 🎉

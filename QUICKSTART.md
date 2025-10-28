@@ -48,13 +48,22 @@ fn main() {
 
 ## Explore the Examples
 
-MeTTaIL includes working examples:
+MeTTaIL includes working examples with full execution:
 
 ```bash
-# Run the Rho Calculus example
+# Run the Rho Calculus rewrite demo
 cargo run --bin rhocalc
 
-# See generated code
+# Output:
+# === Rho Calculus Rewrite Demo ===
+# 
+# Input:  for(a<-x){*x}|a!(0)
+# 
+# Step 1: *@(0)
+# 
+# → Normal form reached after 1 step(s)
+
+# See generated code (AST + parser + substitution + rewrite engine)
 cargo expand --bin rhocalc > output.rs
 ```
 
@@ -117,9 +126,11 @@ Ready to contribute? Check out:
 ## Current Status
 
 **Phase 1**: ✅ Complete - Theory definition, type-checking, substitution  
-**Phase 2**: 🎯 Current - Parser generation, pattern matching, reduction  
+**Phase 2**: ✅ Complete - Parser generation, rewrite engine, execution  
 **Phase 3**: 📋 Planned - Theory composition  
 **Phase 4**: 💡 Future - E-graph integration  
+
+**Latest:** Fully functional rewrite engine with pattern matching, freshness checking, and capture-avoiding substitution! 🎉
 
 ---
 

@@ -4,7 +4,7 @@
 
 // Re-export moniker types for generated code
 pub use moniker::{
-    Var, FreeVar, Binder, Scope, BoundTerm, BoundPattern,
+    Var, FreeVar, Binder, Scope, BoundTerm, BoundPattern, BoundVar,
 };
 
 // Re-export LALRPOP utilities for generated parsers

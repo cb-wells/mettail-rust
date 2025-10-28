@@ -22,8 +22,14 @@ ProcInfix: Proc = {
 ProcAtom: Proc = {
     "(" <Proc> ")",
     "0" => Proc::PZero,
-    "for" "(" <f0:Name> <x_1:Ident> ")" "{" <body_2:Proc> "}" => {
-        let binder = Binder(FreeVar::fresh_named(x_1));
+    "for" "(" <f0:Name> "<-" <x_1:Ident> ")" "{" <body_2:Proc> "}" => {
+        use mettail_runtime::BoundTerm;
+        let free_vars = body_2.free_vars();
+        let binder = if let Some(fv) = free_vars.iter().find(|fv| fv.pretty_name.as_deref() == Some(&x_1)) {
+            Binder((*fv).clone())
+        } else {
+            Binder(FreeVar::fresh_named(x_1))
+        };
         let scope = Scope::new(binder, Box::new(body_2));
         Proc::PInput(Box::new(f0), scope)
     },

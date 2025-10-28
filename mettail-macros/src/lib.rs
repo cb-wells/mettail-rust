@@ -8,6 +8,7 @@ mod substitution;
 mod lalrpop_gen;
 mod grammar_writer;
 mod display_gen;
+mod rewrite_gen;
 
 use proc_macro::TokenStream;
 use proc_macro_error::{proc_macro_error, abort};
@@ -18,6 +19,7 @@ use validator::validate_theory;
 use codegen::generate_ast;
 use lalrpop_gen::generate_lalrpop_grammar;
 use grammar_writer::write_grammar_file;
+use rewrite_gen::generate_rewrite_engine;
 
 #[proc_macro]
 #[proc_macro_error]
@@ -31,7 +33,10 @@ pub fn theory(input: TokenStream) -> TokenStream {
     }
     
     // Generate the Rust AST types
-    let generated = generate_ast(&theory_def);
+    let ast_code = generate_ast(&theory_def);
+    
+    // Generate rewrite engine
+    let rewrite_code = generate_rewrite_engine(&theory_def);
     
     // Generate LALRPOP grammar file with precedence handling
     let grammar = generate_lalrpop_grammar(&theory_def);
@@ -39,6 +44,11 @@ pub fn theory(input: TokenStream) -> TokenStream {
         eprintln!("Warning: Failed to write LALRPOP grammar: {}", e);
     }
     
-    TokenStream::from(generated)
+    let combined = quote::quote! {
+        #ast_code
+        #rewrite_code
+    };
+    
+    TokenStream::from(combined)
 }
 
