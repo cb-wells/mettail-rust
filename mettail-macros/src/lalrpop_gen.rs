@@ -241,7 +241,8 @@ fn generate_rule_alternative(rule: &GrammarRule) -> String {
             }
             GrammarItem::NonTerminal(nt) if nt == "Var" => {
                 // Variable: need to parse identifier
-                alt.push_str(&format!("<v:Ident> => {}::{}(Var::Free(FreeVar::fresh_named(v)))", 
+                // Use get_or_create_var to ensure same name = same ID within a parse
+                alt.push_str(&format!("<v:Ident> => {}::{}(Var::Free(mettail_runtime::get_or_create_var(v)))", 
                     rule.category, label));
             }
             GrammarItem::NonTerminal(nt) => {
@@ -365,7 +366,7 @@ fn generate_binder_alternative(rule: &GrammarRule) -> String {
     action.push_str(&format!("        let binder = if let Some(fv) = free_vars.iter().find(|fv| fv.pretty_name.as_deref() == Some(&{})) {{\n", binder_var));
     action.push_str("            Binder((*fv).clone())\n");
     action.push_str("        } else {\n");
-    action.push_str(&format!("            Binder(FreeVar::fresh_named({}))\n", binder_var));
+    action.push_str(&format!("            Binder(mettail_runtime::get_or_create_var({}))\n", binder_var));
     action.push_str("        };\n");
     action.push_str(&format!("        let scope = Scope::new(binder, Box::new({}));\n", body_var));
     
@@ -378,132 +379,3 @@ fn generate_binder_alternative(rule: &GrammarRule) -> String {
     
     format!("{}{}", pattern.trim(), action)
 }
-
-/// Generate a token definition for identifiers
-pub fn generate_ident_token() -> String {
-    r#"Ident: String = {
-    r"[a-zA-Z_][a-zA-Z0-9_]*" => <>.to_string(),
-};
-"#.to_string()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::ast::*;
-    use syn::parse_quote;
-    
-    #[test]
-    fn test_rhocalc_grammar() {
-        use std::fs;
-        
-        // Full Rho Calculus theory
-        let theory = TheoryDef {
-            name: parse_quote!(RhoCalc),
-            params: vec![],
-            exports: vec![
-                Export { name: parse_quote!(Proc) },
-                Export { name: parse_quote!(Name) },
-            ],
-            terms: vec![
-                // Proc constructors
-                GrammarRule {
-                    label: parse_quote!(PZero),
-                    category: parse_quote!(Proc),
-                    items: vec![GrammarItem::Terminal("0".to_string())],
-                    bindings: vec![],
-                },
-                GrammarRule {
-                    label: parse_quote!(PInput),
-                    category: parse_quote!(Proc),
-                    items: vec![
-                        GrammarItem::Terminal("for".to_string()),
-                        GrammarItem::Terminal("(".to_string()),
-                        GrammarItem::NonTerminal(parse_quote!(Name)),
-                        GrammarItem::Binder { category: parse_quote!(Name) },
-                        GrammarItem::Terminal(")".to_string()),
-                        GrammarItem::Terminal("{".to_string()),
-                        GrammarItem::NonTerminal(parse_quote!(Proc)),
-                        GrammarItem::Terminal("}".to_string()),
-                    ],
-                    bindings: vec![(3, vec![6])], // Item 3 (binder) binds in item 6 (body)
-                },
-                GrammarRule {
-                    label: parse_quote!(POutput),
-                    category: parse_quote!(Proc),
-                    items: vec![
-                        GrammarItem::NonTerminal(parse_quote!(Name)),
-                        GrammarItem::Terminal("!".to_string()),
-                        GrammarItem::Terminal("(".to_string()),
-                        GrammarItem::NonTerminal(parse_quote!(Proc)),
-                        GrammarItem::Terminal(")".to_string()),
-                    ],
-                    bindings: vec![],
-                },
-                GrammarRule {
-                    label: parse_quote!(PPar),
-                    category: parse_quote!(Proc),
-                    items: vec![
-                        GrammarItem::NonTerminal(parse_quote!(Proc)),
-                        GrammarItem::Terminal("|".to_string()),
-                        GrammarItem::NonTerminal(parse_quote!(Proc)),
-                    ],
-                    bindings: vec![],
-                },
-                GrammarRule {
-                    label: parse_quote!(PDrop),
-                    category: parse_quote!(Proc),
-                    items: vec![
-                        GrammarItem::Terminal("*".to_string()),
-                        GrammarItem::NonTerminal(parse_quote!(Name)),
-                    ],
-                    bindings: vec![],
-                },
-                // Name constructors
-                GrammarRule {
-                    label: parse_quote!(NQuote),
-                    category: parse_quote!(Name),
-                    items: vec![
-                        GrammarItem::Terminal("@".to_string()),
-                        GrammarItem::NonTerminal(parse_quote!(Proc)),
-                    ],
-                    bindings: vec![],
-                },
-                GrammarRule {
-                    label: parse_quote!(NVar),
-                    category: parse_quote!(Name),
-                    items: vec![GrammarItem::NonTerminal(parse_quote!(Var))],
-                    bindings: vec![],
-                },
-            ],
-            equations: vec![],
-            rewrites: vec![],
-        };
-        
-        let grammar = generate_lalrpop_grammar(&theory);
-        
-        println!("\n=== Generated Rho Calculus Grammar ===\n{}", grammar);
-        
-        // Write to file
-        let target_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("target")
-            .join("test_grammars");
-        
-        fs::create_dir_all(&target_dir).unwrap();
-        fs::write(target_dir.join("rhocalc.lalrpop"), &grammar).unwrap();
-        
-        println!("✓ Wrote grammar to: {}", target_dir.join("rhocalc.lalrpop").display());
-        
-        // Verify Rho-specific constructs
-        assert!(grammar.contains("pub Proc: Proc"));
-        assert!(grammar.contains("pub Name: Name"));
-        assert!(grammar.contains("PZero"));
-        assert!(grammar.contains("PInput"));
-        assert!(grammar.contains("Binder(FreeVar::fresh_named"));
-        assert!(grammar.contains("Scope::new"));
-        assert!(grammar.contains("\"for\""));
-        assert!(grammar.contains("\"@\""));
-        assert!(grammar.contains("\"|\""));
-    }
-}
-

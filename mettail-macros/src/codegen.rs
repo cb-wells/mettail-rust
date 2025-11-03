@@ -14,7 +14,7 @@ pub fn generate_ast(theory: &TheoryDef) -> TokenStream {
     // Generate LALRPOP module reference
     let theory_name = &theory.name;
     let theory_name_lower = theory_name.to_string().to_lowercase();
-    let lalrpop_mod = syn::Ident::new(&theory_name_lower, proc_macro2::Span::call_site());
+    let theory_mod = syn::Ident::new(&theory_name_lower, proc_macro2::Span::call_site());
     
     quote! {
         #ast_enums
@@ -22,14 +22,16 @@ pub fn generate_ast(theory: &TheoryDef) -> TokenStream {
         #subst_impl
         
         #display_impl
+
+        // #theory_mod;
         
         // Include the LALRPOP-generated parser
         // The .lalrpop file is generated at compile time and compiled by build.rs
         #[cfg(not(test))]
-        lalrpop_util::lalrpop_mod!(pub #lalrpop_mod);
+        lalrpop_util::lalrpop_mod!(pub #theory_mod);
         
         #[cfg(test)]
-        lalrpop_util::lalrpop_mod!(#lalrpop_mod);
+        lalrpop_util::lalrpop_mod!(#theory_mod);
     }
 }
 
@@ -57,7 +59,7 @@ fn generate_ast_enums(theory: &TheoryDef) -> TokenStream {
         }).collect();
         
         quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, mettail_runtime::BoundTerm)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, mettail_runtime::BoundTerm)]
             pub enum #cat_name {
                 #(#variants),*
             }

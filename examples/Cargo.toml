@@ -7,11 +7,17 @@ edition = "2021"
 name = "rhocalc"
 path = "rhocalc.rs"
 
+[[bin]]
+name = "test_var_identity"
+path = "test_var_identity.rs"
+
 [dependencies]
 mettail-macros = { path = "../mettail-macros" }
 mettail-runtime = { path = "../mettail-runtime" }
-moniker = { version = "0.5.0", features = ["moniker-derive"] }
+moniker = { workspace = true }
 lalrpop-util = { workspace = true, features = ["lexer"] }
+ascent = { workspace = true }
+
 
 [build-dependencies]
 lalrpop = { workspace = true }

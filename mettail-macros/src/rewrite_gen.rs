@@ -83,11 +83,13 @@ fn generate_pattern_with_body(
             let var_name = var.to_string();
             bindings.insert(var_name, quote! { #term_ident.clone() });
             
-            // This is the innermost level - generate freshness checks + RHS
+            // This is the innermost level - generate equality + freshness checks + RHS
+            let equality_checks = quote! {}; // No equality checks at top level variable
             let freshness_checks = generate_freshness_checks(&rule.conditions, bindings);
             let rhs = generate_rhs(&rule.right, bindings);
             
             quote! {
+                #equality_checks
                 #freshness_checks
                 return Some(#rhs);
             }
@@ -95,12 +97,14 @@ fn generate_pattern_with_body(
         
         Expr::Apply { constructor, args } => {
             let category = extract_category(expr);
+            let mut equality_checks = Vec::new();
             generate_constructor_pattern_with_body(
                 &category,
                 constructor,
                 args,
                 &term_ident,
                 bindings,
+                &mut equality_checks,
                 theory,
                 rule
             )
@@ -119,6 +123,7 @@ fn generate_constructor_pattern_with_body(
     args: &[Expr],
     term: &Ident,
     bindings: &mut HashMap<String, TokenStream>,
+    equality_checks: &mut Vec<(String, TokenStream)>,
     theory: &TheoryDef,
     rule: &RewriteRule
 ) -> TokenStream {
@@ -131,12 +136,12 @@ fn generate_constructor_pattern_with_body(
     if !grammar_rule.bindings.is_empty() {
         generate_binder_pattern_with_body(
             category, constructor, args, term, bindings,
-            grammar_rule, theory, rule
+            equality_checks, grammar_rule, theory, rule
         )
     } else {
         generate_regular_pattern_with_body(
             category, constructor, args, term, bindings,
-            grammar_rule, theory, rule
+            equality_checks, grammar_rule, theory, rule
         )
     }
 }
@@ -148,8 +153,9 @@ fn generate_binder_pattern_with_body(
     args: &[Expr],
     term: &Ident,
     bindings: &mut HashMap<String, TokenStream>,
+    equality_checks: &mut Vec<(String, TokenStream)>,
     grammar_rule: &crate::ast::GrammarRule,
-    theory: &TheoryDef,
+    _theory: &TheoryDef,
     rule: &RewriteRule
 ) -> TokenStream {
     let (binder_idx, body_indices) = &grammar_rule.bindings[0];
@@ -175,7 +181,15 @@ fn generate_binder_pattern_with_body(
             crate::ast::GrammarItem::Binder { .. } => {
                 if pattern_arg_idx < args.len() {
                     if let Expr::Var(var) = &args[pattern_arg_idx] {
-                        bindings.insert(format!("{}_binder", var), quote! { binder.clone() });
+                        let binder_key = format!("{}_binder", var);
+                        let binding = quote! { binder.clone() };
+                        
+                        // Check for duplicate binder variable
+                        if bindings.contains_key(&binder_key) {
+                            equality_checks.push((binder_key, binding));
+                        } else {
+                            bindings.insert(binder_key, binding);
+                        }
                     }
                     pattern_arg_idx += 1;
                 }
@@ -184,8 +198,15 @@ fn generate_binder_pattern_with_body(
                 if pattern_arg_idx < args.len() {
                     if i == body_idx {
                         if let Expr::Var(var) = &args[pattern_arg_idx] {
-                            // body is Box<Proc>, so dereference to store the unboxed value
-                            bindings.insert(var.to_string(), quote! { (*body).clone() });
+                            let var_name = var.to_string();
+                            let binding = quote! { (*body).clone() };
+                            
+                            // Check for duplicate variable
+                            if bindings.contains_key(&var_name) {
+                                equality_checks.push((var_name, binding));
+                            } else {
+                                bindings.insert(var_name, binding);
+                            }
                         }
                     } else {
                         // Find corresponding AST field
@@ -197,7 +218,15 @@ fn generate_binder_pattern_with_body(
                         if field_count_before < ast_field_names.len() {
                             let field = &ast_field_names[field_count_before];
                             if let Expr::Var(var) = &args[pattern_arg_idx] {
-                                bindings.insert(var.to_string(), quote! { (*#field).clone() });
+                                let var_name = var.to_string();
+                                let binding = quote! { (*#field).clone() };
+                                
+                                // Check for duplicate variable
+                                if bindings.contains_key(&var_name) {
+                                    equality_checks.push((var_name, binding));
+                                } else {
+                                    bindings.insert(var_name, binding);
+                                }
                             }
                         }
                     }
@@ -208,23 +237,23 @@ fn generate_binder_pattern_with_body(
         }
     }
     
-    // Generate final body (freshness + RHS)
-    // Only do this if the parent hasn't already done it (check if rule has content)
+    // Generate final body (equality + freshness + RHS)
     let is_dummy = matches!(rule.right, Expr::Var(ref v) if v == "dummy");
     
     if is_dummy {
         // Dummy rule - return ONLY the inner statements (unbinding), no if-let wrapper
-        // This way the parent can wrap it and keep variables in scope
         quote! {
             let (binder, body) = scope_field.clone().unbind();
         }
     } else {
-        // Real rule - generate complete if-let with freshness checks and RHS
+        // Real rule - generate complete if-let with equality + freshness checks and RHS
+        let eq_checks = generate_equality_checks(equality_checks, bindings);
         let freshness_checks = generate_freshness_checks(&rule.conditions, bindings);
         let rhs = generate_rhs(&rule.right, bindings);
         quote! {
             if let #category::#constructor(#(#ast_field_names),*) = #term {
                 let (binder, body) = scope_field.clone().unbind();
+                #eq_checks
                 #freshness_checks
                 return Some(#rhs);
             }
@@ -239,6 +268,7 @@ fn generate_regular_pattern_with_body(
     args: &[Expr],
     term: &Ident,
     bindings: &mut HashMap<String, TokenStream>,
+    equality_checks: &mut Vec<(String, TokenStream)>,
     grammar_rule: &crate::ast::GrammarRule,
     theory: &TheoryDef,
     rule: &RewriteRule
@@ -252,7 +282,7 @@ fn generate_regular_pattern_with_body(
         .map(|i| syn::Ident::new(&format!("field_{}", i), proc_macro2::Span::call_site()))
         .collect();
     
-    // First bind all simple variables
+    // First bind all simple variables, checking for duplicates
     for (i, arg) in args.iter().enumerate() {
         if i >= field_names.len() {
             break;
@@ -260,8 +290,17 @@ fn generate_regular_pattern_with_body(
         
         let field = &field_names[i];
         if let Expr::Var(var) = arg {
+            let var_name = var.to_string();
             let binding = quote! { (*#field).clone() };
-            bindings.insert(var.to_string(), binding);
+            
+            // Check if this variable was already bound
+            if bindings.contains_key(&var_name) {
+                // Duplicate variable - add equality check instead of rebinding
+                equality_checks.push((var_name, binding));
+            } else {
+                // First occurrence - bind it
+                bindings.insert(var_name, binding);
+            }
         }
     }
     
@@ -289,11 +328,13 @@ fn generate_regular_pattern_with_body(
                 .expect("Constructor not found");
             
             if !inner_grammar.bindings.is_empty() {
-                // Binder constructor - add bindings for binder and body
-                let (_binder_idx, body_indices) = &inner_grammar.bindings[0];
+                // Binder constructor - add bindings for ALL fields (regular, binder, and body), checking for duplicates
+                let (binder_idx, body_indices) = &inner_grammar.bindings[0];
                 let body_idx = body_indices[0];
                 
                 let mut pattern_arg_idx = 0;
+                let mut ast_field_idx = 0;
+                
                 for (i, item) in inner_grammar.items.iter().enumerate() {
                     if pattern_arg_idx >= inner_args.len() {
                         break;
@@ -302,15 +343,48 @@ fn generate_regular_pattern_with_body(
                     match item {
                         crate::ast::GrammarItem::Binder { .. } => {
                             if let Expr::Var(var) = &inner_args[pattern_arg_idx] {
-                                bindings.insert(format!("{}_binder", var), quote! { binder.clone() });
+                                let binder_key = format!("{}_binder", var);
+                                let binding = quote! { binder.clone() };
+                                
+                                // Check for duplicate
+                                if bindings.contains_key(&binder_key) {
+                                    equality_checks.push((binder_key, binding));
+                                } else {
+                                    bindings.insert(binder_key, binding);
+                                }
                             }
                             pattern_arg_idx += 1;
                         }
                         crate::ast::GrammarItem::NonTerminal(_) => {
                             if i == body_idx {
+                                // This is the body
                                 if let Expr::Var(var) = &inner_args[pattern_arg_idx] {
-                                    bindings.insert(var.to_string(), quote! { (*body).clone() });
+                                    let var_name = var.to_string();
+                                    let binding = quote! { (*body).clone() };
+                                    
+                                    // Check for duplicate
+                                    if bindings.contains_key(&var_name) {
+                                        equality_checks.push((var_name, binding));
+                                    } else {
+                                        bindings.insert(var_name, binding);
+                                    }
                                 }
+                            } else {
+                                // Regular field (not binder, not body) - use unique nested field name
+                                let field_name = syn::Ident::new(&format!("{}_{}", field_term, ast_field_idx), proc_macro2::Span::call_site());
+                                if let Expr::Var(var) = &inner_args[pattern_arg_idx] {
+                                    let var_name = var.to_string();
+                                    // field_name is &Box<T> from the pattern match, so **field_name gets T
+                                    let binding = quote! { (**#field_name).clone() };
+                                    
+                                    // Check for duplicate
+                                    if bindings.contains_key(&var_name) {
+                                        equality_checks.push((var_name, binding));
+                                    } else {
+                                        bindings.insert(var_name, binding);
+                                    }
+                                }
+                                ast_field_idx += 1;
                             }
                             pattern_arg_idx += 1;
                         }
@@ -318,7 +392,7 @@ fn generate_regular_pattern_with_body(
                     }
                 }
             } else {
-                // Regular constructor - add bindings with unique field names
+                // Regular constructor - add bindings with unique field names, checking for duplicates
                 let inner_field_count = inner_grammar.items.iter()
                     .filter(|item| matches!(item, crate::ast::GrammarItem::NonTerminal(_)))
                     .count();
@@ -334,15 +408,22 @@ fn generate_regular_pattern_with_body(
                     
                     let field = &inner_fields[i];
                     if let Expr::Var(var) = arg {
-                        // field is &Box<T>, so *field is Box<T>, and **field is T
-                        bindings.insert(var.to_string(), quote! { (**#field).clone() });
+                        let var_name = var.to_string();
+                        let binding = quote! { (**#field).clone() };
+                        
+                        // Check for duplicate
+                        if bindings.contains_key(&var_name) {
+                            equality_checks.push((var_name, binding));
+                        } else {
+                            bindings.insert(var_name, binding);
+                        }
                     }
                 }
             }
         }
     }
     
-    // Generate final body (freshness + RHS)
+    // Generate final body (equality + freshness + RHS)
     // NOW all bindings from nested patterns are available
     // Only generate if this is not a dummy rule
     let is_dummy = matches!(rule.right, Expr::Var(ref v) if v == "dummy");
@@ -351,12 +432,14 @@ fn generate_regular_pattern_with_body(
         // Dummy rule - return ONLY the binding statements, no if-let wrapper
         quote! {}
     } else {
-        // Real rule - nest all patterns and add final body with freshness + RHS
+        // Real rule - nest all patterns and add final body with equality + freshness + RHS
+        let eq_checks = generate_equality_checks(equality_checks, bindings);
         let freshness_checks = generate_freshness_checks(&rule.conditions, bindings);
         let rhs = generate_rhs(&rule.right, bindings);
         
         // Build nested structure from inside out
         let mut body = quote! {
+            #eq_checks
             #freshness_checks
             return Some(#rhs);
         };
@@ -376,19 +459,21 @@ fn generate_regular_pattern_with_body(
                     // Binder constructor - generate if-let with unbinding
                     let inner_category = extract_category(field_arg);
                     
-                    // Generate AST field names for this binder constructor
+                    // Generate AST field names for this binder constructor with unique names
                     let (_binder_idx, body_indices) = &inner_grammar.bindings[0];
                     let body_idx = body_indices[0];
                     
                     let mut inner_ast_fields = Vec::new();
+                    let mut ast_field_idx = 0;
                     for (i, item) in inner_grammar.items.iter().enumerate() {
                         if i == *_binder_idx {
                             continue;
                         } else if i == body_idx {
                             inner_ast_fields.push(syn::Ident::new("scope_field", proc_macro2::Span::call_site()));
                         } else if matches!(item, crate::ast::GrammarItem::NonTerminal(_)) {
-                            let field_num = inner_ast_fields.len();
-                            inner_ast_fields.push(syn::Ident::new(&format!("field_{}", field_num), proc_macro2::Span::call_site()));
+                            // Use unique nested field names matching those in binding phase
+                            inner_ast_fields.push(syn::Ident::new(&format!("{}_{}", field_term, ast_field_idx), proc_macro2::Span::call_site()));
+                            ast_field_idx += 1;
                         }
                     }
                     
@@ -448,6 +533,31 @@ fn extract_category(expr: &Expr) -> Ident {
         }
         Expr::Var(ident) => ident.clone(),
         Expr::Subst { term, .. } => extract_category(term),
+    }
+}
+
+/// Generate equality checks for duplicate variables
+fn generate_equality_checks(
+    checks: &[(String, TokenStream)],
+    bindings: &HashMap<String, TokenStream>
+) -> TokenStream {
+    if checks.is_empty() {
+        return quote! {};
+    }
+    
+    let check_code: Vec<TokenStream> = checks.iter().map(|(var_name, field_access)| {
+        let first_binding = bindings.get(var_name)
+            .expect(&format!("First binding for {} not found", var_name));
+        
+        quote! {
+            if !(#first_binding == #field_access) {
+                return None;
+            }
+        }
+    }).collect();
+    
+    quote! {
+        #(#check_code)*
     }
 }
 
