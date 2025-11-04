@@ -1,5 +1,5 @@
 use crate::ast::{TheoryDef, GrammarItem, GrammarRule};
-use crate::{subst_gen, display_gen, termgen_gen};
+use crate::{subst_gen, display_gen, termgen_gen, random_generation};
 use proc_macro2::TokenStream;
 use quote::quote;
 use std::collections::HashMap;
@@ -9,6 +9,7 @@ pub fn generate_ast(theory: &TheoryDef) -> TokenStream {
     let subst_impl = subst_gen::generate_substitution(theory);
     let display_impl = display_gen::generate_display(theory);
     let generation_impl = termgen_gen::generate_term_generation(theory);
+    let random_gen_impl = random_generation::generate_random_generation(theory);
     
     // Generate LALRPOP module reference
     let theory_name = &theory.name;
@@ -23,6 +24,8 @@ pub fn generate_ast(theory: &TheoryDef) -> TokenStream {
         #display_impl
         
         #generation_impl
+        
+        #random_gen_impl
 
         #[cfg(not(test))]
         lalrpop_util::lalrpop_mod!(pub #theory_mod);

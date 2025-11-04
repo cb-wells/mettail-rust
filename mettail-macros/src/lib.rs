@@ -10,6 +10,7 @@ mod lalrpop_gen;
 mod display_gen;
 mod rewrite_gen;
 mod termgen_gen;
+mod random_generation;
 
 use proc_macro::TokenStream;
 use proc_macro_error::{proc_macro_error, abort};

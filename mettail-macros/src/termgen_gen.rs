@@ -30,6 +30,7 @@ fn generate_context_struct(theory: &TheoryDef) -> TokenStream {
     quote! {
         struct GenerationContext {
             vars: Vec<String>,
+            initial_var_count: usize,  // Track how many vars were in initial pool
             max_depth: usize,
             #(#category_fields),*
         }
@@ -59,8 +60,10 @@ fn generate_context_impl(theory: &TheoryDef) -> TokenStream {
     quote! {
         impl GenerationContext {
             fn new(vars: Vec<String>, max_depth: usize) -> Self {
+                let initial_var_count = vars.len();
                 Self {
                     vars,
+                    initial_var_count,
                     max_depth,
                     #(#new_fields),*
                 }
@@ -392,26 +395,28 @@ fn generate_simple_binder_case(
     let body_field = category_to_field_name(body_cat);
     
     quote! {
-        // Generate bodies WITH the binder variable in scope
-        // This allows bodies to reference the bound variable
+        // Generate bodies WITH unique binder variables
+        // Count how many vars are binder vars (vars beyond the initial pool)
+        let current_binding_depth = self.vars.len() - self.initial_var_count;
+        let binder_name = format!("x{}", current_binding_depth);
         let mut extended_vars = self.vars.clone();
-        extended_vars.push(String::from("x"));
+        extended_vars.push(binder_name.clone());
         
-        // Create temporary context for generating bodies that can use "x"
+        // Create temporary context for generating bodies that can use the binder
         let mut temp_ctx = GenerationContext::new(extended_vars, depth - 1);
         temp_ctx = temp_ctx.generate_all();
         
         // Get all bodies from temp context (up to depth-1)
-        let mut bodies_with_x = Vec::new();
+        let mut bodies_with_binder = Vec::new();
         for d in 0..depth {
-            if let Some(terms) = temp_ctx.#body_field.get(&d) {
-                bodies_with_x.extend(terms.clone());
+            if let Some(ts) = temp_ctx.#body_field.get(&d) {
+                bodies_with_binder.extend(ts.clone());
             }
         }
         
-        // Create scopes with bodies that may reference "x"
-        for body in bodies_with_x {
-            let binder_var = mettail_runtime::get_or_create_var("x");
+        // Create scopes with bodies that may reference the binder
+        for body in bodies_with_binder {
+            let binder_var = mettail_runtime::get_or_create_var(&binder_name);
             let binder = mettail_runtime::Binder(binder_var);
             // Scope::new will automatically close free occurrences of binder_var in body
             let scope = mettail_runtime::Scope::new(binder, Box::new(body));
@@ -435,18 +440,20 @@ fn generate_binder_with_one_arg(
     let body_field = category_to_field_name(body_cat);
     
     quote! {
-        // Generate bodies WITH the binder variable in scope
+        // Generate bodies WITH unique binder variable
+        let current_binding_depth = self.vars.len() - self.initial_var_count;
+        let binder_name = format!("x{}", current_binding_depth);
         let mut extended_vars = self.vars.clone();
-        extended_vars.push(String::from("x"));
+        extended_vars.push(binder_name.clone());
         
         let mut temp_ctx = GenerationContext::new(extended_vars, depth - 1);
         temp_ctx = temp_ctx.generate_all();
         
         // Collect all bodies from temp context
-        let mut bodies_with_x = Vec::new();
+        let mut bodies_with_binder = Vec::new();
         for d in 0..depth {
             if let Some(terms) = temp_ctx.#body_field.get(&d) {
-                bodies_with_x.extend(terms.clone());
+                bodies_with_binder.extend(terms.clone());
             }
         }
         
@@ -454,10 +461,10 @@ fn generate_binder_with_one_arg(
         for d1 in 0..depth {
             if let Some(args1) = self.#arg_field.get(&d1) {
                 for arg1 in args1 {
-                    for body in &bodies_with_x {
-                        let binder_var = mettail_runtime::get_or_create_var("x");
+                    for body in &bodies_with_binder {
+                        let binder_var = mettail_runtime::get_or_create_var(&binder_name);
                         let binder = mettail_runtime::Binder(binder_var);
-                        // Scope::new will close free "x" in body to bound variable
+                        // Scope::new will close free binder_var in body to bound variable
                         let scope = mettail_runtime::Scope::new(binder, Box::new(body.clone()));
                         
                         // Check depth constraint
@@ -518,24 +525,26 @@ fn generate_binder_with_multiple_args(
         if depth > 0 {
             let d = depth - 1;
             
-            // Generate bodies WITH the binder variable
+            // Generate bodies WITH unique binder variable
+            let current_binding_depth = self.vars.len() - self.initial_var_count;
+            let binder_name = format!("x{}", current_binding_depth);
             let mut extended_vars = self.vars.clone();
-            extended_vars.push(String::from("x"));
+            extended_vars.push(binder_name.clone());
             
             let mut temp_ctx = GenerationContext::new(extended_vars, d);
             temp_ctx = temp_ctx.generate_all();
             
-            let mut bodies_with_x = Vec::new();
+            let mut bodies_with_binder = Vec::new();
             for depth_i in 0..=d {
                 if let Some(terms) = temp_ctx.#body_field.get(&depth_i) {
-                    bodies_with_x.extend(terms.clone());
+                    bodies_with_binder.extend(terms.clone());
                 }
             }
             
             #(#arg_fields)* {
                 #(#arg_loops)* {
-                    for body in &bodies_with_x {
-                        let binder_var = mettail_runtime::get_or_create_var("x");
+                    for body in &bodies_with_binder {
+                        let binder_var = mettail_runtime::get_or_create_var(&binder_name);
                         let binder = mettail_runtime::Binder(binder_var);
                         let scope = mettail_runtime::Scope::new(binder, Box::new(body.clone()));
                         terms.push(#cat_name::#label(

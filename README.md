@@ -269,6 +269,8 @@ cargo run --bin rhocalc
 - `docs/design/THEORY-COMPOSITION-DESIGN.md` - Phase 3 design
 - `docs/design/SORTING-DESIGN.md` - Term ordering and generation
 - `docs/design/TERM-GENERATION-COMPLETE.md` - Implementation summary
+- `docs/design/BINDER-SHADOWING-FIX.md` - Unique binder names
+- `docs/design/TERM-GENERATION-ASSUMPTIONS.md` - Current limitations and future work
 
 ### Historical
 - `docs/phase-1/FOUNDATION-REVIEW.md` - Mid-Phase 1 review

@@ -13,6 +13,7 @@ mettail-runtime = { path = "../mettail-runtime" }
 moniker = { workspace = true }
 lalrpop-util = { workspace = true, features = ["lexer"] }
 ascent = { workspace = true }
+rand = { workspace = true }
 
 
 [build-dependencies]

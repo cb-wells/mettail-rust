@@ -102,30 +102,63 @@ ascent_source! {
 }
 
 fn main() {
-    // println!("=== Rho Calculus Demo ===\n");
+    println!("=== Rho Calculus Demo ===\n");
 
-    // // === Term Generation Demo ===
-    // println!("--- Term Generation ---");
-    // println!("Generating Proc terms up to depth 2 with vars [a, b]...\n");
+    let vars = vec!["a".to_string(), "b".to_string()];
     
-    // let vars = vec!["a".to_string(), "b".to_string()];
-    // let terms = Proc::generate_terms(&vars, 2);
+    // === Term Generation Demo - Nested Binders ===
+    println!("--- Term Generation with Unique Binder Names ---");
     
-    // println!("Generated {} terms total", terms.len());
-    // for term in terms {
-    //     println!("  {}", term);
-    // }
+    // Test exhaustive at depth 1
+    println!("\nExhaustive at depth 2 (showing x0):");
+    let terms_d2 = Proc::generate_terms(&vars, 2);
+    let with_binders: Vec<&Proc> = terms_d2.iter()
+        .filter(|p| p.to_string().contains("for"))
+        // .take(3)
+        .collect();
     
-    // println!("\n--- Rewrite Engine Demo ---");
-    let rdx_str = "for(a->x){*x}|a!(b!(*n))|for(b->y){*y}|b!(0)";
+    for t in &with_binders {
+        println!("    {}", t);
+    }
+    
+    println!("\nRandom at depth 10 (showing x0, x1, x2, ...):");
+    for i in 0..7 {
+        let term = Proc::generate_random_at_depth_with_seed(&vars, 10, 3000 + i);
+        let s = term.to_string();
+        
+        // Count each binder level
+        let x0_count = s.matches("x0").count();
+        let x1_count = s.matches("x1").count();
+        let x2_count = s.matches("x2").count();
+        let x3_count = s.matches("x3").count();
+        
+        // Only show if has nested binders (x1+)
+        if x1_count > 0 || x2_count > 0 || x3_count > 0 {
+            let truncated = if s.len() > 90 {
+                format!("{}...", &s[..90])
+            } else {
+                s.clone()
+            };
+            
+            print!("  [{}] Binders:", i);
+            if x0_count > 0 { print!(" x0({})", x0_count); }
+            if x1_count > 0 { print!(" x1({})", x1_count); }
+            if x2_count > 0 { print!(" x2({})", x2_count); }
+            if x3_count > 0 { print!(" x3({})", x3_count); }
+            println!("\n      {}", truncated);
+        }
+    }
+    
+    // === Rewrite Engine Demo ===
+    println!("\n--- Rewrite Engine Demo ---");
+    let rdx_str = "for(a->x0){*x0}|a!(0)";
     mettail_runtime::clear_var_cache();
     let parser = rhocalc::ProcParser::new();
     let redex = parser.parse(rdx_str).unwrap();
+    println!("Initial: {}", redex);
 
     let prog = ascent_run! {
-        // ascent modularity
         include_source!(theory_source);
-        
         proc(p) <-- for p in [redex.clone()];
         relation full_path(Proc, Vec<Proc>);
         full_path(s,ps) <-- path_terminal(s,ps), eq(s,redex.clone());
@@ -134,10 +167,9 @@ fn main() {
     let mut paths = prog.full_path.clone();
     paths.sort_by(|a,b| a.0.cmp(&b.0));
 
-    println!("Paths found: {}", paths.len());
-    for (s, ps) in paths.iter().take(3) {
-        println!("{} ~> {}", s, ps.iter().map(|p| p.to_string()).collect::<Vec<String>>().join(" ~> "));
-        println!();
+    println!("Paths: {}", paths.len());
+    for (s, ps) in paths.iter().take(2) {
+        println!("  {} ~> {}", s, ps.iter().map(|p| p.to_string()).collect::<Vec<String>>().join(" ~> "));
     }
 }
 
