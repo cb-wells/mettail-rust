@@ -10,6 +10,10 @@ use quote::quote;
 use syn::Ident;
 
 pub fn generate_substitution(theory: &TheoryDef) -> TokenStream {
+    // Find all categories that appear anywhere in the theory
+    // This ensures every exported category gets substitute_X methods for all other categories
+    let all_subst_cats = find_all_substitutable_categories(&theory.terms);
+    
     let impls: Vec<TokenStream> = theory.exports.iter().map(|export| {
         let category = &export.name;
         
@@ -19,11 +23,7 @@ pub fn generate_substitution(theory: &TheoryDef) -> TokenStream {
             .filter(|r| r.category == *category)
             .collect();
         
-        // Find all categories that we might need to substitute
-        // This includes binder categories AND field categories
-        let subst_cats = find_substitutable_categories(&rules);
-        
-        generate_category_substitution(category, &rules, &subst_cats)
+        generate_category_substitution(category, &rules, &all_subst_cats)
     }).collect();
     
     quote! {
@@ -31,7 +31,9 @@ pub fn generate_substitution(theory: &TheoryDef) -> TokenStream {
     }
 }
 
-fn find_substitutable_categories(rules: &[&GrammarRule]) -> std::collections::HashSet<String> {
+/// Find all categories that appear anywhere in the theory
+/// This ensures we generate substitute_X methods for all possible cross-category substitutions
+fn find_all_substitutable_categories(rules: &[GrammarRule]) -> std::collections::HashSet<String> {
     let mut cats = std::collections::HashSet::new();
     
     for rule in rules {
@@ -43,6 +45,7 @@ fn find_substitutable_categories(rules: &[&GrammarRule]) -> std::collections::Ha
             }
         }
         
+        // Add all non-terminal categories (except Var)
         for item in &rule.items {
             if let GrammarItem::NonTerminal(cat) = item {
                 let cat_str = cat.to_string();
@@ -51,6 +54,9 @@ fn find_substitutable_categories(rules: &[&GrammarRule]) -> std::collections::Ha
                 }
             }
         }
+        
+        // Also add the rule's own category to ensure we have all categories
+        cats.insert(rule.category.to_string());
     }
     
     cats

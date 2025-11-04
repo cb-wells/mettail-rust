@@ -243,6 +243,162 @@ fn generate_binder_pattern_with_body(
     }
 }
 
+/// Information about a nested pattern at any depth
+#[derive(Clone)]
+struct NestedPatternInfo {
+    /// Index in parent's args
+    field_idx: usize,
+    /// Unique identifier for this pattern (e.g., "field_0_inner", "field_0_inner_1_inner")
+    field_term: Ident,
+    /// The expression representing this pattern
+    expr: Expr,
+    /// Nested patterns within this one (recursive)
+    children: Vec<NestedPatternInfo>,
+}
+
+/// Recursively extract all variables from an expression tree
+fn extract_variables_recursive(
+    expr: &Expr,
+    field_prefix: &str,
+    theory: &TheoryDef,
+    bindings: &mut HashMap<String, TokenStream>,
+    equality_checks: &mut Vec<(String, TokenStream)>,
+) -> Option<NestedPatternInfo> {
+    match expr {
+        Expr::Var(var) => {
+            // Base case: this is a variable, extract it
+            let var_name = var.to_string();
+            
+            // Special handling for variables inside binder bodies
+            let binding = if field_prefix == "body" {
+                // Body of a binder - 'body' variable comes from unbind(), already unwrapped
+                quote! { (*body).clone() }
+            } else {
+                // Regular field - need double deref from Box
+                let field_ident = syn::Ident::new(field_prefix, proc_macro2::Span::call_site());
+                quote! { (**#field_ident).clone() }
+            };
+            
+            if bindings.contains_key(&var_name) {
+                equality_checks.push((var_name, binding));
+            } else {
+                bindings.insert(var_name, binding);
+            }
+            None // Variables don't have nested patterns
+        }
+        
+        Expr::Apply { constructor, args } => {
+            // Recursive case: this is a constructor with args
+            let grammar = theory.terms.iter()
+                .find(|r| r.label == *constructor)
+                .expect("Constructor not found");
+            
+            // Get field count (how many AST fields this constructor has)
+            let field_count = grammar.items.iter()
+                .filter(|item| matches!(item, crate::ast::GrammarItem::NonTerminal(_)))
+                .count();
+            
+            let mut children = Vec::new();
+            
+            // Handle binder constructors specially
+            if !grammar.bindings.is_empty() {
+                let (_binder_idx, body_indices) = &grammar.bindings[0];
+                let body_idx = body_indices[0];
+                
+                let mut pattern_arg_idx = 0;
+                let mut ast_field_idx = 0;
+                
+                for (i, item) in grammar.items.iter().enumerate() {
+                    if pattern_arg_idx >= args.len() {
+                        break;
+                    }
+                    
+                    match item {
+                        crate::ast::GrammarItem::Binder { .. } => {
+                            if let Expr::Var(var) = &args[pattern_arg_idx] {
+                                let binder_key = format!("{}_binder", var);
+                                let binding = quote! { binder.clone() };
+                                
+                                if bindings.contains_key(&binder_key) {
+                                    equality_checks.push((binder_key, binding));
+                                } else {
+                                    bindings.insert(binder_key, binding);
+                                }
+                            }
+                            pattern_arg_idx += 1;
+                        }
+                        crate::ast::GrammarItem::NonTerminal(_) => {
+                            if i == body_idx {
+                                // Body - part of Scope, use "body" as field name for variables inside
+                                if let Some(mut child_info) = extract_variables_recursive(
+                                    &args[pattern_arg_idx],
+                                    "body",
+                                    theory,
+                                    bindings,
+                                    equality_checks
+                                ) {
+                                    child_info.field_idx = ast_field_idx; // Body is still an AST field (the Scope)
+                                    children.push(child_info);
+                                }
+                            } else {
+                                // Regular field (not binder, not body)
+                                let child_prefix = format!("{}_inner_{}", field_prefix, ast_field_idx);
+                                if let Some(mut child_info) = extract_variables_recursive(
+                                    &args[pattern_arg_idx],
+                                    &child_prefix,
+                                    theory,
+                                    bindings,
+                                    equality_checks
+                                ) {
+                                    child_info.field_idx = ast_field_idx;
+                                    children.push(child_info);
+                                }
+                            }
+                            // Increment ast_field_idx for ALL NonTerminals (both body and regular fields)
+                            // because they all appear in the AST (body is wrapped in Scope)
+                            ast_field_idx += 1;
+                            pattern_arg_idx += 1;
+                        }
+                        _ => {}
+                    }
+                }
+            } else {
+                // Regular constructor - recurse into all args
+                for (i, arg) in args.iter().enumerate() {
+                    if i >= field_count {
+                        break;
+                    }
+                    
+                    // Use consistent naming: field_prefix_inner_{i}
+                    let child_prefix = format!("{}_inner_{}", field_prefix, i);
+                    if let Some(mut child_info) = extract_variables_recursive(
+                        arg,
+                        &child_prefix,
+                        theory,
+                        bindings,
+                        equality_checks
+                    ) {
+                        child_info.field_idx = i;
+                        children.push(child_info);
+                    }
+                }
+            }
+            
+            // Return info about this nested pattern
+            Some(NestedPatternInfo {
+                field_idx: 0, // Will be set by caller
+                field_term: syn::Ident::new(&format!("{}_inner", field_prefix), proc_macro2::Span::call_site()),
+                expr: expr.clone(),
+                children,
+            })
+        }
+        
+        Expr::Subst { .. } => {
+            panic!("Substitution should not appear in LHS");
+        }
+    }
+}
+
 /// Generate pattern for regular constructor with complete body
 fn generate_regular_pattern_with_body(
     category: &Ident,
@@ -264,7 +420,7 @@ fn generate_regular_pattern_with_body(
         .map(|i| syn::Ident::new(&format!("field_{}", i), proc_macro2::Span::call_site()))
         .collect();
     
-    // First bind all simple variables, checking for duplicates
+    // First bind all top-level simple variables
     for (i, arg) in args.iter().enumerate() {
         if i >= field_names.len() {
             break;
@@ -273,22 +429,19 @@ fn generate_regular_pattern_with_body(
         let field = &field_names[i];
         if let Expr::Var(var) = arg {
             let var_name = var.to_string();
-            let binding = quote! { (*#field).clone() };
+            // Top-level fields are &Box<T>, so (**field) gives T
+            let binding = quote! { (**#field).clone() };
             
-            // Check if this variable was already bound
             if bindings.contains_key(&var_name) {
-                // Duplicate variable - add equality check instead of rebinding
                 equality_checks.push((var_name, binding));
             } else {
-                // First occurrence - bind it
                 bindings.insert(var_name, binding);
             }
         }
     }
     
-    // Now generate nested patterns for complex args
-    // Don't recursively generate - we'll manually bind variables with correct unique names
-    let mut nested_pattern_info: Vec<(usize, Ident)> = Vec::new();
+    // Recursively extract all variables from nested patterns (ANY DEPTH)
+    let mut nested_patterns: Vec<NestedPatternInfo> = Vec::new();
     
     for (i, arg) in args.iter().enumerate() {
         if i >= field_names.len() {
@@ -296,118 +449,21 @@ fn generate_regular_pattern_with_body(
         }
         
         if let Expr::Apply { .. } = arg {
-            let field_term = syn::Ident::new(&format!("field_{}_inner", i), proc_macro2::Span::call_site());
-            nested_pattern_info.push((i, field_term));
-        }
-    }
-    
-    // IMPORTANT: Add bindings for nested patterns BEFORE generating freshness checks/RHS
-    for (field_idx, field_term) in &nested_pattern_info {
-        let field_arg = &args[*field_idx];
-        if let Expr::Apply { constructor: inner_constr, args: inner_args, .. } = field_arg {
-            let inner_grammar = theory.terms.iter()
-                .find(|r| r.label == *inner_constr)
-                .expect("Constructor not found");
-            
-            if !inner_grammar.bindings.is_empty() {
-                // Binder constructor - add bindings for ALL fields (regular, binder, and body), checking for duplicates
-                let (binder_idx, body_indices) = &inner_grammar.bindings[0];
-                let body_idx = body_indices[0];
-                
-                let mut pattern_arg_idx = 0;
-                let mut ast_field_idx = 0;
-                
-                for (i, item) in inner_grammar.items.iter().enumerate() {
-                    if pattern_arg_idx >= inner_args.len() {
-                        break;
-                    }
-                    
-                    match item {
-                        crate::ast::GrammarItem::Binder { .. } => {
-                            if let Expr::Var(var) = &inner_args[pattern_arg_idx] {
-                                let binder_key = format!("{}_binder", var);
-                                let binding = quote! { binder.clone() };
-                                
-                                // Check for duplicate
-                                if bindings.contains_key(&binder_key) {
-                                    equality_checks.push((binder_key, binding));
-                                } else {
-                                    bindings.insert(binder_key, binding);
-                                }
-                            }
-                            pattern_arg_idx += 1;
-                        }
-                        crate::ast::GrammarItem::NonTerminal(_) => {
-                            if i == body_idx {
-                                // This is the body
-                                if let Expr::Var(var) = &inner_args[pattern_arg_idx] {
-                                    let var_name = var.to_string();
-                                    let binding = quote! { (*body).clone() };
-                                    
-                                    // Check for duplicate
-                                    if bindings.contains_key(&var_name) {
-                                        equality_checks.push((var_name, binding));
-                                    } else {
-                                        bindings.insert(var_name, binding);
-                                    }
-                                }
-                            } else {
-                                // Regular field (not binder, not body) - use unique nested field name
-                                let field_name = syn::Ident::new(&format!("{}_{}", field_term, ast_field_idx), proc_macro2::Span::call_site());
-                                if let Expr::Var(var) = &inner_args[pattern_arg_idx] {
-                                    let var_name = var.to_string();
-                                    // field_name is &Box<T> from the pattern match, so **field_name gets T
-                                    let binding = quote! { (**#field_name).clone() };
-                                    
-                                    // Check for duplicate
-                                    if bindings.contains_key(&var_name) {
-                                        equality_checks.push((var_name, binding));
-                                    } else {
-                                        bindings.insert(var_name, binding);
-                                    }
-                                }
-                                ast_field_idx += 1;
-                            }
-                            pattern_arg_idx += 1;
-                        }
-                        _ => {}
-                    }
-                }
-            } else {
-                // Regular constructor - add bindings with unique field names, checking for duplicates
-                let inner_field_count = inner_grammar.items.iter()
-                    .filter(|item| matches!(item, crate::ast::GrammarItem::NonTerminal(_)))
-                    .count();
-                
-                let inner_fields: Vec<Ident> = (0..inner_field_count)
-                    .map(|i| syn::Ident::new(&format!("{}_{}", field_term, i), proc_macro2::Span::call_site()))
-                    .collect();
-                
-                for (i, arg) in inner_args.iter().enumerate() {
-                    if i >= inner_fields.len() {
-                        break;
-                    }
-                    
-                    let field = &inner_fields[i];
-                    if let Expr::Var(var) = arg {
-                        let var_name = var.to_string();
-                        let binding = quote! { (**#field).clone() };
-                        
-                        // Check for duplicate
-                        if bindings.contains_key(&var_name) {
-                            equality_checks.push((var_name, binding));
-                        } else {
-                            bindings.insert(var_name, binding);
-                        }
-                    }
-                }
+            let field_prefix = format!("field_{}", i);
+            if let Some(mut pattern_info) = extract_variables_recursive(
+                arg,
+                &field_prefix,
+                theory,
+                bindings,
+                equality_checks
+            ) {
+                pattern_info.field_idx = i;
+                nested_patterns.push(pattern_info);
             }
         }
     }
     
     // Generate final body (equality + freshness + RHS)
-    // NOW all bindings from nested patterns are available
-    // Only generate if this is not a dummy rule
     let is_dummy = matches!(rule.right, Expr::Var(ref v) if v == "dummy");
     
     if is_dummy {
@@ -426,77 +482,121 @@ fn generate_regular_pattern_with_body(
             return Some(#rhs);
         };
         
-        // Wrap with nested patterns and manually create bindings
-        for (field_idx, field_term) in nested_pattern_info.iter().rev() {
-            let field_name = &field_names[*field_idx];
-            
-            // Get the grammar rule for this nested pattern to know if it's a binder
-            let field_arg = &args[*field_idx];
-            if let Expr::Apply { constructor: inner_constr, .. } = field_arg {
-                let inner_grammar = theory.terms.iter()
-                    .find(|r| r.label == *inner_constr)
-                    .expect("Constructor not found");
-                
-                if !inner_grammar.bindings.is_empty() {
-                    // Binder constructor - generate if-let with unbinding
-                    let inner_category = extract_category(field_arg);
-                    
-                    // Generate AST field names for this binder constructor with unique names
-                    let (_binder_idx, body_indices) = &inner_grammar.bindings[0];
-                    let body_idx = body_indices[0];
-                    
-                    let mut inner_ast_fields = Vec::new();
-                    let mut ast_field_idx = 0;
-                    for (i, item) in inner_grammar.items.iter().enumerate() {
-                        if i == *_binder_idx {
-                            continue;
-                        } else if i == body_idx {
-                            inner_ast_fields.push(syn::Ident::new("scope_field", proc_macro2::Span::call_site()));
-                        } else if matches!(item, crate::ast::GrammarItem::NonTerminal(_)) {
-                            // Use unique nested field names matching those in binding phase
-                            inner_ast_fields.push(syn::Ident::new(&format!("{}_{}", field_term, ast_field_idx), proc_macro2::Span::call_site()));
-                            ast_field_idx += 1;
-                        }
-                    }
-                    
-                    // Bindings were already added earlier - don't duplicate them
-                    
-                    body = quote! {
-                        let #field_term = &(**#field_name);
-                        if let #inner_category::#inner_constr(#(#inner_ast_fields),*) = #field_term {
-                            let (binder, body) = scope_field.clone().unbind();
-                            #body
-                        }
-                    };
-                } else {
-                    // Regular constructor
-                    let inner_category = extract_category(field_arg);
-                    let inner_field_count = inner_grammar.items.iter()
-                        .filter(|item| matches!(item, crate::ast::GrammarItem::NonTerminal(_)))
-                        .count();
-                    
-                    // Use unique field names for nested patterns to avoid shadowing
-                    let inner_fields: Vec<Ident> = (0..inner_field_count)
-                        .map(|i| syn::Ident::new(&format!("{}_{}", field_term, i), proc_macro2::Span::call_site()))
-                        .collect();
-                    
-                    // Bindings were already added earlier - don't duplicate them
-                    
-                    body = quote! {
-                        let #field_term = &(**#field_name);
-                        if let #inner_category::#inner_constr(#(#inner_fields),*) = #field_term {
-                            #body
-                        }
-                    };
-                }
-            }
-        }
+        // Wrap with nested patterns recursively (handles arbitrary depth)
+        body = wrap_nested_patterns_recursive(&nested_patterns, &field_names, body, theory);
         
         quote! {
             if let #category::#constructor(#(#field_names),*) = #term {
                 #body
             }
         }
+    }
+}
+
+/// Recursively wrap body with nested pattern matches to arbitrary depth
+fn wrap_nested_patterns_recursive(
+    patterns: &[NestedPatternInfo],
+    parent_field_names: &[Ident],
+    mut body: TokenStream,
+    theory: &TheoryDef,
+) -> TokenStream {
+    // Process patterns in reverse order (inside-out)
+    for pattern in patterns.iter().rev() {
+        body = wrap_single_pattern(&pattern, parent_field_names, body, theory);
+    }
+    body
+}
+
+/// Wrap body with a single pattern match, recursively handling its children
+fn wrap_single_pattern(
+    pattern: &NestedPatternInfo,
+    parent_field_names: &[Ident],
+    mut body: TokenStream,
+    theory: &TheoryDef,
+) -> TokenStream {
+    // First, recursively wrap any children of this pattern
+    if !pattern.children.is_empty() {
+        // We need to compute the field names that will be bound by this pattern
+        let field_term = &pattern.field_term;
+        let grammar = match &pattern.expr {
+            Expr::Apply { constructor, .. } => {
+                theory.terms.iter()
+                    .find(|r| r.label == *constructor)
+                    .expect("Constructor not found")
+            }
+            _ => unreachable!("Pattern should be Apply"),
+        };
+        
+        let field_count = grammar.items.iter()
+            .filter(|item| matches!(item, crate::ast::GrammarItem::NonTerminal(_)))
+            .count();
+        
+        // Use consistent naming: {field_term}_{i} for child fields
+        let child_field_names: Vec<Ident> = (0..field_count)
+            .map(|i| syn::Ident::new(&format!("{}_{}", field_term, i), proc_macro2::Span::call_site()))
+            .collect();
+        
+        body = wrap_nested_patterns_recursive(&pattern.children, &child_field_names, body, theory);
+    }
+    
+    // Now wrap this pattern itself
+    let field_name = &parent_field_names[pattern.field_idx];
+    let field_term = &pattern.field_term;
+    
+    match &pattern.expr {
+        Expr::Apply { constructor, .. } => {
+            let grammar = theory.terms.iter()
+                .find(|r| r.label == *constructor)
+                .expect("Constructor not found");
+            
+            let category = extract_category(&pattern.expr);
+            
+            if !grammar.bindings.is_empty() {
+                // Binder constructor
+                let (_binder_idx, body_indices) = &grammar.bindings[0];
+                let body_idx = body_indices[0];
+                
+                let mut inner_ast_fields = Vec::new();
+                let mut ast_field_idx = 0;
+                for (i, item) in grammar.items.iter().enumerate() {
+                    if i == *_binder_idx {
+                        continue;
+                    } else if i == body_idx {
+                        inner_ast_fields.push(syn::Ident::new("scope_field", proc_macro2::Span::call_site()));
+                    } else if matches!(item, crate::ast::GrammarItem::NonTerminal(_)) {
+                        // Use consistent naming: {field_term}_{ast_field_idx}
+                        inner_ast_fields.push(syn::Ident::new(&format!("{}_{}", field_term, ast_field_idx), proc_macro2::Span::call_site()));
+                        ast_field_idx += 1;
+                    }
+                }
+                
+                quote! {
+                    let #field_term = &(**#field_name);
+                    if let #category::#constructor(#(#inner_ast_fields),*) = #field_term {
+                        let (binder, body) = scope_field.clone().unbind();
+                        #body
+                    }
+                }
+            } else {
+                // Regular constructor
+                let field_count = grammar.items.iter()
+                    .filter(|item| matches!(item, crate::ast::GrammarItem::NonTerminal(_)))
+                    .count();
+                
+                // Use consistent naming: {field_term}_{i}
+                let inner_fields: Vec<Ident> = (0..field_count)
+                    .map(|i| syn::Ident::new(&format!("{}_{}", field_term, i), proc_macro2::Span::call_site()))
+                    .collect();
+                
+                quote! {
+                    let #field_term = &(**#field_name);
+                    if let #category::#constructor(#(#inner_fields),*) = #field_term {
+                        #body
+                    }
+                }
+            }
+        }
+        _ => unreachable!("Pattern should be Apply"),
     }
 }
 
@@ -650,3 +750,4 @@ fn generate_freshness_functions(_theory: &TheoryDef) -> TokenStream {
         }
     }
 }
+
