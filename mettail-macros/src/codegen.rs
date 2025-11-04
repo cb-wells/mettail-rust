@@ -59,7 +59,7 @@ fn generate_ast_enums(theory: &TheoryDef) -> TokenStream {
         }).collect();
         
         quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, mettail_runtime::BoundTerm)]
+            #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, mettail_runtime::BoundTerm)]
             pub enum #cat_name {
                 #(#variants),*
             }
@@ -94,15 +94,15 @@ fn generate_variant(rule: &GrammarRule) -> TokenStream {
         // Unit variant
         quote! { #label }
     } else if fields.len() == 1 && fields[0].to_string() == "Var" {
-        // Special case: Var field -> generate Var<String> directly (not boxed)
-        quote! { #label(mettail_runtime::Var<String>) }
+        // Special case: Var field -> generate OrdVar directly (not boxed)
+        quote! { #label(mettail_runtime::OrdVar) }
     } else {
         // Tuple variant - wrap in Box to avoid recursive type
         // Check each field to see if it's Var
         let boxed_fields: Vec<TokenStream> = fields.iter().map(|f| {
             if f.to_string() == "Var" {
-                // Var is not boxed
-                quote! { mettail_runtime::Var<String> }
+                // Var is not boxed, use OrdVar wrapper
+                quote! { mettail_runtime::OrdVar }
             } else {
                 quote! { Box<#f> }
             }

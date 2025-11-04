@@ -242,7 +242,7 @@ fn generate_rule_alternative(rule: &GrammarRule) -> String {
             GrammarItem::NonTerminal(nt) if nt == "Var" => {
                 // Variable: need to parse identifier
                 // Use get_or_create_var to ensure same name = same ID within a parse
-                alt.push_str(&format!("<v:Ident> => {}::{}(Var::Free(mettail_runtime::get_or_create_var(v)))", 
+                alt.push_str(&format!("<v:Ident> => {}::{}(mettail_runtime::OrdVar(Var::Free(mettail_runtime::get_or_create_var(v))))", 
                     rule.category, label));
             }
             GrammarItem::NonTerminal(nt) => {
@@ -287,7 +287,8 @@ fn generate_sequence_alternative(rule: &GrammarRule) -> String {
                 pattern.push_str(&format!(" <{}:{}>", var_name, nt));
                 
                 if nt.to_string() == "Var" {
-                    args.push(var_name);
+                    // Wrap Var in OrdVar
+                    args.push(format!("mettail_runtime::OrdVar({})", var_name));
                 } else {
                     args.push(format!("Box::new({})", var_name));
                 }

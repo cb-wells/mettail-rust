@@ -267,6 +267,7 @@ cargo run --bin rhocalc
 - `docs/design/REMAINING-ISSUES.md` - Known problems
 - `docs/design/VARIABLE-TYPING-ANALYSIS.md` - Design decisions
 - `docs/design/THEORY-COMPOSITION-DESIGN.md` - Phase 3 design
+- `docs/design/SORTING-DESIGN.md` - Term ordering and generation
 
 ### Historical
 - `docs/phase-1/FOUNDATION-REVIEW.md` - Mid-Phase 1 review

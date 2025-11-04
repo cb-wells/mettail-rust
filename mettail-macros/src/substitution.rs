@@ -184,7 +184,7 @@ fn generate_substitution_arm(category: &Ident, rule: &GrammarRule, replacement_c
         if category == replacement_cat {
             // Special case: EVar(v) - check if v matches the variable to substitute
             return quote! {
-                #category::#label(mettail_runtime::Var::Free(v)) if v == var => {
+                #category::#label(mettail_runtime::OrdVar(mettail_runtime::Var::Free(v))) if v == var => {
                     // This free variable matches - replace it
                     replacement.clone()
                 }

@@ -11,13 +11,17 @@ pub use moniker::{
     Var, FreeVar, Binder, BoundTerm, BoundPattern, BoundVar,
 };
 
-// Wrapper for Scope with Hash implementation
+// Wrapper for Scope with Hash and Ord implementations
 pub use scope_wrapper::Scope;
+
+// Wrapper for Var with Ord implementation
+pub use ord_var::OrdVar;
 
 // Re-export LALRPOP utilities for generated parsers
 pub use lalrpop_util::ParseError as LalrpopParseError;
 
 use std::fmt;
+use std::cmp::Ordering;
 
 // Variable cache for consistent variable identity within a parsing session
 lazy_static::lazy_static! {
@@ -49,6 +53,44 @@ mod scope_wrapper {
             // that equal scopes have equal patterns and bodies (alpha-equivalently)
             self.inner.unsafe_pattern.hash(state);
             self.inner.unsafe_body.hash(state);
+        }
+    }
+
+    // Ord implementation for Scope - orders scopes canonically by their structure
+    impl<P, T> PartialOrd for Scope<P, T>
+    where
+        P: Clone + PartialEq + Eq + BoundPattern<String> + fmt::Debug,
+        T: Clone + PartialEq + Eq + BoundTerm<String> + fmt::Debug,
+    {
+        fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+            Some(self.cmp(other))
+        }
+    }
+
+    impl<P, T> Ord for Scope<P, T>
+    where
+        P: Clone + PartialEq + Eq + BoundPattern<String> + fmt::Debug,
+        T: Clone + PartialEq + Eq + BoundTerm<String> + fmt::Debug,
+    {
+        fn cmp(&self, other: &Self) -> Ordering {
+            // Clone scopes to unbind without consuming
+            let (p1, t1) = self.clone().unbind();
+            let (p2, t2) = other.clone().unbind();
+            
+            // Compare by pretty-printed representation
+            // (since Binder doesn't implement Ord directly)
+            let p1_str = format!("{:?}", p1);
+            let p2_str = format!("{:?}", p2);
+            
+            match p1_str.cmp(&p2_str) {
+                Ordering::Equal => {
+                    // Compare bodies by their Debug representation
+                    let t1_str = format!("{:?}", t1);
+                    let t2_str = format!("{:?}", t2);
+                    t1_str.cmp(&t2_str)
+                }
+                ord => ord,
+            }
         }
     }
 
@@ -188,4 +230,78 @@ pub fn clear_var_cache() {
 
 pub fn var_cache_size() -> usize {
     VAR_CACHE.lock().unwrap().len()
+}
+
+/// Wrapper module for Var with Ord implementation
+mod ord_var {
+    use super::*;
+    
+    /// Wrapper around moniker::Var that adds Ord implementation.
+    /// 
+    /// This is needed because the official moniker crate doesn't implement Ord for Var,
+    /// but we need it for sorting terms and using terms as keys in BTree collections.
+    /// 
+    /// The Ord implementation compares variables by their pretty-printed names,
+    /// providing a canonical ordering that is NOT alpha-equivalence respecting.
+    /// This is intentional - we want a total order for enumeration, not equivalence classes.
+    #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+    #[repr(transparent)]
+    pub struct OrdVar(pub Var<String>);
+    
+    impl PartialOrd for OrdVar {
+        fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+            Some(self.cmp(other))
+        }
+    }
+    
+    impl Ord for OrdVar {
+        fn cmp(&self, other: &Self) -> Ordering {
+            // Compare by Debug representation (gives us the variable name)
+            format!("{:?}", self.0).cmp(&format!("{:?}", other.0))
+        }
+    }
+    
+    // Forward BoundTerm implementation to inner Var
+    impl BoundTerm<String> for OrdVar {
+        fn term_eq(&self, other: &Self) -> bool {
+            self.0.term_eq(&other.0)
+        }
+        
+        fn close_term(&mut self, state: moniker::ScopeState, on_free: &impl moniker::OnFreeFn<String>) {
+            self.0.close_term(state, on_free)
+        }
+        
+        fn open_term(&mut self, state: moniker::ScopeState, on_bound: &impl moniker::OnBoundFn<String>) {
+            self.0.open_term(state, on_bound)
+        }
+        
+        fn visit_vars(&self, on_var: &mut impl FnMut(&Var<String>)) {
+            self.0.visit_vars(on_var)
+        }
+        
+        fn visit_mut_vars(&mut self, on_var: &mut impl FnMut(&mut Var<String>)) {
+            self.0.visit_mut_vars(on_var)
+        }
+    }
+    
+    // Conversion from Var to OrdVar
+    impl From<Var<String>> for OrdVar {
+        fn from(var: Var<String>) -> Self {
+            OrdVar(var)
+        }
+    }
+    
+    // Conversion from OrdVar to Var
+    impl From<OrdVar> for Var<String> {
+        fn from(ord_var: OrdVar) -> Self {
+            ord_var.0
+        }
+    }
+    
+    // Allow Display formatting
+    impl fmt::Display for OrdVar {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "{:?}", self.0)
+        }
+    }
 }

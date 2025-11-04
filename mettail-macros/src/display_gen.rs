@@ -108,7 +108,7 @@ fn generate_display_arm(rule: &GrammarRule) -> TokenStream {
                         if let Some((_, field_name)) = field_iter.next() {
                             format_parts.push("{}".to_string());
                             format_args_tokens.push(quote! {
-                                match #field_name {
+                                match &(#field_name).0 {
                                     mettail_runtime::Var::Free(fv) => fv.pretty_name.as_ref().map(|s| s.as_str()).unwrap_or("_"),
                                     mettail_runtime::Var::Bound(_) => "<bound>",
                                 }

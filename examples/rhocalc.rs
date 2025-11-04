@@ -14,10 +14,10 @@ theory! {
     
     terms {
         PZero . Proc ::= "0" ;
-        PInput . Proc ::= "for" "(" Name "<-" <Name> ")" "{" Proc "}" ;
-        POutput . Proc ::= Name "!" "(" Proc ")" ;
-        PPar . Proc ::= Proc "|" Proc ;
         PDrop . Proc ::= "*" Name ;
+        POutput . Proc ::= Name "!" "(" Proc ")" ;
+        PInput . Proc ::= "for" "(" Name "->" <Name> ")" "{" Proc "}" ;
+        PPar . Proc ::= Proc "|" Proc ;
         
         NQuote . Name ::= "@" "(" Proc ")" ;
         NVar . Name ::= Var ;
@@ -41,93 +41,88 @@ theory! {
 #[cfg(test)]
 mod tests {}
 
-fn paths(redex: &Proc) -> Vec<Vec<Proc>> {
-    let result = ascent_run! {
-        relation proc(Proc);
-        relation eq(Proc, Proc);
-        relation rw(Proc, Proc);
-        relation ev(Proc, Proc);
-        relation path(Proc, Vec<Proc>);
+ascent_source! {
+    theory_source:
 
-        proc(p) <-- 
-            for p in [redex];
-        proc(p1) <-- 
-            proc(p0), rw(p0,p1);
-        proc(p1) <--
-            proc(p0), eq(p0,p1);
-        proc(*p.clone()), proc(*q.clone()) <-- 
-            proc(p0), if let Proc::PPar(p,q) = p0;
+    relation proc(Proc);
+    relation eq(Proc, Proc);
+    relation rw(Proc, Proc);
+    relation path(Proc, Vec<Proc>);
+    relation path_terminal(Proc, Vec<Proc>);
 
-        // Commutativity
-        eq(p0,p1) <--
-            proc(p0),
-            if let Proc::PPar(p,q) = p0,
-            let p1 = Proc::PPar(q.clone(),p.clone());
-        // Associativity
-        eq(p0,p1) <--
-            proc(p0),
-            if let Proc::PPar(t,r) = p0,
-            if let Proc::PPar(p,q) = &**t,
-            let p1 = Proc::PPar(p.clone(),Box::new(Proc::PPar(q.clone(),r.clone())));
-        
-        eq(p,p) <-- proc(p);
-        eq(q,p) <-- eq(p,q);
-        eq(p,r) <-- eq(p,q), eq(q,r);
+    proc(p1) <-- 
+        proc(p0), rw(p0,p1);
+    proc(p1) <--
+        proc(p0), eq(p0,p1);
+    proc(*p.clone()), proc(*q.clone()) <-- 
+        proc(p0), if let Proc::PPar(p,q) = p0;
 
-        rw(s,*p.clone()) <--
-            proc(s),
-            if let Proc::PDrop(n) = s,
-            if let Name::NQuote(p) = &**n;
-
-        rw(s1, t.clone()) <-- 
-            proc(s0),
-            if let Some(t) = try_rewrite_rule_0(&s0),
-            eq(s0,s1);
-        rw(ss,t) <-- 
-            proc(s),
-            eq(s,ss),
-            if let Proc::PPar(s0,p) = ss,
-            rw(**s0,t0),
-            let t = Proc::PPar(Box::new(t0.clone()),p.clone());
-        
-        // ev(s,t) <-- rw(s,t);
-        // ev(s,u) <-- rw(s,t),ev(t,u);
-
-        path(p1, vec![p1.clone(),p2.clone()]) <--
-            rw(p1,p2);
-        path(p1, ps) <--
-            rw(p1,p2),
-            path(p2,qs),
-            let ps = [vec![p1.clone(), p2.clone()], qs.clone()].concat();
-    };
+    // Commutativity
+    eq(p0,p1) <--
+        proc(p0),
+        if let Proc::PPar(p,q) = p0,
+        let p1 = Proc::PPar(q.clone(),p.clone());
+    // Associativity
+    eq(p0,p1) <--
+        proc(p0),
+        if let Proc::PPar(t,r) = p0,
+        if let Proc::PPar(p,q) = &**t,
+        let p1 = Proc::PPar(p.clone(),Box::new(Proc::PPar(q.clone(),r.clone())));
     
-    result.path.into_iter()
-        .filter(|(s,_)| s == redex)
-        .map(|(_,q)| q)
-        .collect()
+    eq(p,p) <-- proc(p);
+    eq(q,p) <-- eq(p,q);
+    eq(p,r) <-- eq(p,q), eq(q,r);
+
+    rw(s,*p.clone()) <--
+        proc(s),
+        if let Proc::PDrop(n) = s,
+        if let Name::NQuote(p) = &**n;
+
+    rw(s, t.clone()) <-- 
+        proc(s),
+        if let Some(t) = try_rewrite_rule_0(&s);
+    rw(s,t) <-- 
+        proc(s),
+        if let Proc::PPar(s0,p) = s,
+        rw(**s0,t0),
+        let t = Proc::PPar(Box::new(t0.clone()),p.clone());
+    rw(s1,t) <-- rw(s0,t), eq(s0,s1);
+    
+    path(p1, vec![p2.clone()]) <--
+        rw(p1,p2);
+    path(p1, ps) <--
+        rw(p1,p2),
+        path(p2,qs),
+        let ps = [vec![p2.clone()], qs.clone()].concat();
+
+    path_terminal(p,ps) <--
+        path(p,ps),
+        let z = ps.last().unwrap(),
+        !rw(z,_);
 }
 
 fn main() {
-    // Test with matching channels - should fire the rewrite
-    let rdx_str = "for(a<-x){*x}|a!(b!(0))|for(b<-y){*y}|b!(0)";
-    
-    // Clear variable cache before parsing to ensure fresh IDs for this term
+    let rdx_str = "for(a->x){*x}|a!(b!(*n))|for(b->y){*y}|b!(0)";
     mettail_runtime::clear_var_cache();
-    
     let parser = rhocalc::ProcParser::new();
     let redex = parser.parse(rdx_str).unwrap();
 
-    // println!("Redex: {:?}", redex);
-    
-    let paths = paths(&redex);
-    
-    println!("Paths found:");
-    for ps in &paths {
-        for p in ps {
-            print!("{}", p);
-            print!(" ~> ");
-        }
-        println!(".");
+    let prog = ascent_run! {
+        // ascent modularity
+        include_source!(theory_source);
+        
+        proc(p) <-- for p in [redex.clone()];
+        relation full_path(Proc, Vec<Proc>);
+        full_path(s,ps) <-- path_terminal(s,ps), eq(s,redex.clone());
+    };
+
+    let mut paths = prog.full_path.clone();
+    paths.sort_by(|a,b| a.0.cmp(&b.0));
+
+    println!("Paths found: {}", paths.len());
+    for (s, ps) in paths {
+        println!("{} ~> {}", s, ps.iter().map(|p| p.to_string()).collect::<Vec<String>>().join(" ~> "));
+        println!();
     }
 }
 
