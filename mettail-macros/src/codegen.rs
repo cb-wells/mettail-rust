@@ -109,10 +109,6 @@ fn generate_variant(rule: &GrammarRule) -> TokenStream {
     }
 }
 
-/// Generate a variant for a constructor with binders
-/// Example: PInput . Proc ::= "for" "(" Name <Name> ")" "{" Proc "}" ;
-/// Generates: PInput(Box<Name>, mettail_runtime::Scope<mettail_runtime::Binder<String>, Box<Proc>>)
-/// Fields are generated in the ORDER they appear in the grammar
 fn generate_binder_variant(rule: &GrammarRule) -> TokenStream {
     let label = &rule.label;
     
@@ -132,11 +128,6 @@ fn generate_binder_variant(rule: &GrammarRule) -> TokenStream {
         _ => panic!("Body index doesn't point to a NonTerminal"),
     };
     
-    // Generate fields in GRAMMAR ORDER
-    // For each item:
-    //   - If it's the binder: skip (it's part of the Scope)
-    //   - If it's the body: generate Scope<Binder<String>, Box<Body>>
-    //   - Otherwise: generate Box<Type> or Var<String>
     let mut fields = Vec::new();
     
     for (i, item) in rule.items.iter().enumerate() {

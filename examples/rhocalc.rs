@@ -134,10 +134,10 @@ fn main() {
     let mut paths = prog.full_path.clone();
     paths.sort_by(|a,b| a.0.cmp(&b.0));
 
-    // println!("Paths found: {}", paths.len());
-    // for (s, ps) in paths.iter().take(3) {
-    //     println!("{} ~> {}", s, ps.iter().map(|p| p.to_string()).collect::<Vec<String>>().join(" ~> "));
-    //     println!();
-    // }
+    println!("Paths found: {}", paths.len());
+    for (s, ps) in paths.iter().take(3) {
+        println!("{} ~> {}", s, ps.iter().map(|p| p.to_string()).collect::<Vec<String>>().join(" ~> "));
+        println!();
+    }
 }
 

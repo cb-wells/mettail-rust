@@ -54,8 +54,6 @@ fn generate_rule_matcher(
         }
     };
     
-    eprintln!("\n=== Generated rewrite function ===\n{}\n================================\n", result);
-    
     result
 }
 
