@@ -39,6 +39,6 @@ ProcAtom: Proc = {
 
 pub Name: Name = {
     "@" "(" <f0:Proc> ")" => Name::NQuote(Box::new(f0)),
-    <v:Ident> => Name::NVar(mettail_runtime::OrdVar(Var::Free(mettail_runtime::get_or_create_var(v))))
+    <v:Ident> => Name::NVar(Var::Free(mettail_runtime::get_or_create_var(v)))
 };
 

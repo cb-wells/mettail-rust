@@ -9,13 +9,6 @@ use proc_macro2::TokenStream;
 use quote::quote;
 use syn::Ident;
 
-/// Generate substitution methods for a theory's AST types
-/// 
-/// For each exported category, generates:
-/// - `substitute(var, replacement)` for same-category substitution
-/// - `substitute_X(var, replacement)` for each category X that appears in this category
-/// 
-/// Uses moniker's BoundTerm operations for automatic capture avoidance.
 pub fn generate_substitution(theory: &TheoryDef) -> TokenStream {
     let impls: Vec<TokenStream> = theory.exports.iter().map(|export| {
         let category = &export.name;
@@ -38,10 +31,6 @@ pub fn generate_substitution(theory: &TheoryDef) -> TokenStream {
     }
 }
 
-/// Find all categories that might be substituted in a set of rules
-/// This includes:
-/// - Binder categories (what Scopes bind)
-/// - Field categories (what appears in constructors)
 fn find_substitutable_categories(rules: &[&GrammarRule]) -> std::collections::HashSet<String> {
     let mut cats = std::collections::HashSet::new();
     
@@ -54,11 +43,9 @@ fn find_substitutable_categories(rules: &[&GrammarRule]) -> std::collections::Ha
             }
         }
         
-        // Add field categories
         for item in &rule.items {
             if let GrammarItem::NonTerminal(cat) = item {
                 let cat_str = cat.to_string();
-                // Don't include Var - it's handled specially
                 if cat_str != "Var" {
                     cats.insert(cat_str);
                 }
@@ -69,7 +56,6 @@ fn find_substitutable_categories(rules: &[&GrammarRule]) -> std::collections::Ha
     cats
 }
 
-/// Generate substitution implementation for a specific category
 fn generate_category_substitution(
     category: &Ident,
     rules: &[&GrammarRule],
@@ -89,8 +75,6 @@ fn generate_category_substitution(
         })
         .collect();
     
-    // Also generate a self-referential method (substitute_X where X == category)
-    // This is just an alias for substitute, needed for cross-category recursion
     let self_method = generate_self_substitute_method(category);
     
     quote! {
@@ -102,7 +86,6 @@ fn generate_category_substitution(
     }
 }
 
-/// Generate the main substitute method (same-category substitution)
 fn generate_substitute_method(
     category: &Ident,
     rules: &[&GrammarRule],
@@ -113,9 +96,6 @@ fn generate_substitute_method(
     }).collect();
     
     quote! {
-        /// Substitute `replacement` for free occurrences of `var` in this term
-        /// 
-        /// This performs capture-avoiding substitution using moniker's BoundTerm trait.
         pub fn substitute(
             &self,
             var: &mettail_runtime::FreeVar<String>,

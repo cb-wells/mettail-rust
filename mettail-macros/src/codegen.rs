@@ -1,16 +1,14 @@
 use crate::ast::{TheoryDef, GrammarItem, GrammarRule};
-use crate::{substitution, display_gen, generation};
+use crate::{subst_gen, display_gen, termgen_gen};
 use proc_macro2::TokenStream;
 use quote::quote;
 use std::collections::HashMap;
 
-/// Generate complete code for a theory: AST enums + substitution + display + generation
-/// Note: Parser is generated separately by LALRPOP (see grammar_writer.rs)
 pub fn generate_ast(theory: &TheoryDef) -> TokenStream {
     let ast_enums = generate_ast_enums(theory);
-    let subst_impl = substitution::generate_substitution(theory);
+    let subst_impl = subst_gen::generate_substitution(theory);
     let display_impl = display_gen::generate_display(theory);
-    let generation_impl = generation::generate_term_generation(theory);
+    let generation_impl = termgen_gen::generate_term_generation(theory);
     
     // Generate LALRPOP module reference
     let theory_name = &theory.name;
@@ -26,10 +24,6 @@ pub fn generate_ast(theory: &TheoryDef) -> TokenStream {
         
         #generation_impl
 
-        // #theory_mod;
-        
-        // Include the LALRPOP-generated parser
-        // The .lalrpop file is generated at compile time and compiled by build.rs
         #[cfg(not(test))]
         lalrpop_util::lalrpop_mod!(pub #theory_mod);
         

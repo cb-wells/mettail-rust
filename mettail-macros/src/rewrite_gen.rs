@@ -4,20 +4,17 @@ use quote::quote;
 use syn::Ident;
 use std::collections::HashMap;
 
-/// Generate rewrite execution code from theory definition
 pub fn generate_rewrite_engine(theory: &TheoryDef) -> TokenStream {
     if theory.rewrites.is_empty() {
         return quote! {};
     }
     
-    // Generate one matcher per rewrite rule
     let matchers: Vec<TokenStream> = theory.rewrites
         .iter()
         .enumerate()
         .map(|(idx, rule)| generate_rule_matcher(idx, rule, theory))
         .collect();
     
-    // Generate freshness checkers
     let freshness_fns = generate_freshness_functions(theory);
     
     quote! {
@@ -27,7 +24,6 @@ pub fn generate_rewrite_engine(theory: &TheoryDef) -> TokenStream {
     }
 }
 
-/// Generate a pattern matcher for one rewrite rule
 fn generate_rule_matcher(
     idx: usize, 
     rule: &RewriteRule,
@@ -37,14 +33,11 @@ fn generate_rule_matcher(
         &format!("try_rewrite_rule_{}", idx),
         proc_macro2::Span::call_site()
     );
-    
-    // Determine which category this rule applies to (from LHS)
+
     let category = extract_category(&rule.left);
     
-    // Build bindings as we generate
     let mut bindings = HashMap::new();
     
-    // Generate the complete pattern match with body
     let pattern_body = generate_pattern_with_body(
         &rule.left,
         "term",
@@ -66,8 +59,6 @@ fn generate_rule_matcher(
     result
 }
 
-/// Generate complete pattern match with body
-/// This builds the entire if-let structure with proper nesting and matched braces
 fn generate_pattern_with_body(
     expr: &Expr,
     term_name: &str,
@@ -79,11 +70,9 @@ fn generate_pattern_with_body(
     
     match expr {
         Expr::Var(var) => {
-            // Variable matches anything - bind it and generate body
             let var_name = var.to_string();
             bindings.insert(var_name, quote! { #term_ident.clone() });
             
-            // This is the innermost level - generate equality + freshness checks + RHS
             let equality_checks = quote! {}; // No equality checks at top level variable
             let freshness_checks = generate_freshness_checks(&rule.conditions, bindings);
             let rhs = generate_rhs(&rule.right, bindings);
@@ -116,7 +105,6 @@ fn generate_pattern_with_body(
     }
 }
 
-/// Generate constructor pattern with complete body
 fn generate_constructor_pattern_with_body(
     category: &Ident,
     constructor: &Ident,
@@ -127,12 +115,10 @@ fn generate_constructor_pattern_with_body(
     theory: &TheoryDef,
     rule: &RewriteRule
 ) -> TokenStream {
-    // Look up grammar rule
     let grammar_rule = theory.terms.iter()
         .find(|r| r.label == *constructor)
         .expect(&format!("Constructor {} not found", constructor));
     
-    // Check if this is a binder constructor
     if !grammar_rule.bindings.is_empty() {
         generate_binder_pattern_with_body(
             category, constructor, args, term, bindings,
@@ -146,7 +132,6 @@ fn generate_constructor_pattern_with_body(
     }
 }
 
-/// Generate pattern for binder constructor with complete body
 fn generate_binder_pattern_with_body(
     category: &Ident,
     constructor: &Ident,
@@ -161,7 +146,6 @@ fn generate_binder_pattern_with_body(
     let (binder_idx, body_indices) = &grammar_rule.bindings[0];
     let body_idx = body_indices[0];
     
-    // Generate AST field names (non-binder fields + scope)
     let mut ast_field_names = Vec::new();
     for (i, item) in grammar_rule.items.iter().enumerate() {
         if i == *binder_idx {

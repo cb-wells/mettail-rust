@@ -7,10 +7,6 @@ edition = "2021"
 name = "rhocalc"
 path = "rhocalc.rs"
 
-[[bin]]
-name = "test_var_identity"
-path = "test_var_identity.rs"
-
 [dependencies]
 mettail-macros = { path = "../mettail-macros" }
 mettail-runtime = { path = "../mettail-runtime" }
