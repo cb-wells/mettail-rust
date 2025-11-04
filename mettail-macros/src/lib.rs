@@ -9,6 +9,7 @@ mod lalrpop_gen;
 mod grammar_writer;
 mod display_gen;
 mod rewrite_gen;
+mod generation;
 
 use proc_macro::TokenStream;
 use proc_macro_error::{proc_macro_error, abort};

@@ -102,6 +102,21 @@ ascent_source! {
 }
 
 fn main() {
+    // println!("=== Rho Calculus Demo ===\n");
+
+    // // === Term Generation Demo ===
+    // println!("--- Term Generation ---");
+    // println!("Generating Proc terms up to depth 2 with vars [a, b]...\n");
+    
+    // let vars = vec!["a".to_string(), "b".to_string()];
+    // let terms = Proc::generate_terms(&vars, 2);
+    
+    // println!("Generated {} terms total", terms.len());
+    // for term in terms {
+    //     println!("  {}", term);
+    // }
+    
+    // println!("\n--- Rewrite Engine Demo ---");
     let rdx_str = "for(a->x){*x}|a!(b!(*n))|for(b->y){*y}|b!(0)";
     mettail_runtime::clear_var_cache();
     let parser = rhocalc::ProcParser::new();
@@ -119,10 +134,10 @@ fn main() {
     let mut paths = prog.full_path.clone();
     paths.sort_by(|a,b| a.0.cmp(&b.0));
 
-    println!("Paths found: {}", paths.len());
-    for (s, ps) in paths {
-        println!("{} ~> {}", s, ps.iter().map(|p| p.to_string()).collect::<Vec<String>>().join(" ~> "));
-        println!();
-    }
+    // println!("Paths found: {}", paths.len());
+    // for (s, ps) in paths.iter().take(3) {
+    //     println!("{} ~> {}", s, ps.iter().map(|p| p.to_string()).collect::<Vec<String>>().join(" ~> "));
+    //     println!();
+    // }
 }
 
