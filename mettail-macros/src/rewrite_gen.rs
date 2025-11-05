@@ -9,9 +9,12 @@ pub fn generate_rewrite_engine(theory: &TheoryDef) -> TokenStream {
         return quote! {};
     }
     
+    // Only generate matchers for base rules (not congruences)
+    // Congruences (rules with premise) are handled by Ascent generation
     let matchers: Vec<TokenStream> = theory.rewrites
         .iter()
         .enumerate()
+        .filter(|(_, rule)| rule.premise.is_none()) // Skip congruence rules
         .map(|(idx, rule)| generate_rule_matcher(idx, rule, theory))
         .collect();
     

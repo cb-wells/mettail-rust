@@ -11,6 +11,7 @@ mod display_gen;
 mod rewrite_gen;
 mod termgen_gen;
 mod random_generation;
+mod ascent_gen;
 
 use proc_macro::TokenStream;
 use proc_macro_error::{proc_macro_error, abort};
@@ -22,6 +23,7 @@ use codegen::generate_ast;
 use lalrpop_gen::generate_lalrpop_grammar;
 use grammar_writer::{write_grammar_file};
 use rewrite_gen::generate_rewrite_engine;
+use ascent_gen::generate_ascent_source;
 
 #[proc_macro]
 #[proc_macro_error]
@@ -39,6 +41,9 @@ pub fn theory(input: TokenStream) -> TokenStream {
     
     // Generate rewrite engine
     let rewrite_code = generate_rewrite_engine(&theory_def);
+    
+    // Generate Ascent datalog source
+    let ascent_code = generate_ascent_source(&theory_def);
 
     // Generate LALRPOP grammar file with precedence handling
     let grammar = generate_lalrpop_grammar(&theory_def);
@@ -49,6 +54,7 @@ pub fn theory(input: TokenStream) -> TokenStream {
     let combined = quote::quote! {
         #ast_code
         #rewrite_code
+        #ascent_code
     };
     
     TokenStream::from(combined)

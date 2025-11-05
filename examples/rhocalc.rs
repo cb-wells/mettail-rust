@@ -1,6 +1,8 @@
 use mettail_macros::theory;
 use mettail_runtime;
 use lalrpop_util::lalrpop_mod;
+use ascent_byods_rels::*;
+use std::time::Instant;
 
 use ascent::*;
 
@@ -26,125 +28,78 @@ theory! {
     equations {
         (PPar P Q) == (PPar Q P) ;
         (PPar P (PPar Q R)) == (PPar (PPar P Q) R) ;
-        (PPar P PZero) == P ;
+        // (PPar P PZero) == P ;
         
-        (PDrop (NQuote P)) == P ;
+        (NQuote (PDrop N)) == N ;
     },
     
     rewrites {
         if x # Q then (PPar (PInput chan x P) (POutput chan Q))
             => (subst P x (NQuote Q));
+        
+        (PDrop (NQuote P)) => P ;
 
-        (PDrop (NQuote P)) => P;
-
-        // if S => T then (PPar P S) => (PPar P T)
+        if S => T then (PPar P S) => (PPar P T);
     }
-}
-
-#[cfg(test)]
-mod tests {}
-
-ascent_source! {
-    theory_source:
-
-    relation proc(Proc);
-    relation eq(Proc, Proc);
-    relation rw(Proc, Proc);
-    relation path(Proc, Vec<Proc>);
-    relation path_terminal(Proc, Vec<Proc>);
-
-    proc(p1) <-- 
-        proc(p0), rw(p0,p1);
-    proc(p1) <--
-        proc(p0), eq(p0,p1);
-    proc(*p.clone()), proc(*q.clone()) <-- 
-        proc(p0), if let Proc::PPar(p,q) = p0;
-
-    // Commutativity
-    eq(p0,p1) <--
-        proc(p0),
-        if let Proc::PPar(p,q) = p0,
-        let p1 = Proc::PPar(q.clone(),p.clone());
-    // Associativity
-    eq(p0,p1) <--
-        proc(p0),
-        if let Proc::PPar(t,r) = p0,
-        if let Proc::PPar(p,q) = &**t,
-        let p1 = Proc::PPar(p.clone(),Box::new(Proc::PPar(q.clone(),r.clone())));
-    
-    eq(p,p) <-- proc(p);
-    eq(q,p) <-- eq(p,q);
-    eq(p,r) <-- eq(p,q), eq(q,r);
-
-    rw(s,*p.clone()) <--
-        proc(s),
-        if let Proc::PDrop(n) = s,
-        if let Name::NQuote(p) = &**n;
-
-    rw(s, t.clone()) <-- 
-        proc(s),
-        if let Some(t) = try_rewrite_rule_0(&s);
-    rw(s, t.clone()) <-- 
-        proc(s),
-        if let Some(t) = try_rewrite_rule_1(&s);
-
-    rw(s,t) <-- 
-        proc(s),
-        if let Proc::PPar(s0,p) = s,
-        rw(**s0,t0),
-        let t = Proc::PPar(Box::new(t0.clone()),p.clone());
-    rw(s1,t) <-- rw(s0,t), eq(s0,s1);
-    
-    path(p1, vec![p2.clone()]) <--
-        rw(p1,p2);
-    path(p1, ps) <--
-        rw(p1,p2),
-        path(p2,qs),
-        let ps = [vec![p2.clone()], qs.clone()].concat();
-
-    path_terminal(p,ps) <--
-        path(p,ps),
-        let z = ps.last().unwrap(),
-        !rw(z,_);
-}
+} 
 
 fn main() {
-    let vars = vec!["a".to_string(), "b".to_string()];
-    
-    // println!("\nExhaustive at depth 2 (showing x0):");
-    // let terms_d2 = Proc::generate_terms(&vars, 2);
-    // let with_binders: Vec<&Proc> = terms_d2.iter()
-    //     .filter(|p| p.to_string().contains("for"))
-    //     // .take(3)
-    //     .collect();
-    
-    // for t in &with_binders {
-    //     println!("    {}", t);
-    // }
 
-    let term = Proc::generate_random_at_depth(&vars, 12);
+    let start_time = Instant::now();
     
-    // === Rewrite Engine Demo ===
-    println!("\n--- Rewrite Engine Demo ---");
-    // let rdx_str = "for(a->x0){*x0}|a!(0)";
-    // mettail_runtime::clear_var_cache();
-    // let parser = rhocalc::ProcParser::new();
-    // let redex = parser.parse(rdx_str).unwrap();
-    println!("Initial: {}", term);
+    // let vars = vec!["a".to_string(), "b".to_string()];
+    // // let terms = Proc::generate_terms(&vars, 2);
+    // let term = Proc::generate_random_at_depth(&vars, 6);
+    // println!("Term: {}", term);
+    
+    // let rdx_str = "*@(for(b->x0){a!(0)})|*@(a!(0))|*@(0)|b!(0|0)|*@(0)|for(b->x0){0}";
+    let rdx_str = "*@(for(b->x0){a!(*x0)})|*@(a!(0))|b!(0|0)|for(b->x0){*x0}";
+    mettail_runtime::clear_var_cache();
+    let parser = rhocalc::ProcParser::new();
+    let redex = parser.parse(rdx_str).unwrap();
+    println!("Initial: {}", redex.clone());
 
     let prog = ascent_run! {
-        include_source!(theory_source);
-        proc(p) <-- for p in [term.clone()];
-        relation full_path(Proc, Vec<Proc>);
-        full_path(s,ps) <-- path_terminal(s,ps), eq(s,term.clone());
+        include_source!(rhocalc_source);
+        
+        // Seed the initial term
+        proc(p) <-- for p in [redex.clone()];
+        
+        relation redex_eq(Proc);
+        redex_eq(q.clone()) <-- eq_proc(redex.clone(), q);
+        proc(q) <-- redex_eq(q);
+        
+        relation path(Proc, Proc);
+        path(redex.clone(), redex.clone()) <-- for _ in [()];
+        path(redex.clone(), q.clone()) <-- redex_eq(q);
+        path(p.clone(),q.clone()) <-- rw_proc(p,q);
+        path(p.clone(),r.clone()) <-- rw_proc(p,q), path(q.clone(),r);
+        
+        relation is_normal_form(Proc);
+        is_normal_form(t.clone()) <-- proc(t), !rw_proc(t.clone(),_);
+        
+        relation path_full(Proc,Proc);
+        path_full(redex.clone(),z.clone()) <-- is_normal_form(z), path(redex.clone(), z);
     };
 
-    let mut paths = prog.full_path.clone();
-    paths.sort_by(|a,b| a.0.cmp(&b.0));
+    let mut procs = prog.proc;
+    procs.sort_by(|a,b| a.0.cmp(&b.0));
 
-    println!("Paths: {}", paths.len());
-    for (s, ps) in paths.iter().take(2) {
-        println!("  {} ~> {}", s, ps.iter().map(|p| p.to_string()).collect::<Vec<String>>().join(" ~> "));
+    println!("Terms: {}", procs.len());
+    println!("Rewrites: {}", prog.rw_proc.len());
+    println!("Normal forms: {}", prog.is_normal_form.len());
+    
+    let mut path_full = prog.path_full.clone();
+    path_full.sort_by(|a,b| a.0.cmp(&b.0));
+    
+    println!("\n=== Paths to normal forms ===");
+    println!("Count: {}", path_full.len());
+    for (s, t) in path_full {
+        println!("  {} ~> {}", s, t);
     }
+
+    // get elapsed time 
+    let elapsed = Instant::now().duration_since(start_time);
+    println!("Time: {:?}", elapsed);    
 }
 

@@ -20,6 +20,7 @@ quote = { workspace = true }
 syn = { workspace = true }
 proc-macro-error = { workspace = true }
 ascent = { workspace = true }
+ascent-byods-rels = { workspace = true }
 moniker = { workspace = true }
 
 [dev-dependencies]

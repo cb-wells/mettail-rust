@@ -32,10 +32,14 @@ pub struct FreshnessCondition {
     pub term: Ident,
 }
 
-/// Rewrite rule with optional freshness conditions
-/// (LHS) => (RHS) or if x # Q then (LHS) => (RHS)
+/// Rewrite rule with optional freshness conditions and optional congruence premise
+/// Base: (LHS) => (RHS) or if x # Q then (LHS) => (RHS)
+/// Congruence: if S => T then (LHS) => (RHS)
 pub struct RewriteRule {
     pub conditions: Vec<FreshnessCondition>,
+    /// Optional congruence premise: (source_var, target_var)
+    /// if S => T then ... represents Some(("S", "T"))
+    pub premise: Option<(Ident, Ident)>,
     pub left: Expr,
     pub right: Expr,
 }
@@ -473,16 +477,37 @@ fn parse_rewrites(input: ParseStream) -> SynResult<Vec<RewriteRule>> {
 
 fn parse_rewrite_rule(input: ParseStream) -> SynResult<RewriteRule> {
     // Parse optional freshness conditions: if x # Q then
+    // OR congruence premise: if S => T then
     let mut conditions = Vec::new();
+    let mut premise = None;
     
     while input.peek(Token![if]) {
         let _ = input.parse::<Token![if]>()?;
         let var = input.parse::<Ident>()?;
-        let _ = input.parse::<Token![#]>()?;
-        let term = input.parse::<Ident>()?;
-        let _ = input.parse::<Ident>()?; // consume 'then'
         
-        conditions.push(FreshnessCondition { var, term });
+        // Check if this is a congruence premise (if S => T then) or freshness (if x # Q then)
+        if input.peek(Token![=]) && input.peek2(Token![>]) {
+            // Congruence premise: if S => T then
+            let _ = input.parse::<Token![=]>()?;
+            let _ = input.parse::<Token![>]>()?;
+            let target = input.parse::<Ident>()?;
+            let then_kw = input.parse::<Ident>()?;
+            if then_kw != "then" {
+                return Err(syn::Error::new(then_kw.span(), "expected 'then'"));
+            }
+            
+            premise = Some((var, target));
+        } else {
+            // Freshness condition: if x # Q then
+            let _ = input.parse::<Token![#]>()?;
+            let term = input.parse::<Ident>()?;
+            let then_kw = input.parse::<Ident>()?;
+            if then_kw != "then" {
+                return Err(syn::Error::new(then_kw.span(), "expected 'then'"));
+            }
+            
+            conditions.push(FreshnessCondition { var, term });
+        }
     }
     
     // Parse left-hand side
@@ -502,6 +527,7 @@ fn parse_rewrite_rule(input: ParseStream) -> SynResult<RewriteRule> {
     
     Ok(RewriteRule {
         conditions,
+        premise,
         left,
         right,
     })

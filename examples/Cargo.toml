@@ -11,6 +11,10 @@ path = "rhocalc.rs"
 name = "ambient"
 path = "ambient.rs"
 
+[[bin]]
+name = "test_ascent_gen"
+path = "test_ascent_gen.rs"
+
 [dependencies]
 mettail-macros = { path = "../mettail-macros" }
 mettail-runtime = { path = "../mettail-runtime" }
@@ -18,6 +22,7 @@ moniker = { workspace = true }
 lalrpop-util = { workspace = true, features = ["lexer"] }
 ascent = { workspace = true }
 rand = { workspace = true }
+ascent-byods-rels = { workspace = true }
 
 
 [build-dependencies]
