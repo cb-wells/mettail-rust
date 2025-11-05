@@ -635,6 +635,44 @@ fn is_nullary_constructor(ident: &Ident, theory: &TheoryDef) -> bool {
 }
 
 /// Generate pattern matching code for equation LHS
+/// Convert a variable name to snake_case for use in generated code
+/// Examples: P -> p, Chan -> chan, MyVar -> my_var
+fn to_snake_case(name: &str) -> String {
+    if name.is_empty() {
+        return name.to_string();
+    }
+    
+    // If it's a single character, just lowercase it
+    if name.len() == 1 {
+        return name.to_lowercase();
+    }
+    
+    // If it's already all lowercase, return as-is
+    if name.chars().all(|c| !c.is_uppercase()) {
+        return name.to_string();
+    }
+    
+    // Convert CamelCase or UPPERCASE to snake_case
+    let mut result = String::new();
+    let mut prev_was_uppercase = false;
+    
+    for (i, ch) in name.chars().enumerate() {
+        if ch.is_uppercase() {
+            // Add underscore before uppercase if not at start and prev was lowercase
+            if i > 0 && !prev_was_uppercase {
+                result.push('_');
+            }
+            result.push(ch.to_lowercase().next().unwrap());
+            prev_was_uppercase = true;
+        } else {
+            result.push(ch);
+            prev_was_uppercase = false;
+        }
+    }
+    
+    result
+}
+
 /// Returns the "if let" pattern match
 fn generate_equation_pattern(
     expr: &Expr,
@@ -652,8 +690,9 @@ fn generate_equation_pattern(
             } else {
                 // Just bind the variable
                 let var_name = var.to_string();
-                // Keep case-sensitive variable name for the binding
-                let var_ident = format_ident!("{}", var_name);
+                // Convert to snake_case for Rust naming conventions
+                let var_snake = to_snake_case(&var_name);
+                let var_ident = format_ident!("{}", var_snake);
                 bindings.insert(var_name, var_ident.clone());
                 None // No pattern match needed, just use the term directly
             }
@@ -705,8 +744,9 @@ fn generate_equation_pattern(
                         } else {
                             // It's a real variable
                             let var_name = var.to_string();
-                            // Keep case-sensitive variable name
-                            let var_ident = format_ident!("{}", var_name);
+                            // Convert to snake_case for Rust naming conventions
+                            let var_snake = to_snake_case(&var_name);
+                            let var_ident = format_ident!("{}", var_snake);
                             bindings.insert(var_name, var_ident.clone());
                             field_patterns.push(quote! { #var_ident });
                         }
@@ -730,7 +770,9 @@ fn generate_equation_pattern(
                                         return None;
                                     } else {
                                         let var_name = var.to_string();
-                                        let var_ident = format_ident!("{}", var_name);
+                                        // Convert to snake_case for Rust naming conventions
+                                        let var_snake = to_snake_case(&var_name);
+                                        let var_ident = format_ident!("{}", var_snake);
                                         bindings.insert(var_name, var_ident.clone());
                                         nested_field_patterns.push(var_ident);
                                     }

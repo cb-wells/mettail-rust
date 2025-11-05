@@ -52,7 +52,6 @@ fn main() {
     // let term = Proc::generate_random_at_depth(&vars, 6);
     // println!("Term: {}", term);
     
-    // let rdx_str = "*@(for(b->x0){a!(0)})|*@(a!(0))|*@(0)|b!(0|0)|*@(0)|for(b->x0){0}";
     let rdx_str = "*@(for(b->x0){a!(*x0)})|*@(a!(0))|b!(0|0)|for(b->x0){*x0}";
     mettail_runtime::clear_var_cache();
     let parser = rhocalc::ProcParser::new();

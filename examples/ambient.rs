@@ -48,9 +48,9 @@ theory! {
             => (PPar P Q);
 
         // congruences
-        // if S => T then (PPar P S) => (PPar P T);
+        if S => T then (PPar P S) => (PPar P T);
         // if S => T then (PNew x S) => (PNew x T);
-        // if S => T then (PAmb N S) => (PAmb N T);
+        if S => T then (PAmb N S) => (PAmb N T);
     }
 }
 
@@ -113,12 +113,12 @@ theory! {
 //         let t = Proc::PNew(new_scope);
 //     rw(s1,t) <-- rw(s0,t), eq(s0,s1);
     
-//     path(p1, vec![p2.clone()]) <--
-//         rw(p1,p2);
-//     path(p1, ps) <--
-//         rw(p1,p2),
-//         path(p2,qs),
-//         let ps = [vec![p2.clone()], qs.clone()].concat();
+    // path(p1, vec![p2.clone()]) <--
+    //     rw(p1,p2);
+    // path(p1, ps) <--
+    //     rw(p1,p2),
+    //     path(p2,qs),
+    //     let ps = [vec![p2.clone()], qs.clone()].concat();
 
 //     path_terminal(p,ps) <--
 //         path(p,ps),
@@ -129,7 +129,7 @@ theory! {
 fn main() {
     println!("ambient calculus");
 
-    let rdx_str = "new(x,m[n[out(m,p)|q]|r])";
+    let rdx_str = "open(m,0)|m[n[out(m,p)|q]|r]";
     mettail_runtime::clear_var_cache();
     let parser = ambient::ProcParser::new();
     let redex = parser.parse(rdx_str).unwrap();
@@ -141,13 +141,20 @@ fn main() {
     let prog = ascent_run! {
         include_source!(ambient_source);
         proc(p) <-- for p in [redex.clone()];
+
+        relation path(Proc, Vec<Proc>);
+        path(p1, vec![p2.clone()]) <-- rw_proc(p1,p2);
+        path(p1, ps) <--
+            rw_proc(p1,p2),
+            path(p2,qs),
+            let ps = [vec![p2.clone()], qs.clone()].concat();
     };
 
-    // let mut paths = prog.full_path.clone();
-    // paths.sort_by(|a,b| a.0.cmp(&b.0));
+    let mut paths = prog.path.clone();
+    paths.sort_by(|a,b| a.0.cmp(&b.0));
 
-    // println!("Paths: {}", paths.len());
-    // for (s, ps) in paths {
-    //     println!("  {} ~> {}", s, ps.iter().map(|p| p.to_string()).collect::<Vec<String>>().join(" ~> "));
-    // }
+    println!("Paths: {}", paths.len());
+    for (s, ps) in paths {
+        println!("  {} ~> {}", s, ps.iter().map(|p| p.to_string()).collect::<Vec<String>>().join(" ~> "));
+    }
 }
