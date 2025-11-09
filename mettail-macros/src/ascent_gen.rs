@@ -1,3 +1,5 @@
+#![allow(dead_code, unused_imports, unused_variables)]
+
 use crate::ast::{TheoryDef, GrammarRule, Equation, Expr};
 use proc_macro2::TokenStream;
 use quote::{quote, format_ident};
@@ -273,23 +275,36 @@ fn generate_binding_deconstruction(
         })
     } else {
         // Has other fields besides the scope
-        // Generate field names (excluding the binder itself)
+        // Generate field names and collect their categories
         let mut field_names = Vec::new();
+        let mut field_cats = Vec::new();
         let mut ast_field_idx = 0usize;
+        
         for (i, item) in constructor.items.iter().enumerate() {
             if i == *_binder_idx {
                 continue; // Skip binder
             } else if i == body_idx {
                 field_names.push(format_ident!("scope_field"));
-            } else if matches!(item, crate::ast::GrammarItem::NonTerminal(_)) {
+            } else if let crate::ast::GrammarItem::NonTerminal(cat) = item {
                 let field_name = format!("field_{}", ast_field_idx);
                 field_names.push(format_ident!("{}", field_name));
+                field_cats.push((ast_field_idx, cat.clone()));
                 ast_field_idx += 1;
             }
         }
         
+        // Generate category facts for all non-body fields, then the body
+        // Maintain grammar order: non-body fields first, then body
+        let mut subterm_facts = Vec::new();
+        for (idx, cat) in &field_cats {
+            let cat_lower = format_ident!("{}", cat.to_string().to_lowercase());
+            let field_name = format_ident!("field_{}", idx);
+            subterm_facts.push(quote! { #cat_lower(*#field_name.clone()) });
+        }
+        subterm_facts.push(quote! { #body_cat_lower(*body.clone()) });
+        
         Some(quote! {
-            #body_cat_lower(*body.clone()) <--
+            #(#subterm_facts),* <--
                 #cat_lower(t),
                 if let #category::#label(#(#field_names),*) = t,
                 let (binder, body) = scope_field.clone().unbind();
@@ -297,33 +312,118 @@ fn generate_binding_deconstruction(
     }
 }
 
+/// Generate congruence rules for equality
+/// For each constructor, generate: if args are equal, then constructed terms are equal
+fn generate_congruence_rules(theory: &TheoryDef) -> Vec<TokenStream> {
+    let mut rules = Vec::new();
+    
+    for grammar_rule in &theory.terms {
+        let category = &grammar_rule.category;
+        let eq_rel = format_ident!("eq_{}", category.to_string().to_lowercase());
+        let cat_lower = format_ident!("{}", category.to_string().to_lowercase());
+        
+        // Check if this constructor has binders
+        let has_binders = !grammar_rule.bindings.is_empty();
+        
+        if has_binders {
+            // Skip binders for now - congruence for binders is more complex
+            // (requires alpha-equivalence reasoning)
+            continue;
+        }
+        
+        // Collect non-terminal arguments and their categories
+        let mut args = Vec::new();
+        let mut arg_categories = Vec::new();
+        
+        for item in &grammar_rule.items {
+            if let crate::ast::GrammarItem::NonTerminal(cat) = item {
+                args.push(cat);
+                arg_categories.push(cat);
+            }
+        }
+        
+        if args.is_empty() {
+            // No arguments - nullary constructor, no congruence needed
+            continue;
+        }
+        
+        // Skip constructors with Var arguments - Var is not a user-defined category
+        if args.iter().any(|cat| cat.to_string() == "Var") {
+            continue;
+        }
+        
+        // Generate variable names for LHS and RHS
+        let lhs_vars: Vec<Ident> = (0..args.len())
+            .map(|i| format_ident!("x{}", i))
+            .collect();
+        let rhs_vars: Vec<Ident> = (0..args.len())
+            .map(|i| format_ident!("y{}", i))
+            .collect();
+        
+        // Generate category bindings and equality checks for each argument
+        // For each arg: cat(x), cat(y), eq_cat(x, y)
+        // Note: First occurrences bind the variables (no .clone()), subsequent uses need .clone()
+        let mut body_clauses = Vec::new();
+        
+        for (cat, (lhs, rhs)) in args.iter().zip(lhs_vars.iter().zip(rhs_vars.iter())) {
+            let cat_rel = format_ident!("{}", cat.to_string().to_lowercase());
+            let eq_arg_rel = format_ident!("eq_{}", cat.to_string().to_lowercase());
+            
+            // Bind the variables (no .clone())
+            body_clauses.push(quote! { #cat_rel(#lhs) });
+            body_clauses.push(quote! { #cat_rel(#rhs) });
+            // Use the bound variables (.clone() needed here)
+            body_clauses.push(quote! { #eq_arg_rel(#lhs.clone(), #rhs.clone()) });
+        }
+        
+        // Generate LHS and RHS constructor applications for the head
+        let lhs_boxed: Vec<TokenStream> = lhs_vars.iter()
+            .map(|v| quote! { Box::new(#v.clone()) })
+            .collect();
+        let rhs_boxed: Vec<TokenStream> = rhs_vars.iter()
+            .map(|v| quote! { Box::new(#v.clone()) })
+            .collect();
+        
+        let label = grammar_rule.label.clone();
+        // Generate the congruence rule
+        // eq_cat(Constructor(x0, x1, ...), Constructor(y0, y1, ...)) <--
+        //   cat0(x0), cat0(y0), eq_cat0(x0, y0),
+        //   cat1(x1), cat1(y1), eq_cat1(x1, y1), ...
+        rules.push(quote! {
+            #eq_rel(
+                #category::#label(#(#lhs_boxed),*),
+                #category::#label(#(#rhs_boxed),*)
+            ) <-- #(#body_clauses),*;
+        });
+    }
+    
+    rules
+}
+
 /// Generate equation rules
 fn generate_equation_rules(theory: &TheoryDef) -> TokenStream {
     let mut rules = Vec::new();
     
-    // OPTIMIZATION: Minimize explicit reflexivity/symmetry/transitivity rules
-    // The eqrel data structure in ascent-byods-rels uses union-find internally,
-    // which can handle closure more efficiently than explicit Datalog rules.
-    //
-    // However, we still need SOME bootstrapping:
-    // - Reflexivity is needed for queries on specific terms
-    // - Symmetry/transitivity can be handled by eqrel more efficiently
-    //
-    // KEY CHANGE: Remove reflexivity for ALL explored terms.
-    // Instead, only generate reflexivity on-demand or rely on eqrel's built-in handling.
+    // Add reflexivity for eq relations
+    // This is needed for rewrites that check eq_cat(x, y) where x == y syntactically
+    // The eqrel data structure requires explicit seeding even for reflexivity
+    for export in &theory.exports {
+        let cat = &export.name;
+        let cat_lower = format_ident!("{}", cat.to_string().to_lowercase());
+        let eq_rel = format_ident!("eq_{}", cat.to_string().to_lowercase());
+        
+        rules.push(quote! {
+            #eq_rel(t.clone(), t.clone()) <-- #cat_lower(t);
+        });
+    }
     
-    // REMOVED: Reflexivity for all explored terms
-    // OLD: eq_cat(t, t) <-- cat(t);
-    // This created O(n) facts where n = number of explored terms.
-    // With term explosion, this became O(10^6) facts.
-    
-    // REMOVED: Explicit symmetry and transitivity
-    // OLD: eq_cat(b, a) <-- eq_cat(a, b);
-    // OLD: eq_cat(a, c) <-- eq_cat(a, b), eq_cat(b, c);
-    // The eqrel data structure handles these implicitly via union-find.
+    // Add congruence rules for all constructors
+    // If arg1 == arg2, then Constructor(arg1) == Constructor(arg2)
+    let congruence_rules = generate_congruence_rules(theory);
+    rules.extend(congruence_rules);
     
     // Generate clauses for each equation declaration
-    // These add only the BASE equalities specified by the theory
+    // These add the BASE equalities specified by the theory
     for equation in &theory.equations {
         if let Some(rule) = generate_equation_clause(equation, theory) {
             rules.push(rule);
@@ -355,16 +455,10 @@ fn generate_rewrite_rules(theory: &TheoryDef) -> TokenStream {
         });
     }
     
-    // 2. Base rewrites: call try_rewrite_rule_N functions
+    // 2. Base rewrites: generate Ascent clauses with equational matching
     // Only for rules without a premise (congruences are handled separately)
-    for (idx, rewrite) in theory.rewrites.iter().enumerate() {
-        if rewrite.premise.is_none() {
-            // Base rewrite - generate function call
-            if let Some(rule) = generate_base_rewrite(idx, rewrite, theory) {
-                rules.push(rule);
-            }
-        }
-    }
+    let base_rewrite_clauses = crate::rewrite_gen::generate_rewrite_clauses(theory);
+    rules.extend(base_rewrite_clauses);
     
     // 3. Congruence rules: explicitly declared as "if S => T then ..."
     for (idx, rewrite) in theory.rewrites.iter().enumerate() {
@@ -381,28 +475,11 @@ fn generate_rewrite_rules(theory: &TheoryDef) -> TokenStream {
     }
 }
 
-/// Generate a base rewrite rule that calls try_rewrite_rule_N
-fn generate_base_rewrite(idx: usize, rewrite: &crate::ast::RewriteRule, theory: &TheoryDef) -> Option<TokenStream> {
-    // Determine which category this rewrite applies to from the LHS
-    let category = extract_category_from_expr(&rewrite.left, theory)?;
-    let cat_lower = format_ident!("{}", category.to_string().to_lowercase());
-    let rw_rel = format_ident!("rw_{}", category.to_string().to_lowercase());
-    let fn_name = format_ident!("try_rewrite_rule_{}", idx);
-    
-    Some(quote! {
-        #rw_rel(s, t.clone()) <--
-            #cat_lower(s),
-            if let Some(t) = #fn_name(&s);
-    })
-}
-
 /// Generate congruence rewrite rules
 /// These are declared as: if S => T then (Constructor P S Q) => (Constructor P T Q)
 fn generate_congruence_rewrite(idx: usize, rewrite: &crate::ast::RewriteRule, theory: &TheoryDef) -> Option<TokenStream> {
     // Only process rules with a congruence premise
     let (source_var, target_var) = rewrite.premise.as_ref()?;
-    
-    eprintln!("DEBUG: Generating congruence rule #{} with premise {} => {}", idx, source_var, target_var);
     
     // Extract category from LHS
     let category = extract_category_from_expr(&rewrite.left, theory)?;
@@ -411,9 +488,6 @@ fn generate_congruence_rewrite(idx: usize, rewrite: &crate::ast::RewriteRule, th
     
     // Parse LHS to determine constructor and which field contains source_var
     let (constructor, field_idx, bindings) = extract_congruence_info(&rewrite.left, source_var, theory)?;
-    
-    eprintln!("DEBUG: Constructor={}, field_idx={}, bindings={:?}", 
-              constructor, field_idx, bindings.iter().map(|i| i.to_string()).collect::<Vec<_>>());
     
     // Check if this is a binding constructor
     let rule = theory.terms.iter().find(|r| r.label == constructor)?;
@@ -424,10 +498,6 @@ fn generate_congruence_rewrite(idx: usize, rewrite: &crate::ast::RewriteRule, th
     } else {
         generate_regular_congruence(&category, &cat_lower, &rw_rel, constructor, field_idx, &bindings)
     };
-    
-    if let Some(ref code) = result {
-        eprintln!("DEBUG: Generated congruence code:\n{}", code);
-    }
     
     result
 }

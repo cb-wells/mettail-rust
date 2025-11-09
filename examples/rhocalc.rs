@@ -20,7 +20,7 @@ theory! {
         POutput . Proc ::= Name "!" "(" Proc ")" ;
         PInput . Proc ::= "for" "(" Name "->" <Name> ")" "{" Proc "}" ;
         PPar . Proc ::= Proc "|" Proc ;
-        
+
         NQuote . Name ::= "@" "(" Proc ")" ;
         NVar . Name ::= Var ;
     },
@@ -28,7 +28,6 @@ theory! {
     equations {
         (PPar P Q) == (PPar Q P) ;
         (PPar P (PPar Q R)) == (PPar (PPar P Q) R) ;
-        // (PPar P PZero) == P ;
         
         (NQuote (PDrop N)) == N ;
     },
@@ -48,11 +47,11 @@ fn main() {
     let start_time = Instant::now();
     
     // let vars = vec!["a".to_string(), "b".to_string()];
-    // // let terms = Proc::generate_terms(&vars, 2);
-    // let term = Proc::generate_random_at_depth(&vars, 6);
+    // let terms = Proc::generate_terms(&vars, 2);
+    // let redex = Proc::generate_random_at_depth(&vars, 6);
     // println!("Term: {}", term);
     
-    let rdx_str = "*@(for(b->x0){a!(*x0)})|*@(a!(0))|b!(0|0)|for(b->x0){*x0}";
+    let rdx_str = "a!(0)|for(@(*a)->x0){*x0}";
     mettail_runtime::clear_var_cache();
     let parser = rhocalc::ProcParser::new();
     let redex = parser.parse(rdx_str).unwrap();
@@ -87,6 +86,30 @@ fn main() {
     println!("Terms: {}", procs.len());
     println!("Rewrites: {}", prog.rw_proc.len());
     println!("Normal forms: {}", prog.is_normal_form.len());
+    
+    // Debug: print proc facts
+    println!("\n=== proc facts ===");
+    println!("Count: {}", procs.len());
+    for p in procs.iter().take(10) {
+        println!("  {}", p.0);
+    }
+    
+    // Debug: print name facts
+    println!("\n=== name facts ===");
+    let mut names: Vec<_> = prog.name.iter().collect();
+    names.sort_by(|a, b| format!("{:?}", a).cmp(&format!("{:?}", b)));
+    println!("Count: {}", names.len());
+    for n in names.iter() {
+        println!("  {}", n.0);
+    }
+    
+    // Debug: print eq_name facts
+    println!("\n=== eq_name facts ===");
+    let mut eq_names: Vec<_> = prog.eq_name.iter().collect();
+    eq_names.sort_by(|a, b| format!("{:?}", a).cmp(&format!("{:?}", b)));
+    for (n1, n2) in eq_names.iter().take(20) {
+        println!("  {} == {}", n1, n2);
+    }
     
     let mut path_full = prog.path_full.clone();
     path_full.sort_by(|a,b| a.0.cmp(&b.0));

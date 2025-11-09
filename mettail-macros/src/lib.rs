@@ -22,7 +22,7 @@ use validator::validate_theory;
 use codegen::generate_ast;
 use lalrpop_gen::generate_lalrpop_grammar;
 use grammar_writer::{write_grammar_file};
-use rewrite_gen::generate_rewrite_engine;
+use rewrite_gen::generate_freshness_functions;
 use ascent_gen::generate_ascent_source;
 
 #[proc_macro]
@@ -39,10 +39,10 @@ pub fn theory(input: TokenStream) -> TokenStream {
     // Generate the Rust AST types
     let ast_code = generate_ast(&theory_def);
     
-    // Generate rewrite engine
-    let rewrite_code = generate_rewrite_engine(&theory_def);
+    // Generate freshness functions (needed by Ascent rewrite clauses)
+    let freshness_fns = generate_freshness_functions(&theory_def);
     
-    // Generate Ascent datalog source
+    // Generate Ascent datalog source (includes rewrites as Ascent clauses)
     let ascent_code = generate_ascent_source(&theory_def);
 
     // Generate LALRPOP grammar file with precedence handling
@@ -53,7 +53,7 @@ pub fn theory(input: TokenStream) -> TokenStream {
     
     let combined = quote::quote! {
         #ast_code
-        #rewrite_code
+        #freshness_fns
         #ascent_code
     };
     

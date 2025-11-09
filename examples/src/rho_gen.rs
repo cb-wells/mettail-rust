@@ -6,6 +6,8 @@ use std::prelude::rust_2021::*;
 use mettail_macros::theory;
 use mettail_runtime;
 use lalrpop_util::lalrpop_mod;
+use ascent_byods_rels::*;
+use std::time::Instant;
 use ascent::*;
 pub enum Proc {
     PZero,
@@ -667,9 +669,6 @@ const _DERIVE_moniker_BoundTerm_String_FOR_Name: () = {
     }
 };
 impl Proc {
-    /// Substitute `replacement` for free occurrences of `var` in this term
-    ///
-    /// This performs capture-avoiding substitution using moniker's BoundTerm trait.
     pub fn substitute(
         &self,
         var: &mettail_runtime::FreeVar<String>,
@@ -749,9 +748,6 @@ impl Proc {
     }
 }
 impl Name {
-    /// Substitute `replacement` for free occurrences of `var` in this term
-    ///
-    /// This performs capture-avoiding substitution using moniker's BoundTerm trait.
     pub fn substitute(
         &self,
         var: &mettail_runtime::FreeVar<String>,
@@ -834,14 +830,17 @@ impl std::fmt::Display for Name {
 }
 struct GenerationContext {
     vars: Vec<String>,
+    initial_var_count: usize,
     max_depth: usize,
     proc_by_depth: std::collections::HashMap<usize, Vec<Proc>>,
     name_by_depth: std::collections::HashMap<usize, Vec<Name>>,
 }
 impl GenerationContext {
     fn new(vars: Vec<String>, max_depth: usize) -> Self {
+        let initial_var_count = vars.len();
         Self {
             vars,
+            initial_var_count,
             max_depth,
             proc_by_depth: std::collections::HashMap::new(),
             name_by_depth: std::collections::HashMap::new(),
@@ -887,24 +886,33 @@ impl GenerationContext {
                     }
                 }
             }
+            let current_binding_depth = self.vars.len() - self.initial_var_count;
+            let binder_name = ::alloc::__export::must_use({
+                ::alloc::fmt::format(format_args!("x{0}", current_binding_depth))
+            });
+            let mut extended_vars = self.vars.clone();
+            extended_vars.push(binder_name.clone());
+            let mut temp_ctx = GenerationContext::new(extended_vars, depth - 1);
+            temp_ctx = temp_ctx.generate_all();
+            let mut bodies_with_binder = Vec::new();
+            for d in 0..depth {
+                if let Some(terms) = temp_ctx.proc_by_depth.get(&d) {
+                    bodies_with_binder.extend(terms.clone());
+                }
+            }
             for d1 in 0..depth {
-                for d2 in 0..depth {
-                    if d1.max(d2) + 1 == depth {
-                        if let Some(args1) = self.name_by_depth.get(&d1) {
-                            if let Some(bodies) = self.proc_by_depth.get(&d2) {
-                                for arg1 in args1 {
-                                    for body in bodies {
-                                        let binder = mettail_runtime::Binder(
-                                            mettail_runtime::get_or_create_var("x"),
-                                        );
-                                        let scope = mettail_runtime::Scope::new(
-                                            binder,
-                                            Box::new(body.clone()),
-                                        );
-                                        terms.push(Proc::PInput(Box::new(arg1.clone()), scope));
-                                    }
-                                }
-                            }
+                if let Some(args1) = self.name_by_depth.get(&d1) {
+                    for arg1 in args1 {
+                        for body in &bodies_with_binder {
+                            let binder_var = mettail_runtime::get_or_create_var(
+                                &binder_name,
+                            );
+                            let binder = mettail_runtime::Binder(binder_var);
+                            let scope = mettail_runtime::Scope::new(
+                                binder,
+                                Box::new(body.clone()),
+                            );
+                            terms.push(Proc::PInput(Box::new(arg1.clone()), scope));
                         }
                     }
                 }
@@ -1013,6 +1021,224 @@ impl Name {
         all_terms.sort();
         all_terms.dedup();
         all_terms
+    }
+}
+impl Proc {
+    /// Generate a random term at exactly the given depth
+    ///
+    /// # Arguments
+    /// * `vars` - Pool of variable names for free variables
+    /// * `depth` - Target depth (operator nesting level)
+    ///
+    /// # Example
+    /// ```ignore
+    /// let term = Proc::generate_random_at_depth(&["a".into(), "b".into()], 25);
+    /// ```
+    pub fn generate_random_at_depth(vars: &[String], depth: usize) -> Self {
+        use rand::Rng;
+        let mut rng = rand::thread_rng();
+        Self::generate_random_at_depth_internal(vars, depth, &mut rng, 0)
+    }
+    /// Generate a random term at exactly the given depth with a seed
+    ///
+    /// This is deterministic - same seed produces same term.
+    ///
+    /// # Arguments
+    /// * `vars` - Pool of variable names for free variables
+    /// * `depth` - Target depth (operator nesting level)
+    /// * `seed` - Random seed for reproducibility
+    pub fn generate_random_at_depth_with_seed(
+        vars: &[String],
+        depth: usize,
+        seed: u64,
+    ) -> Self {
+        use rand::{SeedableRng, Rng};
+        let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+        Self::generate_random_at_depth_internal(vars, depth, &mut rng, 0)
+    }
+    fn generate_random_at_depth_internal<R: rand::Rng>(
+        vars: &[String],
+        depth: usize,
+        rng: &mut R,
+        binding_depth: usize,
+    ) -> Self {
+        if depth == 0 {
+            Proc::PZero
+        } else {
+            {
+                let choice = rng.gen_range(0..4usize);
+                match choice {
+                    0usize => {
+                        let arg = Name::generate_random_at_depth_internal(
+                            vars,
+                            depth - 1,
+                            rng,
+                            binding_depth,
+                        );
+                        Proc::PDrop(Box::new(arg))
+                    }
+                    1usize => {
+                        let d1 = rng.gen_range(0..depth);
+                        let d2 = if d1 == depth - 1 {
+                            rng.gen_range(0..depth)
+                        } else {
+                            depth - 1
+                        };
+                        let arg1 = Name::generate_random_at_depth_internal(
+                            vars,
+                            d1,
+                            rng,
+                            binding_depth,
+                        );
+                        let arg2 = Proc::generate_random_at_depth_internal(
+                            vars,
+                            d2,
+                            rng,
+                            binding_depth,
+                        );
+                        Proc::POutput(Box::new(arg1), Box::new(arg2))
+                    }
+                    2usize => {
+                        let d1 = rng.gen_range(0..depth);
+                        let d2 = if d1 == depth - 1 {
+                            rng.gen_range(0..depth)
+                        } else {
+                            depth - 1
+                        };
+                        let arg1 = Name::generate_random_at_depth_internal(
+                            vars,
+                            d1,
+                            rng,
+                            binding_depth,
+                        );
+                        let binder_name = ::alloc::__export::must_use({
+                            ::alloc::fmt::format(format_args!("x{0}", binding_depth))
+                        });
+                        let mut extended_vars = vars.to_vec();
+                        extended_vars.push(binder_name.clone());
+                        let body = Proc::generate_random_at_depth_internal(
+                            &extended_vars,
+                            d2,
+                            rng,
+                            binding_depth + 1,
+                        );
+                        let binder_var = mettail_runtime::get_or_create_var(
+                            &binder_name,
+                        );
+                        let binder = mettail_runtime::Binder(binder_var);
+                        let scope = mettail_runtime::Scope::new(binder, Box::new(body));
+                        Proc::PInput(Box::new(arg1), scope)
+                    }
+                    3usize => {
+                        let d1 = rng.gen_range(0..depth);
+                        let d2 = if d1 == depth - 1 {
+                            rng.gen_range(0..depth)
+                        } else {
+                            depth - 1
+                        };
+                        let arg1 = Proc::generate_random_at_depth_internal(
+                            vars,
+                            d1,
+                            rng,
+                            binding_depth,
+                        );
+                        let arg2 = Proc::generate_random_at_depth_internal(
+                            vars,
+                            d2,
+                            rng,
+                            binding_depth,
+                        );
+                        Proc::PPar(Box::new(arg1), Box::new(arg2))
+                    }
+                    _ => {
+                        ::core::panicking::panic(
+                            "internal error: entered unreachable code",
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+impl Name {
+    /// Generate a random term at exactly the given depth
+    ///
+    /// # Arguments
+    /// * `vars` - Pool of variable names for free variables
+    /// * `depth` - Target depth (operator nesting level)
+    ///
+    /// # Example
+    /// ```ignore
+    /// let term = Proc::generate_random_at_depth(&["a".into(), "b".into()], 25);
+    /// ```
+    pub fn generate_random_at_depth(vars: &[String], depth: usize) -> Self {
+        use rand::Rng;
+        let mut rng = rand::thread_rng();
+        Self::generate_random_at_depth_internal(vars, depth, &mut rng, 0)
+    }
+    /// Generate a random term at exactly the given depth with a seed
+    ///
+    /// This is deterministic - same seed produces same term.
+    ///
+    /// # Arguments
+    /// * `vars` - Pool of variable names for free variables
+    /// * `depth` - Target depth (operator nesting level)
+    /// * `seed` - Random seed for reproducibility
+    pub fn generate_random_at_depth_with_seed(
+        vars: &[String],
+        depth: usize,
+        seed: u64,
+    ) -> Self {
+        use rand::{SeedableRng, Rng};
+        let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+        Self::generate_random_at_depth_internal(vars, depth, &mut rng, 0)
+    }
+    fn generate_random_at_depth_internal<R: rand::Rng>(
+        vars: &[String],
+        depth: usize,
+        rng: &mut R,
+        binding_depth: usize,
+    ) -> Self {
+        if depth == 0 {
+            if !vars.is_empty() {
+                let idx = rng.gen_range(0..vars.len());
+                Name::NVar(
+                    mettail_runtime::OrdVar(
+                        mettail_runtime::Var::Free(
+                            mettail_runtime::get_or_create_var(&vars[idx]),
+                        ),
+                    ),
+                )
+            } else {
+                Name::NVar(
+                    mettail_runtime::OrdVar(
+                        mettail_runtime::Var::Free(
+                            mettail_runtime::get_or_create_var("_"),
+                        ),
+                    ),
+                )
+            }
+        } else {
+            {
+                let choice = rng.gen_range(0..1usize);
+                match choice {
+                    0usize => {
+                        let arg = Proc::generate_random_at_depth_internal(
+                            vars,
+                            depth - 1,
+                            rng,
+                            binding_depth,
+                        );
+                        Name::NQuote(Box::new(arg))
+                    }
+                    _ => {
+                        ::core::panicking::panic(
+                            "internal error: entered unreachable code",
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 #[rustfmt::skip]
@@ -3736,78 +3962,16 @@ where
     );
     is_fresh
 }
-pub fn try_rewrite_rule_0(term: &Proc) -> Option<Proc> {
-    if let Proc::PPar(field_0, field_1) = term {
-        let field_0_inner = &(**field_0);
-        if let Proc::PInput(field_0_inner_0, scope_field) = field_0_inner {
-            let (binder, body) = scope_field.clone().unbind();
-            let field_1_inner = &(**field_1);
-            if let Proc::POutput(field_1_inner_0, field_1_inner_1) = field_1_inner {
-                if !((**field_0_inner_0).clone() == (**field_1_inner_0).clone()) {
-                    return None;
-                }
-                if !is_fresh(&binder.clone(), &(**field_1_inner_1).clone()) {
-                    return None;
-                }
-                return Some(
-                    ((*body).clone())
-                        .substitute_name(
-                            &(binder.clone()).0,
-                            &Name::NQuote(Box::new((**field_1_inner_1).clone())),
-                        ),
-                );
-            }
-        }
-    }
-    None
-}
-pub use ascent_source_theory_source as theory_source;
+pub use ascent_source_rhocalc_source as rhocalc_source;
 fn main() {
-    {
-        ::std::io::_print(format_args!("=== Rho Calculus Demo ===\n\n"));
-    };
-    {
-        ::std::io::_print(format_args!("--- Term Generation ---\n"));
-    };
-    {
-        ::std::io::_print(
-            format_args!("Generating Proc terms up to depth 2 with vars [a, b]...\n\n"),
-        );
-    };
+    let start_time = Instant::now();
     let vars = <[_]>::into_vec(
         ::alloc::boxed::box_new(["a".to_string(), "b".to_string()]),
     );
-    let terms = Proc::generate_terms(&vars, 2);
+    let redex = Proc::generate_random_at_depth(&vars, 6);
     {
-        ::std::io::_print(format_args!("Generated {0} terms total\n", terms.len()));
+        ::std::io::_print(format_args!("Initial: {0}\n", redex.clone()));
     };
-    {
-        ::std::io::_print(format_args!("\nFirst 20 terms:\n"));
-    };
-    for (i, term) in terms.iter().take(20).enumerate() {
-        {
-            ::std::io::_print(format_args!("  {0}: {1}\n", i + 1, term));
-        };
-    }
-    {
-        ::std::io::_print(format_args!("\nGenerating Name terms up to depth 1...\n"));
-    };
-    let names = Name::generate_terms(&vars, 1);
-    {
-        ::std::io::_print(format_args!("Generated {0} names:\n", names.len()));
-    };
-    for (i, name) in names.iter().take(10).enumerate() {
-        {
-            ::std::io::_print(format_args!("  {0}: {1}\n", i + 1, name));
-        };
-    }
-    {
-        ::std::io::_print(format_args!("\n--- Rewrite Engine Demo ---\n"));
-    };
-    let rdx_str = "for(a->x){*x}|a!(b!(*n))|for(b->y){*y}|b!(0)";
-    mettail_runtime::clear_var_cache();
-    let parser = rhocalc::ProcParser::new();
-    let redex = parser.parse(rdx_str).unwrap();
     let prog = {
         {
             #![allow(
@@ -3818,42 +3982,49 @@ fn main() {
             )]
             pub struct AscentProgram {
                 /**
-logical indices: eq_indices_0; eq_indices_0_1; eq_indices_1; eq_indices_none*/
-                pub eq: ::std::vec::Vec<(Proc, Proc)>,
-                __eq_ind_common: (),
-                eq_indices_0: ascent::rel::ToRelIndexType<(Proc,), (Proc,)>,
-                eq_indices_0_1: ascent::internal::RelFullIndexType<(Proc, Proc), ()>,
-                eq_indices_1: ascent::rel::ToRelIndexType<(Proc,), (Proc,)>,
-                eq_indices_none: ascent::rel::ToRelIndexType<(), (Proc, Proc)>,
+logical indices: eq_name_indices_0; eq_name_indices_0_1*/
+                pub eq_name: ::ascent_byods_rels::fake_vec::FakeVec<(Name, Name)>,
+                __eq_name_ind_common: ::ascent_byods_rels::eqrel_ind::EqRelIndCommon<
+                    Name,
+                >,
+                eq_name_indices_0: ::ascent_byods_rels::eqrel_ind::ToEqRelInd0<Name>,
+                eq_name_indices_0_1: ::ascent_byods_rels::eqrel_ind::ToEqRelInd0_1<Name>,
                 /**
-logical indices: full_path_indices_0_1*/
-                pub full_path: ::std::vec::Vec<(Proc, Vec<Proc>)>,
-                __full_path_ind_common: (),
-                full_path_indices_0_1: ascent::internal::RelFullIndexType<
-                    (Proc, Vec<Proc>),
+logical indices: eq_proc_indices_0; eq_proc_indices_0_1*/
+                pub eq_proc: ::ascent_byods_rels::fake_vec::FakeVec<(Proc, Proc)>,
+                __eq_proc_ind_common: ::ascent_byods_rels::eqrel_ind::EqRelIndCommon<
+                    Proc,
+                >,
+                eq_proc_indices_0: ::ascent_byods_rels::eqrel_ind::ToEqRelInd0<Proc>,
+                eq_proc_indices_0_1: ::ascent_byods_rels::eqrel_ind::ToEqRelInd0_1<Proc>,
+                /**
+logical indices: is_normal_form_indices_0; is_normal_form_indices_none*/
+                pub is_normal_form: ::std::vec::Vec<(Proc,)>,
+                __is_normal_form_ind_common: (),
+                is_normal_form_indices_0: ascent::internal::RelFullIndexType<
+                    (Proc,),
                     (),
                 >,
+                is_normal_form_indices_none: ascent::rel::ToRelIndexType<(), (Proc,)>,
                 /**
-logical indices: path_indices_0; path_indices_0_1; path_indices_none*/
-                pub path: ::std::vec::Vec<(Proc, Vec<Proc>)>,
+logical indices: name_indices_0; name_indices_none*/
+                pub name: ::std::vec::Vec<(Name,)>,
+                __name_ind_common: (),
+                name_indices_0: ascent::internal::RelFullIndexType<(Name,), ()>,
+                name_indices_none: ascent::rel::ToRelIndexType<(), (Name,)>,
+                /**
+logical indices: path_indices_0; path_indices_0_1*/
+                pub path: ::std::vec::Vec<(Proc, Proc)>,
                 __path_ind_common: (),
-                path_indices_0: ascent::rel::ToRelIndexType<(Proc,), (Vec<Proc>,)>,
-                path_indices_0_1: ascent::internal::RelFullIndexType<
-                    (Proc, Vec<Proc>),
-                    (),
-                >,
-                path_indices_none: ascent::rel::ToRelIndexType<(), (Proc, Vec<Proc>)>,
+                path_indices_0: ascent::rel::ToRelIndexType<(Proc,), (Proc,)>,
+                path_indices_0_1: ascent::internal::RelFullIndexType<(Proc, Proc), ()>,
                 /**
-logical indices: path_terminal_indices_0_1; path_terminal_indices_none*/
-                pub path_terminal: ::std::vec::Vec<(Proc, Vec<Proc>)>,
-                __path_terminal_ind_common: (),
-                path_terminal_indices_0_1: ascent::internal::RelFullIndexType<
-                    (Proc, Vec<Proc>),
+logical indices: path_full_indices_0_1*/
+                pub path_full: ::std::vec::Vec<(Proc, Proc)>,
+                __path_full_ind_common: (),
+                path_full_indices_0_1: ascent::internal::RelFullIndexType<
+                    (Proc, Proc),
                     (),
-                >,
-                path_terminal_indices_none: ascent::rel::ToRelIndexType<
-                    (),
-                    (Proc, Vec<Proc>),
                 >,
                 /**
 logical indices: proc_indices_0; proc_indices_none*/
@@ -3862,15 +4033,34 @@ logical indices: proc_indices_0; proc_indices_none*/
                 proc_indices_0: ascent::internal::RelFullIndexType<(Proc,), ()>,
                 proc_indices_none: ascent::rel::ToRelIndexType<(), (Proc,)>,
                 /**
-logical indices: rw_indices_0; rw_indices_0_1; rw_indices_1; rw_indices_none*/
-                pub rw: ::std::vec::Vec<(Proc, Proc)>,
-                __rw_ind_common: (),
-                rw_indices_0: ascent::rel::ToRelIndexType<(Proc,), (Proc,)>,
-                rw_indices_0_1: ascent::internal::RelFullIndexType<(Proc, Proc), ()>,
-                rw_indices_1: ascent::rel::ToRelIndexType<(Proc,), (Proc,)>,
-                rw_indices_none: ascent::rel::ToRelIndexType<(), (Proc, Proc)>,
-                scc_times: [std::time::Duration; 6usize],
-                scc_iters: [usize; 6usize],
+logical indices: redex_eq_indices_0; redex_eq_indices_none*/
+                pub redex_eq: ::std::vec::Vec<(Proc,)>,
+                __redex_eq_ind_common: (),
+                redex_eq_indices_0: ascent::internal::RelFullIndexType<(Proc,), ()>,
+                redex_eq_indices_none: ascent::rel::ToRelIndexType<(), (Proc,)>,
+                /**
+logical indices: rw_name_indices_0; rw_name_indices_0_1; rw_name_indices_1*/
+                pub rw_name: ::std::vec::Vec<(Name, Name)>,
+                __rw_name_ind_common: (),
+                rw_name_indices_0: ascent::rel::ToRelIndexType<(Name,), (Name,)>,
+                rw_name_indices_0_1: ascent::internal::RelFullIndexType<
+                    (Name, Name),
+                    (),
+                >,
+                rw_name_indices_1: ascent::rel::ToRelIndexType<(Name,), (Name,)>,
+                /**
+logical indices: rw_proc_indices_0; rw_proc_indices_0_1; rw_proc_indices_1; rw_proc_indices_none*/
+                pub rw_proc: ::std::vec::Vec<(Proc, Proc)>,
+                __rw_proc_ind_common: (),
+                rw_proc_indices_0: ascent::rel::ToRelIndexType<(Proc,), (Proc,)>,
+                rw_proc_indices_0_1: ascent::internal::RelFullIndexType<
+                    (Proc, Proc),
+                    (),
+                >,
+                rw_proc_indices_1: ascent::rel::ToRelIndexType<(Proc,), (Proc,)>,
+                rw_proc_indices_none: ascent::rel::ToRelIndexType<(), (Proc, Proc)>,
+                scc_times: [std::time::Duration; 8usize],
+                scc_iters: [usize; 8usize],
                 update_time_nanos: std::sync::atomic::AtomicU64,
                 update_indices_duration: std::time::Duration,
             }
@@ -3881,44 +4071,74 @@ logical indices: rw_indices_0; rw_indices_0_1; rw_indices_1; rw_indices_none*/
                     let before = ::ascent::internal::Instant::now();
                     use ascent::internal::ToRelIndex0;
                     use ascent::internal::RelIndexWrite;
-                    for (_i, tuple) in self.eq.iter().enumerate() {
+                    for (_i, tuple) in self.eq_name.iter().enumerate() {
                         let selection_tuple = (tuple.0.clone(),);
-                        let rel_ind = &mut self.eq_indices_0;
+                        let rel_ind = &mut self.eq_name_indices_0;
                         ascent::internal::RelIndexWrite::index_insert(
-                            &mut rel_ind.to_rel_index_write(&mut self.__eq_ind_common),
+                            &mut rel_ind
+                                .to_rel_index_write(&mut self.__eq_name_ind_common),
                             selection_tuple,
                             (tuple.1.clone(),),
                         );
                         let selection_tuple = (tuple.0.clone(), tuple.1.clone());
-                        let rel_ind = &mut self.eq_indices_0_1;
+                        let rel_ind = &mut self.eq_name_indices_0_1;
                         ascent::internal::RelIndexWrite::index_insert(
-                            &mut rel_ind.to_rel_index_write(&mut self.__eq_ind_common),
+                            &mut rel_ind
+                                .to_rel_index_write(&mut self.__eq_name_ind_common),
                             selection_tuple,
                             (),
                         );
-                        let selection_tuple = (tuple.1.clone(),);
-                        let rel_ind = &mut self.eq_indices_1;
+                    }
+                    for (_i, tuple) in self.eq_proc.iter().enumerate() {
+                        let selection_tuple = (tuple.0.clone(),);
+                        let rel_ind = &mut self.eq_proc_indices_0;
                         ascent::internal::RelIndexWrite::index_insert(
-                            &mut rel_ind.to_rel_index_write(&mut self.__eq_ind_common),
+                            &mut rel_ind
+                                .to_rel_index_write(&mut self.__eq_proc_ind_common),
+                            selection_tuple,
+                            (tuple.1.clone(),),
+                        );
+                        let selection_tuple = (tuple.0.clone(), tuple.1.clone());
+                        let rel_ind = &mut self.eq_proc_indices_0_1;
+                        ascent::internal::RelIndexWrite::index_insert(
+                            &mut rel_ind
+                                .to_rel_index_write(&mut self.__eq_proc_ind_common),
+                            selection_tuple,
+                            (),
+                        );
+                    }
+                    for (_i, tuple) in self.is_normal_form.iter().enumerate() {
+                        let selection_tuple = (tuple.0.clone(),);
+                        let rel_ind = &mut self.is_normal_form_indices_0;
+                        ascent::internal::RelIndexWrite::index_insert(
+                            &mut rel_ind
+                                .to_rel_index_write(&mut self.__is_normal_form_ind_common),
+                            selection_tuple,
+                            (),
+                        );
+                        let selection_tuple = ();
+                        let rel_ind = &mut self.is_normal_form_indices_none;
+                        ascent::internal::RelIndexWrite::index_insert(
+                            &mut rel_ind
+                                .to_rel_index_write(&mut self.__is_normal_form_ind_common),
                             selection_tuple,
                             (tuple.0.clone(),),
                         );
-                        let selection_tuple = ();
-                        let rel_ind = &mut self.eq_indices_none;
-                        ascent::internal::RelIndexWrite::index_insert(
-                            &mut rel_ind.to_rel_index_write(&mut self.__eq_ind_common),
-                            selection_tuple,
-                            (tuple.0.clone(), tuple.1.clone()),
-                        );
                     }
-                    for (_i, tuple) in self.full_path.iter().enumerate() {
-                        let selection_tuple = (tuple.0.clone(), tuple.1.clone());
-                        let rel_ind = &mut self.full_path_indices_0_1;
+                    for (_i, tuple) in self.name.iter().enumerate() {
+                        let selection_tuple = (tuple.0.clone(),);
+                        let rel_ind = &mut self.name_indices_0;
                         ascent::internal::RelIndexWrite::index_insert(
-                            &mut rel_ind
-                                .to_rel_index_write(&mut self.__full_path_ind_common),
+                            &mut rel_ind.to_rel_index_write(&mut self.__name_ind_common),
                             selection_tuple,
                             (),
+                        );
+                        let selection_tuple = ();
+                        let rel_ind = &mut self.name_indices_none;
+                        ascent::internal::RelIndexWrite::index_insert(
+                            &mut rel_ind.to_rel_index_write(&mut self.__name_ind_common),
+                            selection_tuple,
+                            (tuple.0.clone(),),
                         );
                     }
                     for (_i, tuple) in self.path.iter().enumerate() {
@@ -3936,30 +4156,15 @@ logical indices: rw_indices_0; rw_indices_0_1; rw_indices_1; rw_indices_none*/
                             selection_tuple,
                             (),
                         );
-                        let selection_tuple = ();
-                        let rel_ind = &mut self.path_indices_none;
-                        ascent::internal::RelIndexWrite::index_insert(
-                            &mut rel_ind.to_rel_index_write(&mut self.__path_ind_common),
-                            selection_tuple,
-                            (tuple.0.clone(), tuple.1.clone()),
-                        );
                     }
-                    for (_i, tuple) in self.path_terminal.iter().enumerate() {
+                    for (_i, tuple) in self.path_full.iter().enumerate() {
                         let selection_tuple = (tuple.0.clone(), tuple.1.clone());
-                        let rel_ind = &mut self.path_terminal_indices_0_1;
+                        let rel_ind = &mut self.path_full_indices_0_1;
                         ascent::internal::RelIndexWrite::index_insert(
                             &mut rel_ind
-                                .to_rel_index_write(&mut self.__path_terminal_ind_common),
+                                .to_rel_index_write(&mut self.__path_full_ind_common),
                             selection_tuple,
                             (),
-                        );
-                        let selection_tuple = ();
-                        let rel_ind = &mut self.path_terminal_indices_none;
-                        ascent::internal::RelIndexWrite::index_insert(
-                            &mut rel_ind
-                                .to_rel_index_write(&mut self.__path_terminal_ind_common),
-                            selection_tuple,
-                            (tuple.0.clone(), tuple.1.clone()),
                         );
                     }
                     for (_i, tuple) in self.proc.iter().enumerate() {
@@ -3978,32 +4183,80 @@ logical indices: rw_indices_0; rw_indices_0_1; rw_indices_1; rw_indices_none*/
                             (tuple.0.clone(),),
                         );
                     }
-                    for (_i, tuple) in self.rw.iter().enumerate() {
+                    for (_i, tuple) in self.redex_eq.iter().enumerate() {
                         let selection_tuple = (tuple.0.clone(),);
-                        let rel_ind = &mut self.rw_indices_0;
+                        let rel_ind = &mut self.redex_eq_indices_0;
                         ascent::internal::RelIndexWrite::index_insert(
-                            &mut rel_ind.to_rel_index_write(&mut self.__rw_ind_common),
+                            &mut rel_ind
+                                .to_rel_index_write(&mut self.__redex_eq_ind_common),
+                            selection_tuple,
+                            (),
+                        );
+                        let selection_tuple = ();
+                        let rel_ind = &mut self.redex_eq_indices_none;
+                        ascent::internal::RelIndexWrite::index_insert(
+                            &mut rel_ind
+                                .to_rel_index_write(&mut self.__redex_eq_ind_common),
+                            selection_tuple,
+                            (tuple.0.clone(),),
+                        );
+                    }
+                    for (_i, tuple) in self.rw_name.iter().enumerate() {
+                        let selection_tuple = (tuple.0.clone(),);
+                        let rel_ind = &mut self.rw_name_indices_0;
+                        ascent::internal::RelIndexWrite::index_insert(
+                            &mut rel_ind
+                                .to_rel_index_write(&mut self.__rw_name_ind_common),
                             selection_tuple,
                             (tuple.1.clone(),),
                         );
                         let selection_tuple = (tuple.0.clone(), tuple.1.clone());
-                        let rel_ind = &mut self.rw_indices_0_1;
+                        let rel_ind = &mut self.rw_name_indices_0_1;
                         ascent::internal::RelIndexWrite::index_insert(
-                            &mut rel_ind.to_rel_index_write(&mut self.__rw_ind_common),
+                            &mut rel_ind
+                                .to_rel_index_write(&mut self.__rw_name_ind_common),
                             selection_tuple,
                             (),
                         );
                         let selection_tuple = (tuple.1.clone(),);
-                        let rel_ind = &mut self.rw_indices_1;
+                        let rel_ind = &mut self.rw_name_indices_1;
                         ascent::internal::RelIndexWrite::index_insert(
-                            &mut rel_ind.to_rel_index_write(&mut self.__rw_ind_common),
+                            &mut rel_ind
+                                .to_rel_index_write(&mut self.__rw_name_ind_common),
+                            selection_tuple,
+                            (tuple.0.clone(),),
+                        );
+                    }
+                    for (_i, tuple) in self.rw_proc.iter().enumerate() {
+                        let selection_tuple = (tuple.0.clone(),);
+                        let rel_ind = &mut self.rw_proc_indices_0;
+                        ascent::internal::RelIndexWrite::index_insert(
+                            &mut rel_ind
+                                .to_rel_index_write(&mut self.__rw_proc_ind_common),
+                            selection_tuple,
+                            (tuple.1.clone(),),
+                        );
+                        let selection_tuple = (tuple.0.clone(), tuple.1.clone());
+                        let rel_ind = &mut self.rw_proc_indices_0_1;
+                        ascent::internal::RelIndexWrite::index_insert(
+                            &mut rel_ind
+                                .to_rel_index_write(&mut self.__rw_proc_ind_common),
+                            selection_tuple,
+                            (),
+                        );
+                        let selection_tuple = (tuple.1.clone(),);
+                        let rel_ind = &mut self.rw_proc_indices_1;
+                        ascent::internal::RelIndexWrite::index_insert(
+                            &mut rel_ind
+                                .to_rel_index_write(&mut self.__rw_proc_ind_common),
                             selection_tuple,
                             (tuple.0.clone(),),
                         );
                         let selection_tuple = ();
-                        let rel_ind = &mut self.rw_indices_none;
+                        let rel_ind = &mut self.rw_proc_indices_none;
                         ascent::internal::RelIndexWrite::index_insert(
-                            &mut rel_ind.to_rel_index_write(&mut self.__rw_ind_common),
+                            &mut rel_ind
+                                .to_rel_index_write(&mut self.__rw_proc_ind_common),
                             selection_tuple,
                             (tuple.0.clone(), tuple.1.clone()),
                         );
@@ -4016,26 +4269,46 @@ logical indices: rw_indices_0; rw_indices_0_1; rw_indices_1; rw_indices_none*/
                 }
                 fn type_constraints() {
                     #![allow(clippy::all)]
+                    let _type_constraints: ascent::internal::TypeConstraints<Name>;
                     let _type_constraints: ascent::internal::TypeConstraints<Proc>;
-                    let _type_constraints: ascent::internal::TypeConstraints<Vec<Proc>>;
                 }
                 pub fn summary(&self) -> &'static str {
-                    "scc 0, is_looping: false:\n  proc <-- for_p\n  dynamic relations: proc\nscc 1, is_looping: true:\n  proc <-- proc_indices_0_delta, rw_indices_0_total+delta [SIMPLE JOIN]\n  proc <-- proc_indices_0_total, rw_indices_0_delta [SIMPLE JOIN]\n  proc <-- proc_indices_0_delta, eq_indices_0_total+delta [SIMPLE JOIN]\n  proc <-- proc_indices_0_total, eq_indices_0_delta [SIMPLE JOIN]\n  proc, proc <-- proc_indices_none_delta, if let ⋯\n  rw <-- proc_indices_none_delta, if let ⋯, if let ⋯\n  rw <-- proc_indices_none_delta, if let ⋯\n  rw <-- proc_indices_none_delta, if let ⋯, rw_indices_0_total+delta, let ⋯\n  rw <-- proc_indices_none_total, if let ⋯, rw_indices_0_delta, let ⋯\n  rw <-- rw_indices_0_delta, eq_indices_0_total+delta [SIMPLE JOIN]\n  rw <-- rw_indices_0_total, eq_indices_0_delta [SIMPLE JOIN]\n  eq <-- proc_indices_none_delta, if let ⋯, let ⋯\n  eq <-- proc_indices_none_delta, if let ⋯, if let ⋯, let ⋯\n  eq <-- proc_indices_none_delta\n  eq <-- eq_indices_none_delta\n  eq <-- eq_indices_1_delta, eq_indices_0_total+delta [SIMPLE JOIN]\n  eq <-- eq_indices_1_total, eq_indices_0_delta [SIMPLE JOIN]\n  dynamic relations: eq, proc, rw\nscc 2, is_looping: false:\n  path <-- rw_indices_none_total\n  dynamic relations: path\nscc 3, is_looping: true:\n  path <-- rw_indices_1_total, path_indices_0_delta, let ⋯ [SIMPLE JOIN]\n  dynamic relations: path\nscc 4, is_looping: false:\n  path_terminal <-- path_indices_none_total, let ⋯, agg rw_indices_0\n  dynamic relations: path_terminal\nscc 5, is_looping: false:\n  full_path <-- path_terminal_indices_none_total, eq_indices_0_1_total\n  dynamic relations: full_path\n"
+                    "scc 0, is_looping: false:\n  proc <-- for_p\n  dynamic relations: proc\nscc 1, is_looping: true:\n  proc <-- proc_indices_0_delta, rw_proc_indices_0_total+delta [SIMPLE JOIN]\n  proc <-- proc_indices_0_total, rw_proc_indices_0_delta [SIMPLE JOIN]\n  name, proc <-- proc_indices_none_delta, if let ⋯\n  name, proc <-- proc_indices_none_delta, if let ⋯, let ⋯\n  proc, proc <-- proc_indices_none_delta, if let ⋯\n  proc <-- name_indices_none_delta, if let ⋯\n  proc <-- redex_eq_indices_none_delta\n  rw_proc <-- rw_proc_indices_0_delta, eq_proc_indices_0_total+delta [SIMPLE JOIN]\n  rw_proc <-- rw_proc_indices_0_total, eq_proc_indices_0_delta [SIMPLE JOIN]\n  rw_proc <-- rw_proc_indices_1_delta, eq_proc_indices_0_total+delta [SIMPLE JOIN]\n  rw_proc <-- rw_proc_indices_1_total, eq_proc_indices_0_delta [SIMPLE JOIN]\n  rw_proc <-- proc_indices_none_delta, if let ⋯, let ⋯, if let ⋯, let ⋯, let ⋯, let ⋯, if let ⋯, let ⋯, let ⋯, eq_name_indices_0_1_total+delta, if ⋯, let ⋯\n  rw_proc <-- proc_indices_none_total, if let ⋯, let ⋯, if let ⋯, let ⋯, let ⋯, let ⋯, if let ⋯, let ⋯, let ⋯, eq_name_indices_0_1_delta, if ⋯, let ⋯\n  rw_proc <-- proc_indices_none_delta, if let ⋯, let ⋯, if let ⋯, let ⋯, let ⋯\n  rw_proc <-- proc_indices_none_delta, if let ⋯, rw_proc_indices_0_total+delta, let ⋯\n  rw_proc <-- proc_indices_none_total, if let ⋯, rw_proc_indices_0_delta, let ⋯\n  name <-- proc_indices_none_delta, if let ⋯\n  name <-- name_indices_0_delta, rw_name_indices_0_total+delta [SIMPLE JOIN]\n  name <-- name_indices_0_total, rw_name_indices_0_delta [SIMPLE JOIN]\n  rw_name <-- rw_name_indices_0_delta, eq_name_indices_0_total+delta [SIMPLE JOIN]\n  rw_name <-- rw_name_indices_0_total, eq_name_indices_0_delta [SIMPLE JOIN]\n  rw_name <-- rw_name_indices_1_delta, eq_name_indices_0_total+delta [SIMPLE JOIN]\n  rw_name <-- rw_name_indices_1_total, eq_name_indices_0_delta [SIMPLE JOIN]\n  eq_proc <-- proc_indices_none_delta\n  eq_name <-- name_indices_none_delta\n  eq_proc <-- name_indices_none_delta, name_indices_none_total+delta, eq_name_indices_0_1_total+delta [SIMPLE JOIN]\n  eq_proc <-- name_indices_none_total, name_indices_none_delta, eq_name_indices_0_1_total+delta [SIMPLE JOIN]\n  eq_proc <-- name_indices_none_total, name_indices_none_total, eq_name_indices_0_1_delta [SIMPLE JOIN]\n  eq_name <-- proc_indices_none_delta, proc_indices_none_total+delta, eq_proc_indices_0_1_total+delta [SIMPLE JOIN]\n  eq_name <-- proc_indices_none_total, proc_indices_none_delta, eq_proc_indices_0_1_total+delta [SIMPLE JOIN]\n  eq_name <-- proc_indices_none_total, proc_indices_none_total, eq_proc_indices_0_1_delta [SIMPLE JOIN]\n  eq_name <-- name_indices_none_delta, if let ⋯, if let ⋯, let ⋯\n  eq_proc <-- name_indices_none_delta, name_indices_none_total+delta, eq_name_indices_0_1_total+delta, proc_indices_none_total+delta, proc_indices_none_total+delta, eq_proc_indices_0_1_total+delta [SIMPLE JOIN]\n  eq_proc <-- name_indices_none_total, name_indices_none_delta, eq_name_indices_0_1_total+delta, proc_indices_none_total+delta, proc_indices_none_total+delta, eq_proc_indices_0_1_total+delta [SIMPLE JOIN]\n  eq_proc <-- name_indices_none_total, name_indices_none_total, eq_name_indices_0_1_delta, proc_indices_none_total+delta, proc_indices_none_total+delta, eq_proc_indices_0_1_total+delta [SIMPLE JOIN]\n  eq_proc <-- name_indices_none_total, name_indices_none_total, eq_name_indices_0_1_total, proc_indices_none_delta, proc_indices_none_total+delta, eq_proc_indices_0_1_total+delta [SIMPLE JOIN]\n  eq_proc <-- name_indices_none_total, name_indices_none_total, eq_name_indices_0_1_total, proc_indices_none_total, proc_indices_none_delta, eq_proc_indices_0_1_total+delta [SIMPLE JOIN]\n  eq_proc <-- name_indices_none_total, name_indices_none_total, eq_name_indices_0_1_total, proc_indices_none_total, proc_indices_none_total, eq_proc_indices_0_1_delta [SIMPLE JOIN]\n  eq_proc <-- proc_indices_none_delta, proc_indices_none_total+delta, eq_proc_indices_0_1_total+delta, proc_indices_none_total+delta, proc_indices_none_total+delta, eq_proc_indices_0_1_total+delta [SIMPLE JOIN]\n  eq_proc <-- proc_indices_none_total, proc_indices_none_delta, eq_proc_indices_0_1_total+delta, proc_indices_none_total+delta, proc_indices_none_total+delta, eq_proc_indices_0_1_total+delta [SIMPLE JOIN]\n  eq_proc <-- proc_indices_none_total, proc_indices_none_total, eq_proc_indices_0_1_delta, proc_indices_none_total+delta, proc_indices_none_total+delta, eq_proc_indices_0_1_total+delta [SIMPLE JOIN]\n  eq_proc <-- proc_indices_none_total, proc_indices_none_total, eq_proc_indices_0_1_total, proc_indices_none_delta, proc_indices_none_total+delta, eq_proc_indices_0_1_total+delta [SIMPLE JOIN]\n  eq_proc <-- proc_indices_none_total, proc_indices_none_total, eq_proc_indices_0_1_total, proc_indices_none_total, proc_indices_none_delta, eq_proc_indices_0_1_total+delta [SIMPLE JOIN]\n  eq_proc <-- proc_indices_none_total, proc_indices_none_total, eq_proc_indices_0_1_total, proc_indices_none_total, proc_indices_none_total, eq_proc_indices_0_1_delta [SIMPLE JOIN]\n  eq_proc <-- proc_indices_none_delta, if let ⋯, let ⋯\n  eq_proc <-- proc_indices_none_delta, if let ⋯, if let ⋯, let ⋯\n  redex_eq <-- eq_proc_indices_0_delta\n  dynamic relations: eq_name, eq_proc, name, proc, redex_eq, rw_name, rw_proc\nscc 2, is_looping: false:\n  path <-- redex_eq_indices_none_total\n  dynamic relations: path\nscc 3, is_looping: false:\n  path <-- rw_proc_indices_none_total\n  dynamic relations: path\nscc 4, is_looping: false:\n  path <-- for_\n  dynamic relations: path\nscc 5, is_looping: true:\n  path <-- rw_proc_indices_none_total, path_indices_0_delta\n  dynamic relations: path\nscc 6, is_looping: false:\n  is_normal_form <-- proc_indices_none_total, agg rw_proc_indices_0\n  dynamic relations: is_normal_form\nscc 7, is_looping: false:\n  path_full <-- is_normal_form_indices_none_total, path_indices_0_1_total\n  dynamic relations: path_full\n"
                 }
                 pub fn relation_sizes_summary(&self) -> String {
                     #![allow(clippy::all)]
                     use std::fmt::Write;
                     let mut res = String::new();
                     (&mut res)
-                        .write_fmt(format_args!("{0} size: {1}\n", "eq", self.eq.len()))
+                        .write_fmt(
+                            format_args!(
+                                "{0} size: {1}\n",
+                                "eq_name",
+                                self.eq_name.len(),
+                            ),
+                        )
                         .unwrap();
                     (&mut res)
                         .write_fmt(
                             format_args!(
                                 "{0} size: {1}\n",
-                                "full_path",
-                                self.full_path.len(),
+                                "eq_proc",
+                                self.eq_proc.len(),
                             ),
+                        )
+                        .unwrap();
+                    (&mut res)
+                        .write_fmt(
+                            format_args!(
+                                "{0} size: {1}\n",
+                                "is_normal_form",
+                                self.is_normal_form.len(),
+                            ),
+                        )
+                        .unwrap();
+                    (&mut res)
+                        .write_fmt(
+                            format_args!("{0} size: {1}\n", "name", self.name.len()),
                         )
                         .unwrap();
                     (&mut res)
@@ -4047,8 +4320,8 @@ logical indices: rw_indices_0; rw_indices_0_1; rw_indices_1; rw_indices_none*/
                         .write_fmt(
                             format_args!(
                                 "{0} size: {1}\n",
-                                "path_terminal",
-                                self.path_terminal.len(),
+                                "path_full",
+                                self.path_full.len(),
                             ),
                         )
                         .unwrap();
@@ -4058,7 +4331,31 @@ logical indices: rw_indices_0; rw_indices_0_1; rw_indices_1; rw_indices_none*/
                         )
                         .unwrap();
                     (&mut res)
-                        .write_fmt(format_args!("{0} size: {1}\n", "rw", self.rw.len()))
+                        .write_fmt(
+                            format_args!(
+                                "{0} size: {1}\n",
+                                "redex_eq",
+                                self.redex_eq.len(),
+                            ),
+                        )
+                        .unwrap();
+                    (&mut res)
+                        .write_fmt(
+                            format_args!(
+                                "{0} size: {1}\n",
+                                "rw_name",
+                                self.rw_name.len(),
+                            ),
+                        )
+                        .unwrap();
+                    (&mut res)
+                        .write_fmt(
+                            format_args!(
+                                "{0} size: {1}\n",
+                                "rw_proc",
+                                self.rw_proc.len(),
+                            ),
+                        )
                         .unwrap();
                     res
                 }
@@ -4134,42 +4431,76 @@ logical indices: rw_indices_0; rw_indices_0_1; rw_indices_1; rw_indices_none*/
                             ),
                         )
                         .unwrap();
+                    (&mut res)
+                        .write_fmt(
+                            format_args!(
+                                "scc {0}: iterations: {1}, time: {2:?}\n",
+                                "6",
+                                self.scc_iters[6usize],
+                                self.scc_times[6usize],
+                            ),
+                        )
+                        .unwrap();
+                    (&mut res)
+                        .write_fmt(
+                            format_args!(
+                                "scc {0}: iterations: {1}, time: {2:?}\n",
+                                "7",
+                                self.scc_iters[7usize],
+                                self.scc_times[7usize],
+                            ),
+                        )
+                        .unwrap();
                     res
                 }
             }
             impl Default for AscentProgram {
                 fn default() -> Self {
                     let mut _self = AscentProgram {
-                        eq: Default::default(),
-                        __eq_ind_common: Default::default(),
-                        eq_indices_0: Default::default(),
-                        eq_indices_0_1: Default::default(),
-                        eq_indices_1: Default::default(),
-                        eq_indices_none: Default::default(),
-                        full_path: Default::default(),
-                        __full_path_ind_common: Default::default(),
-                        full_path_indices_0_1: Default::default(),
+                        eq_name: Default::default(),
+                        __eq_name_ind_common: Default::default(),
+                        eq_name_indices_0: Default::default(),
+                        eq_name_indices_0_1: Default::default(),
+                        eq_proc: Default::default(),
+                        __eq_proc_ind_common: Default::default(),
+                        eq_proc_indices_0: Default::default(),
+                        eq_proc_indices_0_1: Default::default(),
+                        is_normal_form: Default::default(),
+                        __is_normal_form_ind_common: Default::default(),
+                        is_normal_form_indices_0: Default::default(),
+                        is_normal_form_indices_none: Default::default(),
+                        name: Default::default(),
+                        __name_ind_common: Default::default(),
+                        name_indices_0: Default::default(),
+                        name_indices_none: Default::default(),
                         path: Default::default(),
                         __path_ind_common: Default::default(),
                         path_indices_0: Default::default(),
                         path_indices_0_1: Default::default(),
-                        path_indices_none: Default::default(),
-                        path_terminal: Default::default(),
-                        __path_terminal_ind_common: Default::default(),
-                        path_terminal_indices_0_1: Default::default(),
-                        path_terminal_indices_none: Default::default(),
+                        path_full: Default::default(),
+                        __path_full_ind_common: Default::default(),
+                        path_full_indices_0_1: Default::default(),
                         proc: Default::default(),
                         __proc_ind_common: Default::default(),
                         proc_indices_0: Default::default(),
                         proc_indices_none: Default::default(),
-                        rw: Default::default(),
-                        __rw_ind_common: Default::default(),
-                        rw_indices_0: Default::default(),
-                        rw_indices_0_1: Default::default(),
-                        rw_indices_1: Default::default(),
-                        rw_indices_none: Default::default(),
-                        scc_times: [std::time::Duration::ZERO; 6usize],
-                        scc_iters: [0; 6usize],
+                        redex_eq: Default::default(),
+                        __redex_eq_ind_common: Default::default(),
+                        redex_eq_indices_0: Default::default(),
+                        redex_eq_indices_none: Default::default(),
+                        rw_name: Default::default(),
+                        __rw_name_ind_common: Default::default(),
+                        rw_name_indices_0: Default::default(),
+                        rw_name_indices_0_1: Default::default(),
+                        rw_name_indices_1: Default::default(),
+                        rw_proc: Default::default(),
+                        __rw_proc_ind_common: Default::default(),
+                        rw_proc_indices_0: Default::default(),
+                        rw_proc_indices_0_1: Default::default(),
+                        rw_proc_indices_1: Default::default(),
+                        rw_proc_indices_none: Default::default(),
+                        scc_times: [std::time::Duration::ZERO; 8usize],
+                        scc_iters: [0; 8usize],
                         update_time_nanos: Default::default(),
                         update_indices_duration: std::time::Duration::default(),
                     };
@@ -4329,95 +4660,151 @@ logical indices: rw_indices_0; rw_indices_0_1; rw_indices_1; rw_indices_none*/
                 ascent::internal::comment("scc 1");
                 {
                     let _scc_start_time = ::ascent::internal::Instant::now();
-                    let mut __eq_ind_common_delta: () = ::std::mem::take(
-                        &mut _self.__eq_ind_common,
-                    );
-                    let mut __eq_ind_common_total: () = Default::default();
-                    let mut __eq_ind_common_new: () = Default::default();
-                    ::ascent::internal::RelIndexMerge::init(
-                        &mut __eq_ind_common_new,
-                        &mut __eq_ind_common_delta,
-                        &mut __eq_ind_common_total,
-                    );
-                    let mut eq_indices_0_delta: ascent::rel::ToRelIndexType<
-                        (Proc,),
-                        (Proc,),
-                    > = ::std::mem::take(&mut _self.eq_indices_0);
-                    let mut eq_indices_0_total: ascent::rel::ToRelIndexType<
-                        (Proc,),
-                        (Proc,),
+                    let mut __eq_name_ind_common_delta: ::ascent_byods_rels::eqrel_ind::EqRelIndCommon<
+                        Name,
+                    > = ::std::mem::take(&mut _self.__eq_name_ind_common);
+                    let mut __eq_name_ind_common_total: ::ascent_byods_rels::eqrel_ind::EqRelIndCommon<
+                        Name,
                     > = Default::default();
-                    let mut eq_indices_0_new: ascent::rel::ToRelIndexType<
-                        (Proc,),
-                        (Proc,),
+                    let mut __eq_name_ind_common_new: ::ascent_byods_rels::eqrel_ind::EqRelIndCommon<
+                        Name,
                     > = Default::default();
                     ::ascent::internal::RelIndexMerge::init(
-                        &mut eq_indices_0_new
-                            .to_rel_index_write(&mut __eq_ind_common_new),
-                        &mut eq_indices_0_delta
-                            .to_rel_index_write(&mut __eq_ind_common_delta),
-                        &mut eq_indices_0_total
-                            .to_rel_index_write(&mut __eq_ind_common_total),
+                        &mut __eq_name_ind_common_new,
+                        &mut __eq_name_ind_common_delta,
+                        &mut __eq_name_ind_common_total,
                     );
-                    let mut eq_indices_0_1_delta: ascent::internal::RelFullIndexType<
-                        (Proc, Proc),
+                    let mut eq_name_indices_0_delta: ::ascent_byods_rels::eqrel_ind::ToEqRelInd0<
+                        Name,
+                    > = ::std::mem::take(&mut _self.eq_name_indices_0);
+                    let mut eq_name_indices_0_total: ::ascent_byods_rels::eqrel_ind::ToEqRelInd0<
+                        Name,
+                    > = Default::default();
+                    let mut eq_name_indices_0_new: ::ascent_byods_rels::eqrel_ind::ToEqRelInd0<
+                        Name,
+                    > = Default::default();
+                    ::ascent::internal::RelIndexMerge::init(
+                        &mut eq_name_indices_0_new
+                            .to_rel_index_write(&mut __eq_name_ind_common_new),
+                        &mut eq_name_indices_0_delta
+                            .to_rel_index_write(&mut __eq_name_ind_common_delta),
+                        &mut eq_name_indices_0_total
+                            .to_rel_index_write(&mut __eq_name_ind_common_total),
+                    );
+                    let mut eq_name_indices_0_1_delta: ::ascent_byods_rels::eqrel_ind::ToEqRelInd0_1<
+                        Name,
+                    > = ::std::mem::take(&mut _self.eq_name_indices_0_1);
+                    let mut eq_name_indices_0_1_total: ::ascent_byods_rels::eqrel_ind::ToEqRelInd0_1<
+                        Name,
+                    > = Default::default();
+                    let mut eq_name_indices_0_1_new: ::ascent_byods_rels::eqrel_ind::ToEqRelInd0_1<
+                        Name,
+                    > = Default::default();
+                    ::ascent::internal::RelIndexMerge::init(
+                        &mut eq_name_indices_0_1_new
+                            .to_rel_index_write(&mut __eq_name_ind_common_new),
+                        &mut eq_name_indices_0_1_delta
+                            .to_rel_index_write(&mut __eq_name_ind_common_delta),
+                        &mut eq_name_indices_0_1_total
+                            .to_rel_index_write(&mut __eq_name_ind_common_total),
+                    );
+                    let mut __eq_proc_ind_common_delta: ::ascent_byods_rels::eqrel_ind::EqRelIndCommon<
+                        Proc,
+                    > = ::std::mem::take(&mut _self.__eq_proc_ind_common);
+                    let mut __eq_proc_ind_common_total: ::ascent_byods_rels::eqrel_ind::EqRelIndCommon<
+                        Proc,
+                    > = Default::default();
+                    let mut __eq_proc_ind_common_new: ::ascent_byods_rels::eqrel_ind::EqRelIndCommon<
+                        Proc,
+                    > = Default::default();
+                    ::ascent::internal::RelIndexMerge::init(
+                        &mut __eq_proc_ind_common_new,
+                        &mut __eq_proc_ind_common_delta,
+                        &mut __eq_proc_ind_common_total,
+                    );
+                    let mut eq_proc_indices_0_delta: ::ascent_byods_rels::eqrel_ind::ToEqRelInd0<
+                        Proc,
+                    > = ::std::mem::take(&mut _self.eq_proc_indices_0);
+                    let mut eq_proc_indices_0_total: ::ascent_byods_rels::eqrel_ind::ToEqRelInd0<
+                        Proc,
+                    > = Default::default();
+                    let mut eq_proc_indices_0_new: ::ascent_byods_rels::eqrel_ind::ToEqRelInd0<
+                        Proc,
+                    > = Default::default();
+                    ::ascent::internal::RelIndexMerge::init(
+                        &mut eq_proc_indices_0_new
+                            .to_rel_index_write(&mut __eq_proc_ind_common_new),
+                        &mut eq_proc_indices_0_delta
+                            .to_rel_index_write(&mut __eq_proc_ind_common_delta),
+                        &mut eq_proc_indices_0_total
+                            .to_rel_index_write(&mut __eq_proc_ind_common_total),
+                    );
+                    let mut eq_proc_indices_0_1_delta: ::ascent_byods_rels::eqrel_ind::ToEqRelInd0_1<
+                        Proc,
+                    > = ::std::mem::take(&mut _self.eq_proc_indices_0_1);
+                    let mut eq_proc_indices_0_1_total: ::ascent_byods_rels::eqrel_ind::ToEqRelInd0_1<
+                        Proc,
+                    > = Default::default();
+                    let mut eq_proc_indices_0_1_new: ::ascent_byods_rels::eqrel_ind::ToEqRelInd0_1<
+                        Proc,
+                    > = Default::default();
+                    ::ascent::internal::RelIndexMerge::init(
+                        &mut eq_proc_indices_0_1_new
+                            .to_rel_index_write(&mut __eq_proc_ind_common_new),
+                        &mut eq_proc_indices_0_1_delta
+                            .to_rel_index_write(&mut __eq_proc_ind_common_delta),
+                        &mut eq_proc_indices_0_1_total
+                            .to_rel_index_write(&mut __eq_proc_ind_common_total),
+                    );
+                    let mut __name_ind_common_delta: () = ::std::mem::take(
+                        &mut _self.__name_ind_common,
+                    );
+                    let mut __name_ind_common_total: () = Default::default();
+                    let mut __name_ind_common_new: () = Default::default();
+                    ::ascent::internal::RelIndexMerge::init(
+                        &mut __name_ind_common_new,
+                        &mut __name_ind_common_delta,
+                        &mut __name_ind_common_total,
+                    );
+                    let mut name_indices_0_delta: ascent::internal::RelFullIndexType<
+                        (Name,),
                         (),
-                    > = ::std::mem::take(&mut _self.eq_indices_0_1);
-                    let mut eq_indices_0_1_total: ascent::internal::RelFullIndexType<
-                        (Proc, Proc),
+                    > = ::std::mem::take(&mut _self.name_indices_0);
+                    let mut name_indices_0_total: ascent::internal::RelFullIndexType<
+                        (Name,),
                         (),
                     > = Default::default();
-                    let mut eq_indices_0_1_new: ascent::internal::RelFullIndexType<
-                        (Proc, Proc),
+                    let mut name_indices_0_new: ascent::internal::RelFullIndexType<
+                        (Name,),
                         (),
                     > = Default::default();
                     ::ascent::internal::RelIndexMerge::init(
-                        &mut eq_indices_0_1_new
-                            .to_rel_index_write(&mut __eq_ind_common_new),
-                        &mut eq_indices_0_1_delta
-                            .to_rel_index_write(&mut __eq_ind_common_delta),
-                        &mut eq_indices_0_1_total
-                            .to_rel_index_write(&mut __eq_ind_common_total),
+                        &mut name_indices_0_new
+                            .to_rel_index_write(&mut __name_ind_common_new),
+                        &mut name_indices_0_delta
+                            .to_rel_index_write(&mut __name_ind_common_delta),
+                        &mut name_indices_0_total
+                            .to_rel_index_write(&mut __name_ind_common_total),
                     );
-                    let mut eq_indices_1_delta: ascent::rel::ToRelIndexType<
-                        (Proc,),
-                        (Proc,),
-                    > = ::std::mem::take(&mut _self.eq_indices_1);
-                    let mut eq_indices_1_total: ascent::rel::ToRelIndexType<
-                        (Proc,),
-                        (Proc,),
+                    let mut name_indices_none_delta: ascent::rel::ToRelIndexType<
+                        (),
+                        (Name,),
+                    > = ::std::mem::take(&mut _self.name_indices_none);
+                    let mut name_indices_none_total: ascent::rel::ToRelIndexType<
+                        (),
+                        (Name,),
                     > = Default::default();
-                    let mut eq_indices_1_new: ascent::rel::ToRelIndexType<
-                        (Proc,),
-                        (Proc,),
+                    let mut name_indices_none_new: ascent::rel::ToRelIndexType<
+                        (),
+                        (Name,),
                     > = Default::default();
                     ::ascent::internal::RelIndexMerge::init(
-                        &mut eq_indices_1_new
-                            .to_rel_index_write(&mut __eq_ind_common_new),
-                        &mut eq_indices_1_delta
-                            .to_rel_index_write(&mut __eq_ind_common_delta),
-                        &mut eq_indices_1_total
-                            .to_rel_index_write(&mut __eq_ind_common_total),
-                    );
-                    let mut eq_indices_none_delta: ascent::rel::ToRelIndexType<
-                        (),
-                        (Proc, Proc),
-                    > = ::std::mem::take(&mut _self.eq_indices_none);
-                    let mut eq_indices_none_total: ascent::rel::ToRelIndexType<
-                        (),
-                        (Proc, Proc),
-                    > = Default::default();
-                    let mut eq_indices_none_new: ascent::rel::ToRelIndexType<
-                        (),
-                        (Proc, Proc),
-                    > = Default::default();
-                    ::ascent::internal::RelIndexMerge::init(
-                        &mut eq_indices_none_new
-                            .to_rel_index_write(&mut __eq_ind_common_new),
-                        &mut eq_indices_none_delta
-                            .to_rel_index_write(&mut __eq_ind_common_delta),
-                        &mut eq_indices_none_total
-                            .to_rel_index_write(&mut __eq_ind_common_total),
+                        &mut name_indices_none_new
+                            .to_rel_index_write(&mut __name_ind_common_new),
+                        &mut name_indices_none_delta
+                            .to_rel_index_write(&mut __name_ind_common_delta),
+                        &mut name_indices_none_total
+                            .to_rel_index_write(&mut __name_ind_common_total),
                     );
                     let mut __proc_ind_common_delta: () = ::std::mem::take(
                         &mut _self.__proc_ind_common,
@@ -4469,109 +4856,231 @@ logical indices: rw_indices_0; rw_indices_0_1; rw_indices_1; rw_indices_none*/
                         &mut proc_indices_none_total
                             .to_rel_index_write(&mut __proc_ind_common_total),
                     );
-                    let mut __rw_ind_common_delta: () = ::std::mem::take(
-                        &mut _self.__rw_ind_common,
+                    let mut __redex_eq_ind_common_delta: () = ::std::mem::take(
+                        &mut _self.__redex_eq_ind_common,
                     );
-                    let mut __rw_ind_common_total: () = Default::default();
-                    let mut __rw_ind_common_new: () = Default::default();
+                    let mut __redex_eq_ind_common_total: () = Default::default();
+                    let mut __redex_eq_ind_common_new: () = Default::default();
                     ::ascent::internal::RelIndexMerge::init(
-                        &mut __rw_ind_common_new,
-                        &mut __rw_ind_common_delta,
-                        &mut __rw_ind_common_total,
+                        &mut __redex_eq_ind_common_new,
+                        &mut __redex_eq_ind_common_delta,
+                        &mut __redex_eq_ind_common_total,
                     );
-                    let mut rw_indices_0_delta: ascent::rel::ToRelIndexType<
+                    let mut redex_eq_indices_0_delta: ascent::internal::RelFullIndexType<
                         (Proc,),
-                        (Proc,),
-                    > = ::std::mem::take(&mut _self.rw_indices_0);
-                    let mut rw_indices_0_total: ascent::rel::ToRelIndexType<
-                        (Proc,),
-                        (Proc,),
-                    > = Default::default();
-                    let mut rw_indices_0_new: ascent::rel::ToRelIndexType<
-                        (Proc,),
-                        (Proc,),
-                    > = Default::default();
-                    ::ascent::internal::RelIndexMerge::init(
-                        &mut rw_indices_0_new
-                            .to_rel_index_write(&mut __rw_ind_common_new),
-                        &mut rw_indices_0_delta
-                            .to_rel_index_write(&mut __rw_ind_common_delta),
-                        &mut rw_indices_0_total
-                            .to_rel_index_write(&mut __rw_ind_common_total),
-                    );
-                    let mut rw_indices_0_1_delta: ascent::internal::RelFullIndexType<
-                        (Proc, Proc),
                         (),
-                    > = ::std::mem::take(&mut _self.rw_indices_0_1);
-                    let mut rw_indices_0_1_total: ascent::internal::RelFullIndexType<
-                        (Proc, Proc),
+                    > = ::std::mem::take(&mut _self.redex_eq_indices_0);
+                    let mut redex_eq_indices_0_total: ascent::internal::RelFullIndexType<
+                        (Proc,),
                         (),
                     > = Default::default();
-                    let mut rw_indices_0_1_new: ascent::internal::RelFullIndexType<
-                        (Proc, Proc),
+                    let mut redex_eq_indices_0_new: ascent::internal::RelFullIndexType<
+                        (Proc,),
                         (),
                     > = Default::default();
                     ::ascent::internal::RelIndexMerge::init(
-                        &mut rw_indices_0_1_new
-                            .to_rel_index_write(&mut __rw_ind_common_new),
-                        &mut rw_indices_0_1_delta
-                            .to_rel_index_write(&mut __rw_ind_common_delta),
-                        &mut rw_indices_0_1_total
-                            .to_rel_index_write(&mut __rw_ind_common_total),
+                        &mut redex_eq_indices_0_new
+                            .to_rel_index_write(&mut __redex_eq_ind_common_new),
+                        &mut redex_eq_indices_0_delta
+                            .to_rel_index_write(&mut __redex_eq_ind_common_delta),
+                        &mut redex_eq_indices_0_total
+                            .to_rel_index_write(&mut __redex_eq_ind_common_total),
                     );
-                    let mut rw_indices_1_delta: ascent::rel::ToRelIndexType<
+                    let mut redex_eq_indices_none_delta: ascent::rel::ToRelIndexType<
+                        (),
+                        (Proc,),
+                    > = ::std::mem::take(&mut _self.redex_eq_indices_none);
+                    let mut redex_eq_indices_none_total: ascent::rel::ToRelIndexType<
+                        (),
+                        (Proc,),
+                    > = Default::default();
+                    let mut redex_eq_indices_none_new: ascent::rel::ToRelIndexType<
+                        (),
+                        (Proc,),
+                    > = Default::default();
+                    ::ascent::internal::RelIndexMerge::init(
+                        &mut redex_eq_indices_none_new
+                            .to_rel_index_write(&mut __redex_eq_ind_common_new),
+                        &mut redex_eq_indices_none_delta
+                            .to_rel_index_write(&mut __redex_eq_ind_common_delta),
+                        &mut redex_eq_indices_none_total
+                            .to_rel_index_write(&mut __redex_eq_ind_common_total),
+                    );
+                    let mut __rw_name_ind_common_delta: () = ::std::mem::take(
+                        &mut _self.__rw_name_ind_common,
+                    );
+                    let mut __rw_name_ind_common_total: () = Default::default();
+                    let mut __rw_name_ind_common_new: () = Default::default();
+                    ::ascent::internal::RelIndexMerge::init(
+                        &mut __rw_name_ind_common_new,
+                        &mut __rw_name_ind_common_delta,
+                        &mut __rw_name_ind_common_total,
+                    );
+                    let mut rw_name_indices_0_delta: ascent::rel::ToRelIndexType<
+                        (Name,),
+                        (Name,),
+                    > = ::std::mem::take(&mut _self.rw_name_indices_0);
+                    let mut rw_name_indices_0_total: ascent::rel::ToRelIndexType<
+                        (Name,),
+                        (Name,),
+                    > = Default::default();
+                    let mut rw_name_indices_0_new: ascent::rel::ToRelIndexType<
+                        (Name,),
+                        (Name,),
+                    > = Default::default();
+                    ::ascent::internal::RelIndexMerge::init(
+                        &mut rw_name_indices_0_new
+                            .to_rel_index_write(&mut __rw_name_ind_common_new),
+                        &mut rw_name_indices_0_delta
+                            .to_rel_index_write(&mut __rw_name_ind_common_delta),
+                        &mut rw_name_indices_0_total
+                            .to_rel_index_write(&mut __rw_name_ind_common_total),
+                    );
+                    let mut rw_name_indices_0_1_delta: ascent::internal::RelFullIndexType<
+                        (Name, Name),
+                        (),
+                    > = ::std::mem::take(&mut _self.rw_name_indices_0_1);
+                    let mut rw_name_indices_0_1_total: ascent::internal::RelFullIndexType<
+                        (Name, Name),
+                        (),
+                    > = Default::default();
+                    let mut rw_name_indices_0_1_new: ascent::internal::RelFullIndexType<
+                        (Name, Name),
+                        (),
+                    > = Default::default();
+                    ::ascent::internal::RelIndexMerge::init(
+                        &mut rw_name_indices_0_1_new
+                            .to_rel_index_write(&mut __rw_name_ind_common_new),
+                        &mut rw_name_indices_0_1_delta
+                            .to_rel_index_write(&mut __rw_name_ind_common_delta),
+                        &mut rw_name_indices_0_1_total
+                            .to_rel_index_write(&mut __rw_name_ind_common_total),
+                    );
+                    let mut rw_name_indices_1_delta: ascent::rel::ToRelIndexType<
+                        (Name,),
+                        (Name,),
+                    > = ::std::mem::take(&mut _self.rw_name_indices_1);
+                    let mut rw_name_indices_1_total: ascent::rel::ToRelIndexType<
+                        (Name,),
+                        (Name,),
+                    > = Default::default();
+                    let mut rw_name_indices_1_new: ascent::rel::ToRelIndexType<
+                        (Name,),
+                        (Name,),
+                    > = Default::default();
+                    ::ascent::internal::RelIndexMerge::init(
+                        &mut rw_name_indices_1_new
+                            .to_rel_index_write(&mut __rw_name_ind_common_new),
+                        &mut rw_name_indices_1_delta
+                            .to_rel_index_write(&mut __rw_name_ind_common_delta),
+                        &mut rw_name_indices_1_total
+                            .to_rel_index_write(&mut __rw_name_ind_common_total),
+                    );
+                    let mut __rw_proc_ind_common_delta: () = ::std::mem::take(
+                        &mut _self.__rw_proc_ind_common,
+                    );
+                    let mut __rw_proc_ind_common_total: () = Default::default();
+                    let mut __rw_proc_ind_common_new: () = Default::default();
+                    ::ascent::internal::RelIndexMerge::init(
+                        &mut __rw_proc_ind_common_new,
+                        &mut __rw_proc_ind_common_delta,
+                        &mut __rw_proc_ind_common_total,
+                    );
+                    let mut rw_proc_indices_0_delta: ascent::rel::ToRelIndexType<
                         (Proc,),
                         (Proc,),
-                    > = ::std::mem::take(&mut _self.rw_indices_1);
-                    let mut rw_indices_1_total: ascent::rel::ToRelIndexType<
+                    > = ::std::mem::take(&mut _self.rw_proc_indices_0);
+                    let mut rw_proc_indices_0_total: ascent::rel::ToRelIndexType<
                         (Proc,),
                         (Proc,),
                     > = Default::default();
-                    let mut rw_indices_1_new: ascent::rel::ToRelIndexType<
+                    let mut rw_proc_indices_0_new: ascent::rel::ToRelIndexType<
                         (Proc,),
                         (Proc,),
                     > = Default::default();
                     ::ascent::internal::RelIndexMerge::init(
-                        &mut rw_indices_1_new
-                            .to_rel_index_write(&mut __rw_ind_common_new),
-                        &mut rw_indices_1_delta
-                            .to_rel_index_write(&mut __rw_ind_common_delta),
-                        &mut rw_indices_1_total
-                            .to_rel_index_write(&mut __rw_ind_common_total),
+                        &mut rw_proc_indices_0_new
+                            .to_rel_index_write(&mut __rw_proc_ind_common_new),
+                        &mut rw_proc_indices_0_delta
+                            .to_rel_index_write(&mut __rw_proc_ind_common_delta),
+                        &mut rw_proc_indices_0_total
+                            .to_rel_index_write(&mut __rw_proc_ind_common_total),
                     );
-                    let mut rw_indices_none_delta: ascent::rel::ToRelIndexType<
+                    let mut rw_proc_indices_0_1_delta: ascent::internal::RelFullIndexType<
+                        (Proc, Proc),
+                        (),
+                    > = ::std::mem::take(&mut _self.rw_proc_indices_0_1);
+                    let mut rw_proc_indices_0_1_total: ascent::internal::RelFullIndexType<
+                        (Proc, Proc),
+                        (),
+                    > = Default::default();
+                    let mut rw_proc_indices_0_1_new: ascent::internal::RelFullIndexType<
+                        (Proc, Proc),
+                        (),
+                    > = Default::default();
+                    ::ascent::internal::RelIndexMerge::init(
+                        &mut rw_proc_indices_0_1_new
+                            .to_rel_index_write(&mut __rw_proc_ind_common_new),
+                        &mut rw_proc_indices_0_1_delta
+                            .to_rel_index_write(&mut __rw_proc_ind_common_delta),
+                        &mut rw_proc_indices_0_1_total
+                            .to_rel_index_write(&mut __rw_proc_ind_common_total),
+                    );
+                    let mut rw_proc_indices_1_delta: ascent::rel::ToRelIndexType<
+                        (Proc,),
+                        (Proc,),
+                    > = ::std::mem::take(&mut _self.rw_proc_indices_1);
+                    let mut rw_proc_indices_1_total: ascent::rel::ToRelIndexType<
+                        (Proc,),
+                        (Proc,),
+                    > = Default::default();
+                    let mut rw_proc_indices_1_new: ascent::rel::ToRelIndexType<
+                        (Proc,),
+                        (Proc,),
+                    > = Default::default();
+                    ::ascent::internal::RelIndexMerge::init(
+                        &mut rw_proc_indices_1_new
+                            .to_rel_index_write(&mut __rw_proc_ind_common_new),
+                        &mut rw_proc_indices_1_delta
+                            .to_rel_index_write(&mut __rw_proc_ind_common_delta),
+                        &mut rw_proc_indices_1_total
+                            .to_rel_index_write(&mut __rw_proc_ind_common_total),
+                    );
+                    let mut rw_proc_indices_none_delta: ascent::rel::ToRelIndexType<
                         (),
                         (Proc, Proc),
-                    > = ::std::mem::take(&mut _self.rw_indices_none);
-                    let mut rw_indices_none_total: ascent::rel::ToRelIndexType<
+                    > = ::std::mem::take(&mut _self.rw_proc_indices_none);
+                    let mut rw_proc_indices_none_total: ascent::rel::ToRelIndexType<
                         (),
                         (Proc, Proc),
                     > = Default::default();
-                    let mut rw_indices_none_new: ascent::rel::ToRelIndexType<
+                    let mut rw_proc_indices_none_new: ascent::rel::ToRelIndexType<
                         (),
                         (Proc, Proc),
                     > = Default::default();
                     ::ascent::internal::RelIndexMerge::init(
-                        &mut rw_indices_none_new
-                            .to_rel_index_write(&mut __rw_ind_common_new),
-                        &mut rw_indices_none_delta
-                            .to_rel_index_write(&mut __rw_ind_common_delta),
-                        &mut rw_indices_none_total
-                            .to_rel_index_write(&mut __rw_ind_common_total),
+                        &mut rw_proc_indices_none_new
+                            .to_rel_index_write(&mut __rw_proc_ind_common_new),
+                        &mut rw_proc_indices_none_delta
+                            .to_rel_index_write(&mut __rw_proc_ind_common_delta),
+                        &mut rw_proc_indices_none_total
+                            .to_rel_index_write(&mut __rw_proc_ind_common_total),
                     );
                     #[allow(unused_assignments, unused_variables)]
                     loop {
                         let mut __changed = false;
                         ascent::internal::comment(
-                            "proc <-- proc_indices_0_delta, rw_indices_0_total+delta [SIMPLE JOIN]",
+                            "proc <-- proc_indices_0_delta, rw_proc_indices_0_total+delta [SIMPLE JOIN]",
                         );
                         {
                             if proc_indices_0_delta
                                 .to_rel_index(&__proc_ind_common_delta)
                                 .len_estimate()
                                 <= ascent::internal::RelIndexCombined::new(
-                                        &rw_indices_0_total.to_rel_index(&__rw_ind_common_total),
-                                        &rw_indices_0_delta.to_rel_index(&__rw_ind_common_delta),
+                                        &rw_proc_indices_0_total
+                                            .to_rel_index(&__rw_proc_ind_common_total),
+                                        &rw_proc_indices_0_delta
+                                            .to_rel_index(&__rw_proc_ind_common_delta),
                                     )
                                     .len_estimate()
                             {
@@ -4581,12 +5090,14 @@ logical indices: rw_indices_0; rw_indices_0_1; rw_indices_1; rw_indices_none*/
                                     .for_each(|(__cl1_joined_columns, __cl1_tuple_indices)| {
                                         let __cl1_joined_columns = __cl1_joined_columns
                                             .tuple_of_borrowed();
-                                        let p0 = __cl1_joined_columns.0;
+                                        let c0 = __cl1_joined_columns.0;
                                         if let Some(__matching) = ascent::internal::RelIndexCombined::new(
-                                                &rw_indices_0_total.to_rel_index(&__rw_ind_common_total),
-                                                &rw_indices_0_delta.to_rel_index(&__rw_ind_common_delta),
+                                                &rw_proc_indices_0_total
+                                                    .to_rel_index(&__rw_proc_ind_common_total),
+                                                &rw_proc_indices_0_delta
+                                                    .to_rel_index(&__rw_proc_ind_common_delta),
                                             )
-                                            .index_get(&(p0.clone(),))
+                                            .index_get(&(c0.clone(),))
                                         {
                                             __cl1_tuple_indices
                                                 .for_each(|cl1_val| {
@@ -4594,9 +5105,9 @@ logical indices: rw_indices_0; rw_indices_0_1; rw_indices_1; rw_indices_none*/
                                                         .clone()
                                                         .for_each(|__val| {
                                                             let __val = __val.tuple_of_borrowed();
-                                                            let p1: &Proc = __val.0;
+                                                            let c1: &Proc = __val.0;
                                                             let __new_row: (Proc,) = (
-                                                                ascent::internal::Convert::convert(p1),
+                                                                ascent::internal::Convert::convert(c1),
                                                             );
                                                             if !::ascent::internal::RelFullIndexRead::contains_key(
                                                                 &proc_indices_0_total
@@ -4632,27 +5143,29 @@ logical indices: rw_indices_0; rw_indices_0_1; rw_indices_1; rw_indices_none*/
                                     });
                             } else {
                                 ascent::internal::RelIndexCombined::new(
-                                        &rw_indices_0_total.to_rel_index(&__rw_ind_common_total),
-                                        &rw_indices_0_delta.to_rel_index(&__rw_ind_common_delta),
+                                        &rw_proc_indices_0_total
+                                            .to_rel_index(&__rw_proc_ind_common_total),
+                                        &rw_proc_indices_0_delta
+                                            .to_rel_index(&__rw_proc_ind_common_delta),
                                     )
                                     .iter_all()
                                     .for_each(|(__cl1_joined_columns, __cl1_tuple_indices)| {
                                         let __cl1_joined_columns = __cl1_joined_columns
                                             .tuple_of_borrowed();
-                                        let p0 = __cl1_joined_columns.0;
+                                        let c0 = __cl1_joined_columns.0;
                                         if let Some(__matching) = proc_indices_0_delta
                                             .to_rel_index(&__proc_ind_common_delta)
-                                            .index_get(&(p0.clone(),))
+                                            .index_get(&(c0.clone(),))
                                         {
                                             __cl1_tuple_indices
                                                 .for_each(|cl1_val| {
                                                     let cl1_val = cl1_val.tuple_of_borrowed();
-                                                    let p1: &Proc = cl1_val.0;
+                                                    let c1: &Proc = cl1_val.0;
                                                     __matching
                                                         .clone()
                                                         .for_each(|__val| {
                                                             let __new_row: (Proc,) = (
-                                                                ascent::internal::Convert::convert(p1),
+                                                                ascent::internal::Convert::convert(c1),
                                                             );
                                                             if !::ascent::internal::RelFullIndexRead::contains_key(
                                                                 &proc_indices_0_total
@@ -4689,14 +5202,14 @@ logical indices: rw_indices_0; rw_indices_0_1; rw_indices_1; rw_indices_none*/
                             }
                         }
                         ascent::internal::comment(
-                            "proc <-- proc_indices_0_total, rw_indices_0_delta [SIMPLE JOIN]",
+                            "proc <-- proc_indices_0_total, rw_proc_indices_0_delta [SIMPLE JOIN]",
                         );
                         {
                             if proc_indices_0_total
                                 .to_rel_index(&__proc_ind_common_total)
                                 .len_estimate()
-                                <= rw_indices_0_delta
-                                    .to_rel_index(&__rw_ind_common_delta)
+                                <= rw_proc_indices_0_delta
+                                    .to_rel_index(&__rw_proc_ind_common_delta)
                                     .len_estimate()
                             {
                                 proc_indices_0_total
@@ -4705,10 +5218,10 @@ logical indices: rw_indices_0; rw_indices_0_1; rw_indices_1; rw_indices_none*/
                                     .for_each(|(__cl1_joined_columns, __cl1_tuple_indices)| {
                                         let __cl1_joined_columns = __cl1_joined_columns
                                             .tuple_of_borrowed();
-                                        let p0 = __cl1_joined_columns.0;
-                                        if let Some(__matching) = rw_indices_0_delta
-                                            .to_rel_index(&__rw_ind_common_delta)
-                                            .index_get(&(p0.clone(),))
+                                        let c0 = __cl1_joined_columns.0;
+                                        if let Some(__matching) = rw_proc_indices_0_delta
+                                            .to_rel_index(&__rw_proc_ind_common_delta)
+                                            .index_get(&(c0.clone(),))
                                         {
                                             __cl1_tuple_indices
                                                 .for_each(|cl1_val| {
@@ -4716,9 +5229,9 @@ logical indices: rw_indices_0; rw_indices_0_1; rw_indices_1; rw_indices_none*/
                                                         .clone()
                                                         .for_each(|__val| {
                                                             let __val = __val.tuple_of_borrowed();
-                                                            let p1: &Proc = __val.0;
+                                                            let c1: &Proc = __val.0;
                                                             let __new_row: (Proc,) = (
-                                                                ascent::internal::Convert::convert(p1),
+                                                                ascent::internal::Convert::convert(c1),
                                                             );
                                                             if !::ascent::internal::RelFullIndexRead::contains_key(
                                                                 &proc_indices_0_total
@@ -4753,26 +5266,26 @@ logical indices: rw_indices_0; rw_indices_0_1; rw_indices_1; rw_indices_none*/
                                         }
                                     });
                             } else {
-                                rw_indices_0_delta
-                                    .to_rel_index(&__rw_ind_common_delta)
+                                rw_proc_indices_0_delta
+                                    .to_rel_index(&__rw_proc_ind_common_delta)
                                     .iter_all()
                                     .for_each(|(__cl1_joined_columns, __cl1_tuple_indices)| {
                                         let __cl1_joined_columns = __cl1_joined_columns
                                             .tuple_of_borrowed();
-                                        let p0 = __cl1_joined_columns.0;
+                                        let c0 = __cl1_joined_columns.0;
                                         if let Some(__matching) = proc_indices_0_total
                                             .to_rel_index(&__proc_ind_common_total)
-                                            .index_get(&(p0.clone(),))
+                                            .index_get(&(c0.clone(),))
                                         {
                                             __cl1_tuple_indices
                                                 .for_each(|cl1_val| {
                                                     let cl1_val = cl1_val.tuple_of_borrowed();
-                                                    let p1: &Proc = cl1_val.0;
+                                                    let c1: &Proc = cl1_val.0;
                                                     __matching
                                                         .clone()
                                                         .for_each(|__val| {
                                                             let __new_row: (Proc,) = (
-                                                                ascent::internal::Convert::convert(p1),
+                                                                ascent::internal::Convert::convert(c1),
                                                             );
                                                             if !::ascent::internal::RelFullIndexRead::contains_key(
                                                                 &proc_indices_0_total
@@ -4809,247 +5322,152 @@ logical indices: rw_indices_0; rw_indices_0_1; rw_indices_1; rw_indices_none*/
                             }
                         }
                         ascent::internal::comment(
-                            "proc <-- proc_indices_0_delta, eq_indices_0_total+delta [SIMPLE JOIN]",
+                            "name, proc <-- proc_indices_none_delta, if let ⋯",
                         );
                         {
-                            if proc_indices_0_delta
+                            if let Some(__matching) = proc_indices_none_delta
                                 .to_rel_index(&__proc_ind_common_delta)
-                                .len_estimate()
-                                <= ascent::internal::RelIndexCombined::new(
-                                        &eq_indices_0_total.to_rel_index(&__eq_ind_common_total),
-                                        &eq_indices_0_delta.to_rel_index(&__eq_ind_common_delta),
-                                    )
-                                    .len_estimate()
+                                .index_get(&())
                             {
-                                proc_indices_0_delta
-                                    .to_rel_index(&__proc_ind_common_delta)
-                                    .iter_all()
-                                    .for_each(|(__cl1_joined_columns, __cl1_tuple_indices)| {
-                                        let __cl1_joined_columns = __cl1_joined_columns
-                                            .tuple_of_borrowed();
-                                        let p0 = __cl1_joined_columns.0;
-                                        if let Some(__matching) = ascent::internal::RelIndexCombined::new(
-                                                &eq_indices_0_total.to_rel_index(&__eq_ind_common_total),
-                                                &eq_indices_0_delta.to_rel_index(&__eq_ind_common_delta),
+                                __matching
+                                    .for_each(|__val| {
+                                        let __val = __val.tuple_of_borrowed();
+                                        let t: &Proc = __val.0;
+                                        if let Proc::POutput(field_0, field_1) = t {
+                                            let __new_row: (Name,) = (*field_0.clone(),);
+                                            if !::ascent::internal::RelFullIndexRead::contains_key(
+                                                &name_indices_0_total
+                                                    .to_rel_index(&__name_ind_common_total),
+                                                &__new_row,
                                             )
-                                            .index_get(&(p0.clone(),))
-                                        {
-                                            __cl1_tuple_indices
-                                                .for_each(|cl1_val| {
-                                                    __matching
-                                                        .clone()
-                                                        .for_each(|__val| {
-                                                            let __val = __val.tuple_of_borrowed();
-                                                            let p1: &Proc = __val.0;
-                                                            let __new_row: (Proc,) = (
-                                                                ascent::internal::Convert::convert(p1),
-                                                            );
-                                                            if !::ascent::internal::RelFullIndexRead::contains_key(
-                                                                &proc_indices_0_total
-                                                                    .to_rel_index(&__proc_ind_common_total),
-                                                                &__new_row,
-                                                            )
-                                                                && !::ascent::internal::RelFullIndexRead::contains_key(
-                                                                    &proc_indices_0_delta
-                                                                        .to_rel_index(&__proc_ind_common_delta),
-                                                                    &__new_row,
-                                                                )
-                                                            {
-                                                                if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
-                                                                    &mut proc_indices_0_new
-                                                                        .to_rel_index_write(&mut __proc_ind_common_new),
-                                                                    &__new_row,
-                                                                    (),
-                                                                ) {
-                                                                    let __new_row_ind = _self.proc.len();
-                                                                    _self.proc.push((__new_row.0.clone(),));
-                                                                    ::ascent::internal::RelIndexWrite::index_insert(
-                                                                        &mut proc_indices_none_new
-                                                                            .to_rel_index_write(&mut __proc_ind_common_new),
-                                                                        (),
-                                                                        (__new_row.0.clone(),),
-                                                                    );
-                                                                    __changed = true;
-                                                                }
-                                                            }
-                                                        });
-                                                });
-                                        }
-                                    });
-                            } else {
-                                ascent::internal::RelIndexCombined::new(
-                                        &eq_indices_0_total.to_rel_index(&__eq_ind_common_total),
-                                        &eq_indices_0_delta.to_rel_index(&__eq_ind_common_delta),
-                                    )
-                                    .iter_all()
-                                    .for_each(|(__cl1_joined_columns, __cl1_tuple_indices)| {
-                                        let __cl1_joined_columns = __cl1_joined_columns
-                                            .tuple_of_borrowed();
-                                        let p0 = __cl1_joined_columns.0;
-                                        if let Some(__matching) = proc_indices_0_delta
-                                            .to_rel_index(&__proc_ind_common_delta)
-                                            .index_get(&(p0.clone(),))
-                                        {
-                                            __cl1_tuple_indices
-                                                .for_each(|cl1_val| {
-                                                    let cl1_val = cl1_val.tuple_of_borrowed();
-                                                    let p1: &Proc = cl1_val.0;
-                                                    __matching
-                                                        .clone()
-                                                        .for_each(|__val| {
-                                                            let __new_row: (Proc,) = (
-                                                                ascent::internal::Convert::convert(p1),
-                                                            );
-                                                            if !::ascent::internal::RelFullIndexRead::contains_key(
-                                                                &proc_indices_0_total
-                                                                    .to_rel_index(&__proc_ind_common_total),
-                                                                &__new_row,
-                                                            )
-                                                                && !::ascent::internal::RelFullIndexRead::contains_key(
-                                                                    &proc_indices_0_delta
-                                                                        .to_rel_index(&__proc_ind_common_delta),
-                                                                    &__new_row,
-                                                                )
-                                                            {
-                                                                if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
-                                                                    &mut proc_indices_0_new
-                                                                        .to_rel_index_write(&mut __proc_ind_common_new),
-                                                                    &__new_row,
-                                                                    (),
-                                                                ) {
-                                                                    let __new_row_ind = _self.proc.len();
-                                                                    _self.proc.push((__new_row.0.clone(),));
-                                                                    ::ascent::internal::RelIndexWrite::index_insert(
-                                                                        &mut proc_indices_none_new
-                                                                            .to_rel_index_write(&mut __proc_ind_common_new),
-                                                                        (),
-                                                                        (__new_row.0.clone(),),
-                                                                    );
-                                                                    __changed = true;
-                                                                }
-                                                            }
-                                                        });
-                                                });
+                                                && !::ascent::internal::RelFullIndexRead::contains_key(
+                                                    &name_indices_0_delta
+                                                        .to_rel_index(&__name_ind_common_delta),
+                                                    &__new_row,
+                                                )
+                                            {
+                                                if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
+                                                    &mut name_indices_0_new
+                                                        .to_rel_index_write(&mut __name_ind_common_new),
+                                                    &__new_row,
+                                                    (),
+                                                ) {
+                                                    let __new_row_ind = _self.name.len();
+                                                    _self.name.push((__new_row.0.clone(),));
+                                                    ::ascent::internal::RelIndexWrite::index_insert(
+                                                        &mut name_indices_none_new
+                                                            .to_rel_index_write(&mut __name_ind_common_new),
+                                                        (),
+                                                        (__new_row.0.clone(),),
+                                                    );
+                                                    __changed = true;
+                                                }
+                                            }
+                                            let __new_row: (Proc,) = (*field_1.clone(),);
+                                            if !::ascent::internal::RelFullIndexRead::contains_key(
+                                                &proc_indices_0_total
+                                                    .to_rel_index(&__proc_ind_common_total),
+                                                &__new_row,
+                                            )
+                                                && !::ascent::internal::RelFullIndexRead::contains_key(
+                                                    &proc_indices_0_delta
+                                                        .to_rel_index(&__proc_ind_common_delta),
+                                                    &__new_row,
+                                                )
+                                            {
+                                                if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
+                                                    &mut proc_indices_0_new
+                                                        .to_rel_index_write(&mut __proc_ind_common_new),
+                                                    &__new_row,
+                                                    (),
+                                                ) {
+                                                    let __new_row_ind = _self.proc.len();
+                                                    _self.proc.push((__new_row.0.clone(),));
+                                                    ::ascent::internal::RelIndexWrite::index_insert(
+                                                        &mut proc_indices_none_new
+                                                            .to_rel_index_write(&mut __proc_ind_common_new),
+                                                        (),
+                                                        (__new_row.0.clone(),),
+                                                    );
+                                                    __changed = true;
+                                                }
+                                            }
                                         }
                                     });
                             }
                         }
                         ascent::internal::comment(
-                            "proc <-- proc_indices_0_total, eq_indices_0_delta [SIMPLE JOIN]",
+                            "name, proc <-- proc_indices_none_delta, if let ⋯, let ⋯",
                         );
                         {
-                            if proc_indices_0_total
-                                .to_rel_index(&__proc_ind_common_total)
-                                .len_estimate()
-                                <= eq_indices_0_delta
-                                    .to_rel_index(&__eq_ind_common_delta)
-                                    .len_estimate()
+                            if let Some(__matching) = proc_indices_none_delta
+                                .to_rel_index(&__proc_ind_common_delta)
+                                .index_get(&())
                             {
-                                proc_indices_0_total
-                                    .to_rel_index(&__proc_ind_common_total)
-                                    .iter_all()
-                                    .for_each(|(__cl1_joined_columns, __cl1_tuple_indices)| {
-                                        let __cl1_joined_columns = __cl1_joined_columns
-                                            .tuple_of_borrowed();
-                                        let p0 = __cl1_joined_columns.0;
-                                        if let Some(__matching) = eq_indices_0_delta
-                                            .to_rel_index(&__eq_ind_common_delta)
-                                            .index_get(&(p0.clone(),))
-                                        {
-                                            __cl1_tuple_indices
-                                                .for_each(|cl1_val| {
-                                                    __matching
-                                                        .clone()
-                                                        .for_each(|__val| {
-                                                            let __val = __val.tuple_of_borrowed();
-                                                            let p1: &Proc = __val.0;
-                                                            let __new_row: (Proc,) = (
-                                                                ascent::internal::Convert::convert(p1),
-                                                            );
-                                                            if !::ascent::internal::RelFullIndexRead::contains_key(
-                                                                &proc_indices_0_total
-                                                                    .to_rel_index(&__proc_ind_common_total),
-                                                                &__new_row,
-                                                            )
-                                                                && !::ascent::internal::RelFullIndexRead::contains_key(
-                                                                    &proc_indices_0_delta
-                                                                        .to_rel_index(&__proc_ind_common_delta),
-                                                                    &__new_row,
-                                                                )
-                                                            {
-                                                                if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
-                                                                    &mut proc_indices_0_new
-                                                                        .to_rel_index_write(&mut __proc_ind_common_new),
-                                                                    &__new_row,
-                                                                    (),
-                                                                ) {
-                                                                    let __new_row_ind = _self.proc.len();
-                                                                    _self.proc.push((__new_row.0.clone(),));
-                                                                    ::ascent::internal::RelIndexWrite::index_insert(
-                                                                        &mut proc_indices_none_new
-                                                                            .to_rel_index_write(&mut __proc_ind_common_new),
-                                                                        (),
-                                                                        (__new_row.0.clone(),),
-                                                                    );
-                                                                    __changed = true;
-                                                                }
-                                                            }
-                                                        });
-                                                });
-                                        }
-                                    });
-                            } else {
-                                eq_indices_0_delta
-                                    .to_rel_index(&__eq_ind_common_delta)
-                                    .iter_all()
-                                    .for_each(|(__cl1_joined_columns, __cl1_tuple_indices)| {
-                                        let __cl1_joined_columns = __cl1_joined_columns
-                                            .tuple_of_borrowed();
-                                        let p0 = __cl1_joined_columns.0;
-                                        if let Some(__matching) = proc_indices_0_total
-                                            .to_rel_index(&__proc_ind_common_total)
-                                            .index_get(&(p0.clone(),))
-                                        {
-                                            __cl1_tuple_indices
-                                                .for_each(|cl1_val| {
-                                                    let cl1_val = cl1_val.tuple_of_borrowed();
-                                                    let p1: &Proc = cl1_val.0;
-                                                    __matching
-                                                        .clone()
-                                                        .for_each(|__val| {
-                                                            let __new_row: (Proc,) = (
-                                                                ascent::internal::Convert::convert(p1),
-                                                            );
-                                                            if !::ascent::internal::RelFullIndexRead::contains_key(
-                                                                &proc_indices_0_total
-                                                                    .to_rel_index(&__proc_ind_common_total),
-                                                                &__new_row,
-                                                            )
-                                                                && !::ascent::internal::RelFullIndexRead::contains_key(
-                                                                    &proc_indices_0_delta
-                                                                        .to_rel_index(&__proc_ind_common_delta),
-                                                                    &__new_row,
-                                                                )
-                                                            {
-                                                                if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
-                                                                    &mut proc_indices_0_new
-                                                                        .to_rel_index_write(&mut __proc_ind_common_new),
-                                                                    &__new_row,
-                                                                    (),
-                                                                ) {
-                                                                    let __new_row_ind = _self.proc.len();
-                                                                    _self.proc.push((__new_row.0.clone(),));
-                                                                    ::ascent::internal::RelIndexWrite::index_insert(
-                                                                        &mut proc_indices_none_new
-                                                                            .to_rel_index_write(&mut __proc_ind_common_new),
-                                                                        (),
-                                                                        (__new_row.0.clone(),),
-                                                                    );
-                                                                    __changed = true;
-                                                                }
-                                                            }
-                                                        });
-                                                });
+                                __matching
+                                    .for_each(|__val| {
+                                        let __val = __val.tuple_of_borrowed();
+                                        let t: &Proc = __val.0;
+                                        if let Proc::PInput(field_0, scope_field) = t {
+                                            let (binder, body) = scope_field.clone().unbind();
+                                            let __new_row: (Name,) = (*field_0.clone(),);
+                                            if !::ascent::internal::RelFullIndexRead::contains_key(
+                                                &name_indices_0_total
+                                                    .to_rel_index(&__name_ind_common_total),
+                                                &__new_row,
+                                            )
+                                                && !::ascent::internal::RelFullIndexRead::contains_key(
+                                                    &name_indices_0_delta
+                                                        .to_rel_index(&__name_ind_common_delta),
+                                                    &__new_row,
+                                                )
+                                            {
+                                                if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
+                                                    &mut name_indices_0_new
+                                                        .to_rel_index_write(&mut __name_ind_common_new),
+                                                    &__new_row,
+                                                    (),
+                                                ) {
+                                                    let __new_row_ind = _self.name.len();
+                                                    _self.name.push((__new_row.0.clone(),));
+                                                    ::ascent::internal::RelIndexWrite::index_insert(
+                                                        &mut name_indices_none_new
+                                                            .to_rel_index_write(&mut __name_ind_common_new),
+                                                        (),
+                                                        (__new_row.0.clone(),),
+                                                    );
+                                                    __changed = true;
+                                                }
+                                            }
+                                            let __new_row: (Proc,) = (*body.clone(),);
+                                            if !::ascent::internal::RelFullIndexRead::contains_key(
+                                                &proc_indices_0_total
+                                                    .to_rel_index(&__proc_ind_common_total),
+                                                &__new_row,
+                                            )
+                                                && !::ascent::internal::RelFullIndexRead::contains_key(
+                                                    &proc_indices_0_delta
+                                                        .to_rel_index(&__proc_ind_common_delta),
+                                                    &__new_row,
+                                                )
+                                            {
+                                                if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
+                                                    &mut proc_indices_0_new
+                                                        .to_rel_index_write(&mut __proc_ind_common_new),
+                                                    &__new_row,
+                                                    (),
+                                                ) {
+                                                    let __new_row_ind = _self.proc.len();
+                                                    _self.proc.push((__new_row.0.clone(),));
+                                                    ::ascent::internal::RelIndexWrite::index_insert(
+                                                        &mut proc_indices_none_new
+                                                            .to_rel_index_write(&mut __proc_ind_common_new),
+                                                        (),
+                                                        (__new_row.0.clone(),),
+                                                    );
+                                                    __changed = true;
+                                                }
+                                            }
                                         }
                                     });
                             }
@@ -5065,9 +5483,9 @@ logical indices: rw_indices_0; rw_indices_0_1; rw_indices_1; rw_indices_none*/
                                 __matching
                                     .for_each(|__val| {
                                         let __val = __val.tuple_of_borrowed();
-                                        let p0: &Proc = __val.0;
-                                        if let Proc::PPar(p, q) = p0 {
-                                            let __new_row: (Proc,) = (*p.clone(),);
+                                        let t: &Proc = __val.0;
+                                        if let Proc::PPar(field_0, field_1) = t {
+                                            let __new_row: (Proc,) = (*field_0.clone(),);
                                             if !::ascent::internal::RelFullIndexRead::contains_key(
                                                 &proc_indices_0_total
                                                     .to_rel_index(&__proc_ind_common_total),
@@ -5096,7 +5514,7 @@ logical indices: rw_indices_0; rw_indices_0_1; rw_indices_1; rw_indices_none*/
                                                     __changed = true;
                                                 }
                                             }
-                                            let __new_row: (Proc,) = (*q.clone(),);
+                                            let __new_row: (Proc,) = (*field_1.clone(),);
                                             if !::ascent::internal::RelFullIndexRead::contains_key(
                                                 &proc_indices_0_total
                                                     .to_rel_index(&__proc_ind_common_total),
@@ -5130,308 +5548,124 @@ logical indices: rw_indices_0; rw_indices_0_1; rw_indices_1; rw_indices_none*/
                             }
                         }
                         ascent::internal::comment(
-                            "rw <-- proc_indices_none_delta, if let ⋯, if let ⋯",
+                            "proc <-- name_indices_none_delta, if let ⋯",
                         );
                         {
-                            if let Some(__matching) = proc_indices_none_delta
-                                .to_rel_index(&__proc_ind_common_delta)
+                            if let Some(__matching) = name_indices_none_delta
+                                .to_rel_index(&__name_ind_common_delta)
                                 .index_get(&())
                             {
                                 __matching
                                     .for_each(|__val| {
                                         let __val = __val.tuple_of_borrowed();
-                                        let s: &Proc = __val.0;
-                                        if let Proc::PDrop(n) = s {
-                                            if let Name::NQuote(p) = &**n {
-                                                let __new_row: (Proc, Proc) = (
-                                                    ascent::internal::Convert::convert(s),
-                                                    *p.clone(),
+                                        let t: &Name = __val.0;
+                                        if let Name::NQuote(field_0) = t {
+                                            let __new_row: (Proc,) = (*field_0.clone(),);
+                                            if !::ascent::internal::RelFullIndexRead::contains_key(
+                                                &proc_indices_0_total
+                                                    .to_rel_index(&__proc_ind_common_total),
+                                                &__new_row,
+                                            )
+                                                && !::ascent::internal::RelFullIndexRead::contains_key(
+                                                    &proc_indices_0_delta
+                                                        .to_rel_index(&__proc_ind_common_delta),
+                                                    &__new_row,
+                                                )
+                                            {
+                                                if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
+                                                    &mut proc_indices_0_new
+                                                        .to_rel_index_write(&mut __proc_ind_common_new),
+                                                    &__new_row,
+                                                    (),
+                                                ) {
+                                                    let __new_row_ind = _self.proc.len();
+                                                    _self.proc.push((__new_row.0.clone(),));
+                                                    ::ascent::internal::RelIndexWrite::index_insert(
+                                                        &mut proc_indices_none_new
+                                                            .to_rel_index_write(&mut __proc_ind_common_new),
+                                                        (),
+                                                        (__new_row.0.clone(),),
+                                                    );
+                                                    __changed = true;
+                                                }
+                                            }
+                                        }
+                                    });
+                            }
+                        }
+                        ascent::internal::comment(
+                            "proc <-- redex_eq_indices_none_delta",
+                        );
+                        {
+                            if let Some(__matching) = redex_eq_indices_none_delta
+                                .to_rel_index(&__redex_eq_ind_common_delta)
+                                .index_get(&())
+                            {
+                                __matching
+                                    .for_each(|__val| {
+                                        let __val = __val.tuple_of_borrowed();
+                                        let q: &Proc = __val.0;
+                                        let __new_row: (Proc,) = (
+                                            ascent::internal::Convert::convert(q),
+                                        );
+                                        if !::ascent::internal::RelFullIndexRead::contains_key(
+                                            &proc_indices_0_total
+                                                .to_rel_index(&__proc_ind_common_total),
+                                            &__new_row,
+                                        )
+                                            && !::ascent::internal::RelFullIndexRead::contains_key(
+                                                &proc_indices_0_delta
+                                                    .to_rel_index(&__proc_ind_common_delta),
+                                                &__new_row,
+                                            )
+                                        {
+                                            if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
+                                                &mut proc_indices_0_new
+                                                    .to_rel_index_write(&mut __proc_ind_common_new),
+                                                &__new_row,
+                                                (),
+                                            ) {
+                                                let __new_row_ind = _self.proc.len();
+                                                _self.proc.push((__new_row.0.clone(),));
+                                                ::ascent::internal::RelIndexWrite::index_insert(
+                                                    &mut proc_indices_none_new
+                                                        .to_rel_index_write(&mut __proc_ind_common_new),
+                                                    (),
+                                                    (__new_row.0.clone(),),
                                                 );
-                                                if !::ascent::internal::RelFullIndexRead::contains_key(
-                                                    &rw_indices_0_1_total.to_rel_index(&__rw_ind_common_total),
-                                                    &__new_row,
-                                                )
-                                                    && !::ascent::internal::RelFullIndexRead::contains_key(
-                                                        &rw_indices_0_1_delta.to_rel_index(&__rw_ind_common_delta),
-                                                        &__new_row,
-                                                    )
-                                                {
-                                                    if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
-                                                        &mut rw_indices_0_1_new
-                                                            .to_rel_index_write(&mut __rw_ind_common_new),
-                                                        &__new_row,
-                                                        (),
-                                                    ) {
-                                                        let __new_row_ind = _self.rw.len();
-                                                        _self.rw.push((__new_row.0.clone(), __new_row.1.clone()));
-                                                        ::ascent::internal::RelIndexWrite::index_insert(
-                                                            &mut rw_indices_0_new
-                                                                .to_rel_index_write(&mut __rw_ind_common_new),
-                                                            (__new_row.0.clone(),),
-                                                            (__new_row.1.clone(),),
-                                                        );
-                                                        ::ascent::internal::RelIndexWrite::index_insert(
-                                                            &mut rw_indices_1_new
-                                                                .to_rel_index_write(&mut __rw_ind_common_new),
-                                                            (__new_row.1.clone(),),
-                                                            (__new_row.0.clone(),),
-                                                        );
-                                                        ::ascent::internal::RelIndexWrite::index_insert(
-                                                            &mut rw_indices_none_new
-                                                                .to_rel_index_write(&mut __rw_ind_common_new),
-                                                            (),
-                                                            (__new_row.0.clone(), __new_row.1.clone()),
-                                                        );
-                                                        __changed = true;
-                                                    }
-                                                }
+                                                __changed = true;
                                             }
                                         }
                                     });
                             }
                         }
                         ascent::internal::comment(
-                            "rw <-- proc_indices_none_delta, if let ⋯",
+                            "rw_proc <-- rw_proc_indices_0_delta, eq_proc_indices_0_total+delta [SIMPLE JOIN]",
                         );
                         {
-                            if let Some(__matching) = proc_indices_none_delta
-                                .to_rel_index(&__proc_ind_common_delta)
-                                .index_get(&())
-                            {
-                                __matching
-                                    .for_each(|__val| {
-                                        let __val = __val.tuple_of_borrowed();
-                                        let s: &Proc = __val.0;
-                                        if let Some(t) = try_rewrite_rule_0(&s) {
-                                            let __new_row: (Proc, Proc) = (
-                                                ascent::internal::Convert::convert(s),
-                                                t.clone(),
-                                            );
-                                            if !::ascent::internal::RelFullIndexRead::contains_key(
-                                                &rw_indices_0_1_total.to_rel_index(&__rw_ind_common_total),
-                                                &__new_row,
-                                            )
-                                                && !::ascent::internal::RelFullIndexRead::contains_key(
-                                                    &rw_indices_0_1_delta.to_rel_index(&__rw_ind_common_delta),
-                                                    &__new_row,
-                                                )
-                                            {
-                                                if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
-                                                    &mut rw_indices_0_1_new
-                                                        .to_rel_index_write(&mut __rw_ind_common_new),
-                                                    &__new_row,
-                                                    (),
-                                                ) {
-                                                    let __new_row_ind = _self.rw.len();
-                                                    _self.rw.push((__new_row.0.clone(), __new_row.1.clone()));
-                                                    ::ascent::internal::RelIndexWrite::index_insert(
-                                                        &mut rw_indices_0_new
-                                                            .to_rel_index_write(&mut __rw_ind_common_new),
-                                                        (__new_row.0.clone(),),
-                                                        (__new_row.1.clone(),),
-                                                    );
-                                                    ::ascent::internal::RelIndexWrite::index_insert(
-                                                        &mut rw_indices_1_new
-                                                            .to_rel_index_write(&mut __rw_ind_common_new),
-                                                        (__new_row.1.clone(),),
-                                                        (__new_row.0.clone(),),
-                                                    );
-                                                    ::ascent::internal::RelIndexWrite::index_insert(
-                                                        &mut rw_indices_none_new
-                                                            .to_rel_index_write(&mut __rw_ind_common_new),
-                                                        (),
-                                                        (__new_row.0.clone(), __new_row.1.clone()),
-                                                    );
-                                                    __changed = true;
-                                                }
-                                            }
-                                        }
-                                    });
-                            }
-                        }
-                        ascent::internal::comment(
-                            "rw <-- proc_indices_none_delta, if let ⋯, rw_indices_0_total+delta, let ⋯",
-                        );
-                        {
-                            let any_rel_empty = proc_indices_none_delta
-                                .to_rel_index(&__proc_ind_common_delta)
-                                .is_empty()
-                                || ascent::internal::RelIndexCombined::new(
-                                        &rw_indices_0_total.to_rel_index(&__rw_ind_common_total),
-                                        &rw_indices_0_delta.to_rel_index(&__rw_ind_common_delta),
-                                    )
-                                    .is_empty();
-                            if !any_rel_empty {
-                                if let Some(__matching) = proc_indices_none_delta
-                                    .to_rel_index(&__proc_ind_common_delta)
-                                    .index_get(&())
-                                {
-                                    __matching
-                                        .for_each(|__val| {
-                                            let __val = __val.tuple_of_borrowed();
-                                            let s: &Proc = __val.0;
-                                            if let Proc::PPar(s0, p) = s {
-                                                if let Some(__matching) = ascent::internal::RelIndexCombined::new(
-                                                        &rw_indices_0_total.to_rel_index(&__rw_ind_common_total),
-                                                        &rw_indices_0_delta.to_rel_index(&__rw_ind_common_delta),
-                                                    )
-                                                    .index_get(&((**s0).clone(),))
-                                                {
-                                                    __matching
-                                                        .for_each(|__val| {
-                                                            let __val = __val.tuple_of_borrowed();
-                                                            let t0: &Proc = __val.0;
-                                                            let t = Proc::PPar(Box::new(t0.clone()), p.clone());
-                                                            let __new_row: (Proc, Proc) = (
-                                                                ascent::internal::Convert::convert(s),
-                                                                ascent::internal::Convert::convert(t),
-                                                            );
-                                                            if !::ascent::internal::RelFullIndexRead::contains_key(
-                                                                &rw_indices_0_1_total.to_rel_index(&__rw_ind_common_total),
-                                                                &__new_row,
-                                                            )
-                                                                && !::ascent::internal::RelFullIndexRead::contains_key(
-                                                                    &rw_indices_0_1_delta.to_rel_index(&__rw_ind_common_delta),
-                                                                    &__new_row,
-                                                                )
-                                                            {
-                                                                if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
-                                                                    &mut rw_indices_0_1_new
-                                                                        .to_rel_index_write(&mut __rw_ind_common_new),
-                                                                    &__new_row,
-                                                                    (),
-                                                                ) {
-                                                                    let __new_row_ind = _self.rw.len();
-                                                                    _self.rw.push((__new_row.0.clone(), __new_row.1.clone()));
-                                                                    ::ascent::internal::RelIndexWrite::index_insert(
-                                                                        &mut rw_indices_0_new
-                                                                            .to_rel_index_write(&mut __rw_ind_common_new),
-                                                                        (__new_row.0.clone(),),
-                                                                        (__new_row.1.clone(),),
-                                                                    );
-                                                                    ::ascent::internal::RelIndexWrite::index_insert(
-                                                                        &mut rw_indices_1_new
-                                                                            .to_rel_index_write(&mut __rw_ind_common_new),
-                                                                        (__new_row.1.clone(),),
-                                                                        (__new_row.0.clone(),),
-                                                                    );
-                                                                    ::ascent::internal::RelIndexWrite::index_insert(
-                                                                        &mut rw_indices_none_new
-                                                                            .to_rel_index_write(&mut __rw_ind_common_new),
-                                                                        (),
-                                                                        (__new_row.0.clone(), __new_row.1.clone()),
-                                                                    );
-                                                                    __changed = true;
-                                                                }
-                                                            }
-                                                        });
-                                                }
-                                            }
-                                        });
-                                }
-                            }
-                        }
-                        ascent::internal::comment(
-                            "rw <-- proc_indices_none_total, if let ⋯, rw_indices_0_delta, let ⋯",
-                        );
-                        {
-                            let any_rel_empty = proc_indices_none_total
-                                .to_rel_index(&__proc_ind_common_total)
-                                .is_empty()
-                                || rw_indices_0_delta
-                                    .to_rel_index(&__rw_ind_common_delta)
-                                    .is_empty();
-                            if !any_rel_empty {
-                                if let Some(__matching) = proc_indices_none_total
-                                    .to_rel_index(&__proc_ind_common_total)
-                                    .index_get(&())
-                                {
-                                    __matching
-                                        .for_each(|__val| {
-                                            let __val = __val.tuple_of_borrowed();
-                                            let s: &Proc = __val.0;
-                                            if let Proc::PPar(s0, p) = s {
-                                                if let Some(__matching) = rw_indices_0_delta
-                                                    .to_rel_index(&__rw_ind_common_delta)
-                                                    .index_get(&((**s0).clone(),))
-                                                {
-                                                    __matching
-                                                        .for_each(|__val| {
-                                                            let __val = __val.tuple_of_borrowed();
-                                                            let t0: &Proc = __val.0;
-                                                            let t = Proc::PPar(Box::new(t0.clone()), p.clone());
-                                                            let __new_row: (Proc, Proc) = (
-                                                                ascent::internal::Convert::convert(s),
-                                                                ascent::internal::Convert::convert(t),
-                                                            );
-                                                            if !::ascent::internal::RelFullIndexRead::contains_key(
-                                                                &rw_indices_0_1_total.to_rel_index(&__rw_ind_common_total),
-                                                                &__new_row,
-                                                            )
-                                                                && !::ascent::internal::RelFullIndexRead::contains_key(
-                                                                    &rw_indices_0_1_delta.to_rel_index(&__rw_ind_common_delta),
-                                                                    &__new_row,
-                                                                )
-                                                            {
-                                                                if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
-                                                                    &mut rw_indices_0_1_new
-                                                                        .to_rel_index_write(&mut __rw_ind_common_new),
-                                                                    &__new_row,
-                                                                    (),
-                                                                ) {
-                                                                    let __new_row_ind = _self.rw.len();
-                                                                    _self.rw.push((__new_row.0.clone(), __new_row.1.clone()));
-                                                                    ::ascent::internal::RelIndexWrite::index_insert(
-                                                                        &mut rw_indices_0_new
-                                                                            .to_rel_index_write(&mut __rw_ind_common_new),
-                                                                        (__new_row.0.clone(),),
-                                                                        (__new_row.1.clone(),),
-                                                                    );
-                                                                    ::ascent::internal::RelIndexWrite::index_insert(
-                                                                        &mut rw_indices_1_new
-                                                                            .to_rel_index_write(&mut __rw_ind_common_new),
-                                                                        (__new_row.1.clone(),),
-                                                                        (__new_row.0.clone(),),
-                                                                    );
-                                                                    ::ascent::internal::RelIndexWrite::index_insert(
-                                                                        &mut rw_indices_none_new
-                                                                            .to_rel_index_write(&mut __rw_ind_common_new),
-                                                                        (),
-                                                                        (__new_row.0.clone(), __new_row.1.clone()),
-                                                                    );
-                                                                    __changed = true;
-                                                                }
-                                                            }
-                                                        });
-                                                }
-                                            }
-                                        });
-                                }
-                            }
-                        }
-                        ascent::internal::comment(
-                            "rw <-- rw_indices_0_delta, eq_indices_0_total+delta [SIMPLE JOIN]",
-                        );
-                        {
-                            if rw_indices_0_delta
-                                .to_rel_index(&__rw_ind_common_delta)
+                            if rw_proc_indices_0_delta
+                                .to_rel_index(&__rw_proc_ind_common_delta)
                                 .len_estimate()
                                 <= ascent::internal::RelIndexCombined::new(
-                                        &eq_indices_0_total.to_rel_index(&__eq_ind_common_total),
-                                        &eq_indices_0_delta.to_rel_index(&__eq_ind_common_delta),
+                                        &eq_proc_indices_0_total
+                                            .to_rel_index(&__eq_proc_ind_common_total),
+                                        &eq_proc_indices_0_delta
+                                            .to_rel_index(&__eq_proc_ind_common_delta),
                                     )
                                     .len_estimate()
                             {
-                                rw_indices_0_delta
-                                    .to_rel_index(&__rw_ind_common_delta)
+                                rw_proc_indices_0_delta
+                                    .to_rel_index(&__rw_proc_ind_common_delta)
                                     .iter_all()
                                     .for_each(|(__cl1_joined_columns, __cl1_tuple_indices)| {
                                         let __cl1_joined_columns = __cl1_joined_columns
                                             .tuple_of_borrowed();
                                         let s0 = __cl1_joined_columns.0;
                                         if let Some(__matching) = ascent::internal::RelIndexCombined::new(
-                                                &eq_indices_0_total.to_rel_index(&__eq_ind_common_total),
-                                                &eq_indices_0_delta.to_rel_index(&__eq_ind_common_delta),
+                                                &eq_proc_indices_0_total
+                                                    .to_rel_index(&__eq_proc_ind_common_total),
+                                                &eq_proc_indices_0_delta
+                                                    .to_rel_index(&__eq_proc_ind_common_delta),
                                             )
                                             .index_get(&(s0.clone(),))
                                         {
@@ -5449,37 +5683,41 @@ logical indices: rw_indices_0; rw_indices_0_1; rw_indices_1; rw_indices_none*/
                                                                 ascent::internal::Convert::convert(t),
                                                             );
                                                             if !::ascent::internal::RelFullIndexRead::contains_key(
-                                                                &rw_indices_0_1_total.to_rel_index(&__rw_ind_common_total),
+                                                                &rw_proc_indices_0_1_total
+                                                                    .to_rel_index(&__rw_proc_ind_common_total),
                                                                 &__new_row,
                                                             )
                                                                 && !::ascent::internal::RelFullIndexRead::contains_key(
-                                                                    &rw_indices_0_1_delta.to_rel_index(&__rw_ind_common_delta),
+                                                                    &rw_proc_indices_0_1_delta
+                                                                        .to_rel_index(&__rw_proc_ind_common_delta),
                                                                     &__new_row,
                                                                 )
                                                             {
                                                                 if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
-                                                                    &mut rw_indices_0_1_new
-                                                                        .to_rel_index_write(&mut __rw_ind_common_new),
+                                                                    &mut rw_proc_indices_0_1_new
+                                                                        .to_rel_index_write(&mut __rw_proc_ind_common_new),
                                                                     &__new_row,
                                                                     (),
                                                                 ) {
-                                                                    let __new_row_ind = _self.rw.len();
-                                                                    _self.rw.push((__new_row.0.clone(), __new_row.1.clone()));
+                                                                    let __new_row_ind = _self.rw_proc.len();
+                                                                    _self
+                                                                        .rw_proc
+                                                                        .push((__new_row.0.clone(), __new_row.1.clone()));
                                                                     ::ascent::internal::RelIndexWrite::index_insert(
-                                                                        &mut rw_indices_0_new
-                                                                            .to_rel_index_write(&mut __rw_ind_common_new),
+                                                                        &mut rw_proc_indices_0_new
+                                                                            .to_rel_index_write(&mut __rw_proc_ind_common_new),
                                                                         (__new_row.0.clone(),),
                                                                         (__new_row.1.clone(),),
                                                                     );
                                                                     ::ascent::internal::RelIndexWrite::index_insert(
-                                                                        &mut rw_indices_1_new
-                                                                            .to_rel_index_write(&mut __rw_ind_common_new),
+                                                                        &mut rw_proc_indices_1_new
+                                                                            .to_rel_index_write(&mut __rw_proc_ind_common_new),
                                                                         (__new_row.1.clone(),),
                                                                         (__new_row.0.clone(),),
                                                                     );
                                                                     ::ascent::internal::RelIndexWrite::index_insert(
-                                                                        &mut rw_indices_none_new
-                                                                            .to_rel_index_write(&mut __rw_ind_common_new),
+                                                                        &mut rw_proc_indices_none_new
+                                                                            .to_rel_index_write(&mut __rw_proc_ind_common_new),
                                                                         (),
                                                                         (__new_row.0.clone(), __new_row.1.clone()),
                                                                     );
@@ -5492,16 +5730,18 @@ logical indices: rw_indices_0; rw_indices_0_1; rw_indices_1; rw_indices_none*/
                                     });
                             } else {
                                 ascent::internal::RelIndexCombined::new(
-                                        &eq_indices_0_total.to_rel_index(&__eq_ind_common_total),
-                                        &eq_indices_0_delta.to_rel_index(&__eq_ind_common_delta),
+                                        &eq_proc_indices_0_total
+                                            .to_rel_index(&__eq_proc_ind_common_total),
+                                        &eq_proc_indices_0_delta
+                                            .to_rel_index(&__eq_proc_ind_common_delta),
                                     )
                                     .iter_all()
                                     .for_each(|(__cl1_joined_columns, __cl1_tuple_indices)| {
                                         let __cl1_joined_columns = __cl1_joined_columns
                                             .tuple_of_borrowed();
                                         let s0 = __cl1_joined_columns.0;
-                                        if let Some(__matching) = rw_indices_0_delta
-                                            .to_rel_index(&__rw_ind_common_delta)
+                                        if let Some(__matching) = rw_proc_indices_0_delta
+                                            .to_rel_index(&__rw_proc_ind_common_delta)
                                             .index_get(&(s0.clone(),))
                                         {
                                             __cl1_tuple_indices
@@ -5518,37 +5758,41 @@ logical indices: rw_indices_0; rw_indices_0_1; rw_indices_1; rw_indices_none*/
                                                                 ascent::internal::Convert::convert(t),
                                                             );
                                                             if !::ascent::internal::RelFullIndexRead::contains_key(
-                                                                &rw_indices_0_1_total.to_rel_index(&__rw_ind_common_total),
+                                                                &rw_proc_indices_0_1_total
+                                                                    .to_rel_index(&__rw_proc_ind_common_total),
                                                                 &__new_row,
                                                             )
                                                                 && !::ascent::internal::RelFullIndexRead::contains_key(
-                                                                    &rw_indices_0_1_delta.to_rel_index(&__rw_ind_common_delta),
+                                                                    &rw_proc_indices_0_1_delta
+                                                                        .to_rel_index(&__rw_proc_ind_common_delta),
                                                                     &__new_row,
                                                                 )
                                                             {
                                                                 if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
-                                                                    &mut rw_indices_0_1_new
-                                                                        .to_rel_index_write(&mut __rw_ind_common_new),
+                                                                    &mut rw_proc_indices_0_1_new
+                                                                        .to_rel_index_write(&mut __rw_proc_ind_common_new),
                                                                     &__new_row,
                                                                     (),
                                                                 ) {
-                                                                    let __new_row_ind = _self.rw.len();
-                                                                    _self.rw.push((__new_row.0.clone(), __new_row.1.clone()));
+                                                                    let __new_row_ind = _self.rw_proc.len();
+                                                                    _self
+                                                                        .rw_proc
+                                                                        .push((__new_row.0.clone(), __new_row.1.clone()));
                                                                     ::ascent::internal::RelIndexWrite::index_insert(
-                                                                        &mut rw_indices_0_new
-                                                                            .to_rel_index_write(&mut __rw_ind_common_new),
+                                                                        &mut rw_proc_indices_0_new
+                                                                            .to_rel_index_write(&mut __rw_proc_ind_common_new),
                                                                         (__new_row.0.clone(),),
                                                                         (__new_row.1.clone(),),
                                                                     );
                                                                     ::ascent::internal::RelIndexWrite::index_insert(
-                                                                        &mut rw_indices_1_new
-                                                                            .to_rel_index_write(&mut __rw_ind_common_new),
+                                                                        &mut rw_proc_indices_1_new
+                                                                            .to_rel_index_write(&mut __rw_proc_ind_common_new),
                                                                         (__new_row.1.clone(),),
                                                                         (__new_row.0.clone(),),
                                                                     );
                                                                     ::ascent::internal::RelIndexWrite::index_insert(
-                                                                        &mut rw_indices_none_new
-                                                                            .to_rel_index_write(&mut __rw_ind_common_new),
+                                                                        &mut rw_proc_indices_none_new
+                                                                            .to_rel_index_write(&mut __rw_proc_ind_common_new),
                                                                         (),
                                                                         (__new_row.0.clone(), __new_row.1.clone()),
                                                                     );
@@ -5562,25 +5806,25 @@ logical indices: rw_indices_0; rw_indices_0_1; rw_indices_1; rw_indices_none*/
                             }
                         }
                         ascent::internal::comment(
-                            "rw <-- rw_indices_0_total, eq_indices_0_delta [SIMPLE JOIN]",
+                            "rw_proc <-- rw_proc_indices_0_total, eq_proc_indices_0_delta [SIMPLE JOIN]",
                         );
                         {
-                            if rw_indices_0_total
-                                .to_rel_index(&__rw_ind_common_total)
+                            if rw_proc_indices_0_total
+                                .to_rel_index(&__rw_proc_ind_common_total)
                                 .len_estimate()
-                                <= eq_indices_0_delta
-                                    .to_rel_index(&__eq_ind_common_delta)
+                                <= eq_proc_indices_0_delta
+                                    .to_rel_index(&__eq_proc_ind_common_delta)
                                     .len_estimate()
                             {
-                                rw_indices_0_total
-                                    .to_rel_index(&__rw_ind_common_total)
+                                rw_proc_indices_0_total
+                                    .to_rel_index(&__rw_proc_ind_common_total)
                                     .iter_all()
                                     .for_each(|(__cl1_joined_columns, __cl1_tuple_indices)| {
                                         let __cl1_joined_columns = __cl1_joined_columns
                                             .tuple_of_borrowed();
                                         let s0 = __cl1_joined_columns.0;
-                                        if let Some(__matching) = eq_indices_0_delta
-                                            .to_rel_index(&__eq_ind_common_delta)
+                                        if let Some(__matching) = eq_proc_indices_0_delta
+                                            .to_rel_index(&__eq_proc_ind_common_delta)
                                             .index_get(&(s0.clone(),))
                                         {
                                             __cl1_tuple_indices
@@ -5597,37 +5841,41 @@ logical indices: rw_indices_0; rw_indices_0_1; rw_indices_1; rw_indices_none*/
                                                                 ascent::internal::Convert::convert(t),
                                                             );
                                                             if !::ascent::internal::RelFullIndexRead::contains_key(
-                                                                &rw_indices_0_1_total.to_rel_index(&__rw_ind_common_total),
+                                                                &rw_proc_indices_0_1_total
+                                                                    .to_rel_index(&__rw_proc_ind_common_total),
                                                                 &__new_row,
                                                             )
                                                                 && !::ascent::internal::RelFullIndexRead::contains_key(
-                                                                    &rw_indices_0_1_delta.to_rel_index(&__rw_ind_common_delta),
+                                                                    &rw_proc_indices_0_1_delta
+                                                                        .to_rel_index(&__rw_proc_ind_common_delta),
                                                                     &__new_row,
                                                                 )
                                                             {
                                                                 if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
-                                                                    &mut rw_indices_0_1_new
-                                                                        .to_rel_index_write(&mut __rw_ind_common_new),
+                                                                    &mut rw_proc_indices_0_1_new
+                                                                        .to_rel_index_write(&mut __rw_proc_ind_common_new),
                                                                     &__new_row,
                                                                     (),
                                                                 ) {
-                                                                    let __new_row_ind = _self.rw.len();
-                                                                    _self.rw.push((__new_row.0.clone(), __new_row.1.clone()));
+                                                                    let __new_row_ind = _self.rw_proc.len();
+                                                                    _self
+                                                                        .rw_proc
+                                                                        .push((__new_row.0.clone(), __new_row.1.clone()));
                                                                     ::ascent::internal::RelIndexWrite::index_insert(
-                                                                        &mut rw_indices_0_new
-                                                                            .to_rel_index_write(&mut __rw_ind_common_new),
+                                                                        &mut rw_proc_indices_0_new
+                                                                            .to_rel_index_write(&mut __rw_proc_ind_common_new),
                                                                         (__new_row.0.clone(),),
                                                                         (__new_row.1.clone(),),
                                                                     );
                                                                     ::ascent::internal::RelIndexWrite::index_insert(
-                                                                        &mut rw_indices_1_new
-                                                                            .to_rel_index_write(&mut __rw_ind_common_new),
+                                                                        &mut rw_proc_indices_1_new
+                                                                            .to_rel_index_write(&mut __rw_proc_ind_common_new),
                                                                         (__new_row.1.clone(),),
                                                                         (__new_row.0.clone(),),
                                                                     );
                                                                     ::ascent::internal::RelIndexWrite::index_insert(
-                                                                        &mut rw_indices_none_new
-                                                                            .to_rel_index_write(&mut __rw_ind_common_new),
+                                                                        &mut rw_proc_indices_none_new
+                                                                            .to_rel_index_write(&mut __rw_proc_ind_common_new),
                                                                         (),
                                                                         (__new_row.0.clone(), __new_row.1.clone()),
                                                                     );
@@ -5639,15 +5887,15 @@ logical indices: rw_indices_0; rw_indices_0_1; rw_indices_1; rw_indices_none*/
                                         }
                                     });
                             } else {
-                                eq_indices_0_delta
-                                    .to_rel_index(&__eq_ind_common_delta)
+                                eq_proc_indices_0_delta
+                                    .to_rel_index(&__eq_proc_ind_common_delta)
                                     .iter_all()
                                     .for_each(|(__cl1_joined_columns, __cl1_tuple_indices)| {
                                         let __cl1_joined_columns = __cl1_joined_columns
                                             .tuple_of_borrowed();
                                         let s0 = __cl1_joined_columns.0;
-                                        if let Some(__matching) = rw_indices_0_total
-                                            .to_rel_index(&__rw_ind_common_total)
+                                        if let Some(__matching) = rw_proc_indices_0_total
+                                            .to_rel_index(&__rw_proc_ind_common_total)
                                             .index_get(&(s0.clone(),))
                                         {
                                             __cl1_tuple_indices
@@ -5664,37 +5912,41 @@ logical indices: rw_indices_0; rw_indices_0_1; rw_indices_1; rw_indices_none*/
                                                                 ascent::internal::Convert::convert(t),
                                                             );
                                                             if !::ascent::internal::RelFullIndexRead::contains_key(
-                                                                &rw_indices_0_1_total.to_rel_index(&__rw_ind_common_total),
+                                                                &rw_proc_indices_0_1_total
+                                                                    .to_rel_index(&__rw_proc_ind_common_total),
                                                                 &__new_row,
                                                             )
                                                                 && !::ascent::internal::RelFullIndexRead::contains_key(
-                                                                    &rw_indices_0_1_delta.to_rel_index(&__rw_ind_common_delta),
+                                                                    &rw_proc_indices_0_1_delta
+                                                                        .to_rel_index(&__rw_proc_ind_common_delta),
                                                                     &__new_row,
                                                                 )
                                                             {
                                                                 if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
-                                                                    &mut rw_indices_0_1_new
-                                                                        .to_rel_index_write(&mut __rw_ind_common_new),
+                                                                    &mut rw_proc_indices_0_1_new
+                                                                        .to_rel_index_write(&mut __rw_proc_ind_common_new),
                                                                     &__new_row,
                                                                     (),
                                                                 ) {
-                                                                    let __new_row_ind = _self.rw.len();
-                                                                    _self.rw.push((__new_row.0.clone(), __new_row.1.clone()));
+                                                                    let __new_row_ind = _self.rw_proc.len();
+                                                                    _self
+                                                                        .rw_proc
+                                                                        .push((__new_row.0.clone(), __new_row.1.clone()));
                                                                     ::ascent::internal::RelIndexWrite::index_insert(
-                                                                        &mut rw_indices_0_new
-                                                                            .to_rel_index_write(&mut __rw_ind_common_new),
+                                                                        &mut rw_proc_indices_0_new
+                                                                            .to_rel_index_write(&mut __rw_proc_ind_common_new),
                                                                         (__new_row.0.clone(),),
                                                                         (__new_row.1.clone(),),
                                                                     );
                                                                     ::ascent::internal::RelIndexWrite::index_insert(
-                                                                        &mut rw_indices_1_new
-                                                                            .to_rel_index_write(&mut __rw_ind_common_new),
+                                                                        &mut rw_proc_indices_1_new
+                                                                            .to_rel_index_write(&mut __rw_proc_ind_common_new),
                                                                         (__new_row.1.clone(),),
                                                                         (__new_row.0.clone(),),
                                                                     );
                                                                     ::ascent::internal::RelIndexWrite::index_insert(
-                                                                        &mut rw_indices_none_new
-                                                                            .to_rel_index_write(&mut __rw_ind_common_new),
+                                                                        &mut rw_proc_indices_none_new
+                                                                            .to_rel_index_write(&mut __rw_proc_ind_common_new),
                                                                         (),
                                                                         (__new_row.0.clone(), __new_row.1.clone()),
                                                                     );
@@ -5708,7 +5960,5827 @@ logical indices: rw_indices_0; rw_indices_0_1; rw_indices_1; rw_indices_none*/
                             }
                         }
                         ascent::internal::comment(
-                            "eq <-- proc_indices_none_delta, if let ⋯, let ⋯",
+                            "rw_proc <-- rw_proc_indices_1_delta, eq_proc_indices_0_total+delta [SIMPLE JOIN]",
+                        );
+                        {
+                            if rw_proc_indices_1_delta
+                                .to_rel_index(&__rw_proc_ind_common_delta)
+                                .len_estimate()
+                                <= ascent::internal::RelIndexCombined::new(
+                                        &eq_proc_indices_0_total
+                                            .to_rel_index(&__eq_proc_ind_common_total),
+                                        &eq_proc_indices_0_delta
+                                            .to_rel_index(&__eq_proc_ind_common_delta),
+                                    )
+                                    .len_estimate()
+                            {
+                                rw_proc_indices_1_delta
+                                    .to_rel_index(&__rw_proc_ind_common_delta)
+                                    .iter_all()
+                                    .for_each(|(__cl1_joined_columns, __cl1_tuple_indices)| {
+                                        let __cl1_joined_columns = __cl1_joined_columns
+                                            .tuple_of_borrowed();
+                                        let t0 = __cl1_joined_columns.0;
+                                        if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                &eq_proc_indices_0_total
+                                                    .to_rel_index(&__eq_proc_ind_common_total),
+                                                &eq_proc_indices_0_delta
+                                                    .to_rel_index(&__eq_proc_ind_common_delta),
+                                            )
+                                            .index_get(&(t0.clone(),))
+                                        {
+                                            __cl1_tuple_indices
+                                                .for_each(|cl1_val| {
+                                                    let cl1_val = cl1_val.tuple_of_borrowed();
+                                                    let s: &Proc = cl1_val.0;
+                                                    __matching
+                                                        .clone()
+                                                        .for_each(|__val| {
+                                                            let __val = __val.tuple_of_borrowed();
+                                                            let t1: &Proc = __val.0;
+                                                            let __new_row: (Proc, Proc) = (
+                                                                ascent::internal::Convert::convert(s),
+                                                                ascent::internal::Convert::convert(t1),
+                                                            );
+                                                            if !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                &rw_proc_indices_0_1_total
+                                                                    .to_rel_index(&__rw_proc_ind_common_total),
+                                                                &__new_row,
+                                                            )
+                                                                && !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                    &rw_proc_indices_0_1_delta
+                                                                        .to_rel_index(&__rw_proc_ind_common_delta),
+                                                                    &__new_row,
+                                                                )
+                                                            {
+                                                                if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
+                                                                    &mut rw_proc_indices_0_1_new
+                                                                        .to_rel_index_write(&mut __rw_proc_ind_common_new),
+                                                                    &__new_row,
+                                                                    (),
+                                                                ) {
+                                                                    let __new_row_ind = _self.rw_proc.len();
+                                                                    _self
+                                                                        .rw_proc
+                                                                        .push((__new_row.0.clone(), __new_row.1.clone()));
+                                                                    ::ascent::internal::RelIndexWrite::index_insert(
+                                                                        &mut rw_proc_indices_0_new
+                                                                            .to_rel_index_write(&mut __rw_proc_ind_common_new),
+                                                                        (__new_row.0.clone(),),
+                                                                        (__new_row.1.clone(),),
+                                                                    );
+                                                                    ::ascent::internal::RelIndexWrite::index_insert(
+                                                                        &mut rw_proc_indices_1_new
+                                                                            .to_rel_index_write(&mut __rw_proc_ind_common_new),
+                                                                        (__new_row.1.clone(),),
+                                                                        (__new_row.0.clone(),),
+                                                                    );
+                                                                    ::ascent::internal::RelIndexWrite::index_insert(
+                                                                        &mut rw_proc_indices_none_new
+                                                                            .to_rel_index_write(&mut __rw_proc_ind_common_new),
+                                                                        (),
+                                                                        (__new_row.0.clone(), __new_row.1.clone()),
+                                                                    );
+                                                                    __changed = true;
+                                                                }
+                                                            }
+                                                        });
+                                                });
+                                        }
+                                    });
+                            } else {
+                                ascent::internal::RelIndexCombined::new(
+                                        &eq_proc_indices_0_total
+                                            .to_rel_index(&__eq_proc_ind_common_total),
+                                        &eq_proc_indices_0_delta
+                                            .to_rel_index(&__eq_proc_ind_common_delta),
+                                    )
+                                    .iter_all()
+                                    .for_each(|(__cl1_joined_columns, __cl1_tuple_indices)| {
+                                        let __cl1_joined_columns = __cl1_joined_columns
+                                            .tuple_of_borrowed();
+                                        let t0 = __cl1_joined_columns.0;
+                                        if let Some(__matching) = rw_proc_indices_1_delta
+                                            .to_rel_index(&__rw_proc_ind_common_delta)
+                                            .index_get(&(t0.clone(),))
+                                        {
+                                            __cl1_tuple_indices
+                                                .for_each(|cl1_val| {
+                                                    let cl1_val = cl1_val.tuple_of_borrowed();
+                                                    let t1: &Proc = cl1_val.0;
+                                                    __matching
+                                                        .clone()
+                                                        .for_each(|__val| {
+                                                            let __val = __val.tuple_of_borrowed();
+                                                            let s: &Proc = __val.0;
+                                                            let __new_row: (Proc, Proc) = (
+                                                                ascent::internal::Convert::convert(s),
+                                                                ascent::internal::Convert::convert(t1),
+                                                            );
+                                                            if !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                &rw_proc_indices_0_1_total
+                                                                    .to_rel_index(&__rw_proc_ind_common_total),
+                                                                &__new_row,
+                                                            )
+                                                                && !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                    &rw_proc_indices_0_1_delta
+                                                                        .to_rel_index(&__rw_proc_ind_common_delta),
+                                                                    &__new_row,
+                                                                )
+                                                            {
+                                                                if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
+                                                                    &mut rw_proc_indices_0_1_new
+                                                                        .to_rel_index_write(&mut __rw_proc_ind_common_new),
+                                                                    &__new_row,
+                                                                    (),
+                                                                ) {
+                                                                    let __new_row_ind = _self.rw_proc.len();
+                                                                    _self
+                                                                        .rw_proc
+                                                                        .push((__new_row.0.clone(), __new_row.1.clone()));
+                                                                    ::ascent::internal::RelIndexWrite::index_insert(
+                                                                        &mut rw_proc_indices_0_new
+                                                                            .to_rel_index_write(&mut __rw_proc_ind_common_new),
+                                                                        (__new_row.0.clone(),),
+                                                                        (__new_row.1.clone(),),
+                                                                    );
+                                                                    ::ascent::internal::RelIndexWrite::index_insert(
+                                                                        &mut rw_proc_indices_1_new
+                                                                            .to_rel_index_write(&mut __rw_proc_ind_common_new),
+                                                                        (__new_row.1.clone(),),
+                                                                        (__new_row.0.clone(),),
+                                                                    );
+                                                                    ::ascent::internal::RelIndexWrite::index_insert(
+                                                                        &mut rw_proc_indices_none_new
+                                                                            .to_rel_index_write(&mut __rw_proc_ind_common_new),
+                                                                        (),
+                                                                        (__new_row.0.clone(), __new_row.1.clone()),
+                                                                    );
+                                                                    __changed = true;
+                                                                }
+                                                            }
+                                                        });
+                                                });
+                                        }
+                                    });
+                            }
+                        }
+                        ascent::internal::comment(
+                            "rw_proc <-- rw_proc_indices_1_total, eq_proc_indices_0_delta [SIMPLE JOIN]",
+                        );
+                        {
+                            if rw_proc_indices_1_total
+                                .to_rel_index(&__rw_proc_ind_common_total)
+                                .len_estimate()
+                                <= eq_proc_indices_0_delta
+                                    .to_rel_index(&__eq_proc_ind_common_delta)
+                                    .len_estimate()
+                            {
+                                rw_proc_indices_1_total
+                                    .to_rel_index(&__rw_proc_ind_common_total)
+                                    .iter_all()
+                                    .for_each(|(__cl1_joined_columns, __cl1_tuple_indices)| {
+                                        let __cl1_joined_columns = __cl1_joined_columns
+                                            .tuple_of_borrowed();
+                                        let t0 = __cl1_joined_columns.0;
+                                        if let Some(__matching) = eq_proc_indices_0_delta
+                                            .to_rel_index(&__eq_proc_ind_common_delta)
+                                            .index_get(&(t0.clone(),))
+                                        {
+                                            __cl1_tuple_indices
+                                                .for_each(|cl1_val| {
+                                                    let cl1_val = cl1_val.tuple_of_borrowed();
+                                                    let s: &Proc = cl1_val.0;
+                                                    __matching
+                                                        .clone()
+                                                        .for_each(|__val| {
+                                                            let __val = __val.tuple_of_borrowed();
+                                                            let t1: &Proc = __val.0;
+                                                            let __new_row: (Proc, Proc) = (
+                                                                ascent::internal::Convert::convert(s),
+                                                                ascent::internal::Convert::convert(t1),
+                                                            );
+                                                            if !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                &rw_proc_indices_0_1_total
+                                                                    .to_rel_index(&__rw_proc_ind_common_total),
+                                                                &__new_row,
+                                                            )
+                                                                && !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                    &rw_proc_indices_0_1_delta
+                                                                        .to_rel_index(&__rw_proc_ind_common_delta),
+                                                                    &__new_row,
+                                                                )
+                                                            {
+                                                                if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
+                                                                    &mut rw_proc_indices_0_1_new
+                                                                        .to_rel_index_write(&mut __rw_proc_ind_common_new),
+                                                                    &__new_row,
+                                                                    (),
+                                                                ) {
+                                                                    let __new_row_ind = _self.rw_proc.len();
+                                                                    _self
+                                                                        .rw_proc
+                                                                        .push((__new_row.0.clone(), __new_row.1.clone()));
+                                                                    ::ascent::internal::RelIndexWrite::index_insert(
+                                                                        &mut rw_proc_indices_0_new
+                                                                            .to_rel_index_write(&mut __rw_proc_ind_common_new),
+                                                                        (__new_row.0.clone(),),
+                                                                        (__new_row.1.clone(),),
+                                                                    );
+                                                                    ::ascent::internal::RelIndexWrite::index_insert(
+                                                                        &mut rw_proc_indices_1_new
+                                                                            .to_rel_index_write(&mut __rw_proc_ind_common_new),
+                                                                        (__new_row.1.clone(),),
+                                                                        (__new_row.0.clone(),),
+                                                                    );
+                                                                    ::ascent::internal::RelIndexWrite::index_insert(
+                                                                        &mut rw_proc_indices_none_new
+                                                                            .to_rel_index_write(&mut __rw_proc_ind_common_new),
+                                                                        (),
+                                                                        (__new_row.0.clone(), __new_row.1.clone()),
+                                                                    );
+                                                                    __changed = true;
+                                                                }
+                                                            }
+                                                        });
+                                                });
+                                        }
+                                    });
+                            } else {
+                                eq_proc_indices_0_delta
+                                    .to_rel_index(&__eq_proc_ind_common_delta)
+                                    .iter_all()
+                                    .for_each(|(__cl1_joined_columns, __cl1_tuple_indices)| {
+                                        let __cl1_joined_columns = __cl1_joined_columns
+                                            .tuple_of_borrowed();
+                                        let t0 = __cl1_joined_columns.0;
+                                        if let Some(__matching) = rw_proc_indices_1_total
+                                            .to_rel_index(&__rw_proc_ind_common_total)
+                                            .index_get(&(t0.clone(),))
+                                        {
+                                            __cl1_tuple_indices
+                                                .for_each(|cl1_val| {
+                                                    let cl1_val = cl1_val.tuple_of_borrowed();
+                                                    let t1: &Proc = cl1_val.0;
+                                                    __matching
+                                                        .clone()
+                                                        .for_each(|__val| {
+                                                            let __val = __val.tuple_of_borrowed();
+                                                            let s: &Proc = __val.0;
+                                                            let __new_row: (Proc, Proc) = (
+                                                                ascent::internal::Convert::convert(s),
+                                                                ascent::internal::Convert::convert(t1),
+                                                            );
+                                                            if !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                &rw_proc_indices_0_1_total
+                                                                    .to_rel_index(&__rw_proc_ind_common_total),
+                                                                &__new_row,
+                                                            )
+                                                                && !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                    &rw_proc_indices_0_1_delta
+                                                                        .to_rel_index(&__rw_proc_ind_common_delta),
+                                                                    &__new_row,
+                                                                )
+                                                            {
+                                                                if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
+                                                                    &mut rw_proc_indices_0_1_new
+                                                                        .to_rel_index_write(&mut __rw_proc_ind_common_new),
+                                                                    &__new_row,
+                                                                    (),
+                                                                ) {
+                                                                    let __new_row_ind = _self.rw_proc.len();
+                                                                    _self
+                                                                        .rw_proc
+                                                                        .push((__new_row.0.clone(), __new_row.1.clone()));
+                                                                    ::ascent::internal::RelIndexWrite::index_insert(
+                                                                        &mut rw_proc_indices_0_new
+                                                                            .to_rel_index_write(&mut __rw_proc_ind_common_new),
+                                                                        (__new_row.0.clone(),),
+                                                                        (__new_row.1.clone(),),
+                                                                    );
+                                                                    ::ascent::internal::RelIndexWrite::index_insert(
+                                                                        &mut rw_proc_indices_1_new
+                                                                            .to_rel_index_write(&mut __rw_proc_ind_common_new),
+                                                                        (__new_row.1.clone(),),
+                                                                        (__new_row.0.clone(),),
+                                                                    );
+                                                                    ::ascent::internal::RelIndexWrite::index_insert(
+                                                                        &mut rw_proc_indices_none_new
+                                                                            .to_rel_index_write(&mut __rw_proc_ind_common_new),
+                                                                        (),
+                                                                        (__new_row.0.clone(), __new_row.1.clone()),
+                                                                    );
+                                                                    __changed = true;
+                                                                }
+                                                            }
+                                                        });
+                                                });
+                                        }
+                                    });
+                            }
+                        }
+                        ascent::internal::comment(
+                            "rw_proc <-- proc_indices_none_delta, if let ⋯, let ⋯, if let ⋯, let ⋯, let ⋯, let ⋯, if let ⋯, let ⋯, let ⋯, eq_name_indices_0_1_total+delta, if ⋯, let ⋯",
+                        );
+                        {
+                            let any_rel_empty = proc_indices_none_delta
+                                .to_rel_index(&__proc_ind_common_delta)
+                                .is_empty()
+                                || ascent::internal::RelIndexCombined::new(
+                                        &eq_name_indices_0_1_total
+                                            .to_rel_index(&__eq_name_ind_common_total),
+                                        &eq_name_indices_0_1_delta
+                                            .to_rel_index(&__eq_name_ind_common_delta),
+                                    )
+                                    .is_empty();
+                            if !any_rel_empty {
+                                if let Some(__matching) = proc_indices_none_delta
+                                    .to_rel_index(&__proc_ind_common_delta)
+                                    .index_get(&())
+                                {
+                                    __matching
+                                        .for_each(|__val| {
+                                            let __val = __val.tuple_of_borrowed();
+                                            let s: &Proc = __val.0;
+                                            if let Proc::PPar(s_f0, s_f1) = s {
+                                                let s_f0_inner = &**s_f0;
+                                                if let Proc::PInput(s_f0_inner_f0, s_f0_inner_f1) = s_f0_inner {
+                                                    let (binder_0, body_0) = s_f0_inner_f1.clone().unbind();
+                                                    let s_f0_inner_f0_val = &**s_f0_inner_f0;
+                                                    let s_f1_inner = &**s_f1;
+                                                    if let Proc::POutput(s_f1_inner_f0, s_f1_inner_f1) = s_f1_inner {
+                                                        let s_f1_inner_f0_val = &**s_f1_inner_f0;
+                                                        let s_f1_inner_f1_val = &**s_f1_inner_f1;
+                                                        if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                                &eq_name_indices_0_1_total
+                                                                    .to_rel_index(&__eq_name_ind_common_total),
+                                                                &eq_name_indices_0_1_delta
+                                                                    .to_rel_index(&__eq_name_ind_common_delta),
+                                                            )
+                                                            .index_get(
+                                                                &(
+                                                                    (s_f0_inner_f0_val.clone()).clone(),
+                                                                    (s_f1_inner_f0_val.clone()).clone(),
+                                                                ),
+                                                            )
+                                                        {
+                                                            __matching
+                                                                .for_each(|__val| {
+                                                                    if is_fresh(&binder_0, &s_f1_inner_f1_val.clone()) {
+                                                                        let t = ((body_0.clone()).clone())
+                                                                            .substitute_name(
+                                                                                &binder_0.0,
+                                                                                &Name::NQuote(Box::new((s_f1_inner_f1_val.clone()).clone())),
+                                                                            );
+                                                                        let __new_row: (Proc, Proc) = (
+                                                                            ascent::internal::Convert::convert(s),
+                                                                            ascent::internal::Convert::convert(t),
+                                                                        );
+                                                                        if !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                            &rw_proc_indices_0_1_total
+                                                                                .to_rel_index(&__rw_proc_ind_common_total),
+                                                                            &__new_row,
+                                                                        )
+                                                                            && !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                &rw_proc_indices_0_1_delta
+                                                                                    .to_rel_index(&__rw_proc_ind_common_delta),
+                                                                                &__new_row,
+                                                                            )
+                                                                        {
+                                                                            if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
+                                                                                &mut rw_proc_indices_0_1_new
+                                                                                    .to_rel_index_write(&mut __rw_proc_ind_common_new),
+                                                                                &__new_row,
+                                                                                (),
+                                                                            ) {
+                                                                                let __new_row_ind = _self.rw_proc.len();
+                                                                                _self
+                                                                                    .rw_proc
+                                                                                    .push((__new_row.0.clone(), __new_row.1.clone()));
+                                                                                ::ascent::internal::RelIndexWrite::index_insert(
+                                                                                    &mut rw_proc_indices_0_new
+                                                                                        .to_rel_index_write(&mut __rw_proc_ind_common_new),
+                                                                                    (__new_row.0.clone(),),
+                                                                                    (__new_row.1.clone(),),
+                                                                                );
+                                                                                ::ascent::internal::RelIndexWrite::index_insert(
+                                                                                    &mut rw_proc_indices_1_new
+                                                                                        .to_rel_index_write(&mut __rw_proc_ind_common_new),
+                                                                                    (__new_row.1.clone(),),
+                                                                                    (__new_row.0.clone(),),
+                                                                                );
+                                                                                ::ascent::internal::RelIndexWrite::index_insert(
+                                                                                    &mut rw_proc_indices_none_new
+                                                                                        .to_rel_index_write(&mut __rw_proc_ind_common_new),
+                                                                                    (),
+                                                                                    (__new_row.0.clone(), __new_row.1.clone()),
+                                                                                );
+                                                                                __changed = true;
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                });
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        });
+                                }
+                            }
+                        }
+                        ascent::internal::comment(
+                            "rw_proc <-- proc_indices_none_total, if let ⋯, let ⋯, if let ⋯, let ⋯, let ⋯, let ⋯, if let ⋯, let ⋯, let ⋯, eq_name_indices_0_1_delta, if ⋯, let ⋯",
+                        );
+                        {
+                            let any_rel_empty = proc_indices_none_total
+                                .to_rel_index(&__proc_ind_common_total)
+                                .is_empty()
+                                || eq_name_indices_0_1_delta
+                                    .to_rel_index(&__eq_name_ind_common_delta)
+                                    .is_empty();
+                            if !any_rel_empty {
+                                if let Some(__matching) = proc_indices_none_total
+                                    .to_rel_index(&__proc_ind_common_total)
+                                    .index_get(&())
+                                {
+                                    __matching
+                                        .for_each(|__val| {
+                                            let __val = __val.tuple_of_borrowed();
+                                            let s: &Proc = __val.0;
+                                            if let Proc::PPar(s_f0, s_f1) = s {
+                                                let s_f0_inner = &**s_f0;
+                                                if let Proc::PInput(s_f0_inner_f0, s_f0_inner_f1) = s_f0_inner {
+                                                    let (binder_0, body_0) = s_f0_inner_f1.clone().unbind();
+                                                    let s_f0_inner_f0_val = &**s_f0_inner_f0;
+                                                    let s_f1_inner = &**s_f1;
+                                                    if let Proc::POutput(s_f1_inner_f0, s_f1_inner_f1) = s_f1_inner {
+                                                        let s_f1_inner_f0_val = &**s_f1_inner_f0;
+                                                        let s_f1_inner_f1_val = &**s_f1_inner_f1;
+                                                        if let Some(__matching) = eq_name_indices_0_1_delta
+                                                            .to_rel_index(&__eq_name_ind_common_delta)
+                                                            .index_get(
+                                                                &(
+                                                                    (s_f0_inner_f0_val.clone()).clone(),
+                                                                    (s_f1_inner_f0_val.clone()).clone(),
+                                                                ),
+                                                            )
+                                                        {
+                                                            __matching
+                                                                .for_each(|__val| {
+                                                                    if is_fresh(&binder_0, &s_f1_inner_f1_val.clone()) {
+                                                                        let t = ((body_0.clone()).clone())
+                                                                            .substitute_name(
+                                                                                &binder_0.0,
+                                                                                &Name::NQuote(Box::new((s_f1_inner_f1_val.clone()).clone())),
+                                                                            );
+                                                                        let __new_row: (Proc, Proc) = (
+                                                                            ascent::internal::Convert::convert(s),
+                                                                            ascent::internal::Convert::convert(t),
+                                                                        );
+                                                                        if !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                            &rw_proc_indices_0_1_total
+                                                                                .to_rel_index(&__rw_proc_ind_common_total),
+                                                                            &__new_row,
+                                                                        )
+                                                                            && !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                &rw_proc_indices_0_1_delta
+                                                                                    .to_rel_index(&__rw_proc_ind_common_delta),
+                                                                                &__new_row,
+                                                                            )
+                                                                        {
+                                                                            if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
+                                                                                &mut rw_proc_indices_0_1_new
+                                                                                    .to_rel_index_write(&mut __rw_proc_ind_common_new),
+                                                                                &__new_row,
+                                                                                (),
+                                                                            ) {
+                                                                                let __new_row_ind = _self.rw_proc.len();
+                                                                                _self
+                                                                                    .rw_proc
+                                                                                    .push((__new_row.0.clone(), __new_row.1.clone()));
+                                                                                ::ascent::internal::RelIndexWrite::index_insert(
+                                                                                    &mut rw_proc_indices_0_new
+                                                                                        .to_rel_index_write(&mut __rw_proc_ind_common_new),
+                                                                                    (__new_row.0.clone(),),
+                                                                                    (__new_row.1.clone(),),
+                                                                                );
+                                                                                ::ascent::internal::RelIndexWrite::index_insert(
+                                                                                    &mut rw_proc_indices_1_new
+                                                                                        .to_rel_index_write(&mut __rw_proc_ind_common_new),
+                                                                                    (__new_row.1.clone(),),
+                                                                                    (__new_row.0.clone(),),
+                                                                                );
+                                                                                ::ascent::internal::RelIndexWrite::index_insert(
+                                                                                    &mut rw_proc_indices_none_new
+                                                                                        .to_rel_index_write(&mut __rw_proc_ind_common_new),
+                                                                                    (),
+                                                                                    (__new_row.0.clone(), __new_row.1.clone()),
+                                                                                );
+                                                                                __changed = true;
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                });
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        });
+                                }
+                            }
+                        }
+                        ascent::internal::comment(
+                            "rw_proc <-- proc_indices_none_delta, if let ⋯, let ⋯, if let ⋯, let ⋯, let ⋯",
+                        );
+                        {
+                            if let Some(__matching) = proc_indices_none_delta
+                                .to_rel_index(&__proc_ind_common_delta)
+                                .index_get(&())
+                            {
+                                __matching
+                                    .for_each(|__val| {
+                                        let __val = __val.tuple_of_borrowed();
+                                        let s: &Proc = __val.0;
+                                        if let Proc::PDrop(s_f0) = s {
+                                            let s_f0_inner = &**s_f0;
+                                            if let Name::NQuote(s_f0_inner_f0) = s_f0_inner {
+                                                let s_f0_inner_f0_val = &**s_f0_inner_f0;
+                                                let t = (s_f0_inner_f0_val.clone()).clone();
+                                                let __new_row: (Proc, Proc) = (
+                                                    ascent::internal::Convert::convert(s),
+                                                    ascent::internal::Convert::convert(t),
+                                                );
+                                                if !::ascent::internal::RelFullIndexRead::contains_key(
+                                                    &rw_proc_indices_0_1_total
+                                                        .to_rel_index(&__rw_proc_ind_common_total),
+                                                    &__new_row,
+                                                )
+                                                    && !::ascent::internal::RelFullIndexRead::contains_key(
+                                                        &rw_proc_indices_0_1_delta
+                                                            .to_rel_index(&__rw_proc_ind_common_delta),
+                                                        &__new_row,
+                                                    )
+                                                {
+                                                    if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
+                                                        &mut rw_proc_indices_0_1_new
+                                                            .to_rel_index_write(&mut __rw_proc_ind_common_new),
+                                                        &__new_row,
+                                                        (),
+                                                    ) {
+                                                        let __new_row_ind = _self.rw_proc.len();
+                                                        _self
+                                                            .rw_proc
+                                                            .push((__new_row.0.clone(), __new_row.1.clone()));
+                                                        ::ascent::internal::RelIndexWrite::index_insert(
+                                                            &mut rw_proc_indices_0_new
+                                                                .to_rel_index_write(&mut __rw_proc_ind_common_new),
+                                                            (__new_row.0.clone(),),
+                                                            (__new_row.1.clone(),),
+                                                        );
+                                                        ::ascent::internal::RelIndexWrite::index_insert(
+                                                            &mut rw_proc_indices_1_new
+                                                                .to_rel_index_write(&mut __rw_proc_ind_common_new),
+                                                            (__new_row.1.clone(),),
+                                                            (__new_row.0.clone(),),
+                                                        );
+                                                        ::ascent::internal::RelIndexWrite::index_insert(
+                                                            &mut rw_proc_indices_none_new
+                                                                .to_rel_index_write(&mut __rw_proc_ind_common_new),
+                                                            (),
+                                                            (__new_row.0.clone(), __new_row.1.clone()),
+                                                        );
+                                                        __changed = true;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    });
+                            }
+                        }
+                        ascent::internal::comment(
+                            "rw_proc <-- proc_indices_none_delta, if let ⋯, rw_proc_indices_0_total+delta, let ⋯",
+                        );
+                        {
+                            let any_rel_empty = proc_indices_none_delta
+                                .to_rel_index(&__proc_ind_common_delta)
+                                .is_empty()
+                                || ascent::internal::RelIndexCombined::new(
+                                        &rw_proc_indices_0_total
+                                            .to_rel_index(&__rw_proc_ind_common_total),
+                                        &rw_proc_indices_0_delta
+                                            .to_rel_index(&__rw_proc_ind_common_delta),
+                                    )
+                                    .is_empty();
+                            if !any_rel_empty {
+                                if let Some(__matching) = proc_indices_none_delta
+                                    .to_rel_index(&__proc_ind_common_delta)
+                                    .index_get(&())
+                                {
+                                    __matching
+                                        .for_each(|__val| {
+                                            let __val = __val.tuple_of_borrowed();
+                                            let s: &Proc = __val.0;
+                                            if let Proc::PPar(p, s0) = s {
+                                                if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                        &rw_proc_indices_0_total
+                                                            .to_rel_index(&__rw_proc_ind_common_total),
+                                                        &rw_proc_indices_0_delta
+                                                            .to_rel_index(&__rw_proc_ind_common_delta),
+                                                    )
+                                                    .index_get(&((**s0).clone(),))
+                                                {
+                                                    __matching
+                                                        .for_each(|__val| {
+                                                            let __val = __val.tuple_of_borrowed();
+                                                            let t0: &Proc = __val.0;
+                                                            let t = Proc::PPar(p.clone(), Box::new(t0.clone()));
+                                                            let __new_row: (Proc, Proc) = (
+                                                                ascent::internal::Convert::convert(s),
+                                                                ascent::internal::Convert::convert(t),
+                                                            );
+                                                            if !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                &rw_proc_indices_0_1_total
+                                                                    .to_rel_index(&__rw_proc_ind_common_total),
+                                                                &__new_row,
+                                                            )
+                                                                && !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                    &rw_proc_indices_0_1_delta
+                                                                        .to_rel_index(&__rw_proc_ind_common_delta),
+                                                                    &__new_row,
+                                                                )
+                                                            {
+                                                                if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
+                                                                    &mut rw_proc_indices_0_1_new
+                                                                        .to_rel_index_write(&mut __rw_proc_ind_common_new),
+                                                                    &__new_row,
+                                                                    (),
+                                                                ) {
+                                                                    let __new_row_ind = _self.rw_proc.len();
+                                                                    _self
+                                                                        .rw_proc
+                                                                        .push((__new_row.0.clone(), __new_row.1.clone()));
+                                                                    ::ascent::internal::RelIndexWrite::index_insert(
+                                                                        &mut rw_proc_indices_0_new
+                                                                            .to_rel_index_write(&mut __rw_proc_ind_common_new),
+                                                                        (__new_row.0.clone(),),
+                                                                        (__new_row.1.clone(),),
+                                                                    );
+                                                                    ::ascent::internal::RelIndexWrite::index_insert(
+                                                                        &mut rw_proc_indices_1_new
+                                                                            .to_rel_index_write(&mut __rw_proc_ind_common_new),
+                                                                        (__new_row.1.clone(),),
+                                                                        (__new_row.0.clone(),),
+                                                                    );
+                                                                    ::ascent::internal::RelIndexWrite::index_insert(
+                                                                        &mut rw_proc_indices_none_new
+                                                                            .to_rel_index_write(&mut __rw_proc_ind_common_new),
+                                                                        (),
+                                                                        (__new_row.0.clone(), __new_row.1.clone()),
+                                                                    );
+                                                                    __changed = true;
+                                                                }
+                                                            }
+                                                        });
+                                                }
+                                            }
+                                        });
+                                }
+                            }
+                        }
+                        ascent::internal::comment(
+                            "rw_proc <-- proc_indices_none_total, if let ⋯, rw_proc_indices_0_delta, let ⋯",
+                        );
+                        {
+                            let any_rel_empty = proc_indices_none_total
+                                .to_rel_index(&__proc_ind_common_total)
+                                .is_empty()
+                                || rw_proc_indices_0_delta
+                                    .to_rel_index(&__rw_proc_ind_common_delta)
+                                    .is_empty();
+                            if !any_rel_empty {
+                                if let Some(__matching) = proc_indices_none_total
+                                    .to_rel_index(&__proc_ind_common_total)
+                                    .index_get(&())
+                                {
+                                    __matching
+                                        .for_each(|__val| {
+                                            let __val = __val.tuple_of_borrowed();
+                                            let s: &Proc = __val.0;
+                                            if let Proc::PPar(p, s0) = s {
+                                                if let Some(__matching) = rw_proc_indices_0_delta
+                                                    .to_rel_index(&__rw_proc_ind_common_delta)
+                                                    .index_get(&((**s0).clone(),))
+                                                {
+                                                    __matching
+                                                        .for_each(|__val| {
+                                                            let __val = __val.tuple_of_borrowed();
+                                                            let t0: &Proc = __val.0;
+                                                            let t = Proc::PPar(p.clone(), Box::new(t0.clone()));
+                                                            let __new_row: (Proc, Proc) = (
+                                                                ascent::internal::Convert::convert(s),
+                                                                ascent::internal::Convert::convert(t),
+                                                            );
+                                                            if !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                &rw_proc_indices_0_1_total
+                                                                    .to_rel_index(&__rw_proc_ind_common_total),
+                                                                &__new_row,
+                                                            )
+                                                                && !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                    &rw_proc_indices_0_1_delta
+                                                                        .to_rel_index(&__rw_proc_ind_common_delta),
+                                                                    &__new_row,
+                                                                )
+                                                            {
+                                                                if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
+                                                                    &mut rw_proc_indices_0_1_new
+                                                                        .to_rel_index_write(&mut __rw_proc_ind_common_new),
+                                                                    &__new_row,
+                                                                    (),
+                                                                ) {
+                                                                    let __new_row_ind = _self.rw_proc.len();
+                                                                    _self
+                                                                        .rw_proc
+                                                                        .push((__new_row.0.clone(), __new_row.1.clone()));
+                                                                    ::ascent::internal::RelIndexWrite::index_insert(
+                                                                        &mut rw_proc_indices_0_new
+                                                                            .to_rel_index_write(&mut __rw_proc_ind_common_new),
+                                                                        (__new_row.0.clone(),),
+                                                                        (__new_row.1.clone(),),
+                                                                    );
+                                                                    ::ascent::internal::RelIndexWrite::index_insert(
+                                                                        &mut rw_proc_indices_1_new
+                                                                            .to_rel_index_write(&mut __rw_proc_ind_common_new),
+                                                                        (__new_row.1.clone(),),
+                                                                        (__new_row.0.clone(),),
+                                                                    );
+                                                                    ::ascent::internal::RelIndexWrite::index_insert(
+                                                                        &mut rw_proc_indices_none_new
+                                                                            .to_rel_index_write(&mut __rw_proc_ind_common_new),
+                                                                        (),
+                                                                        (__new_row.0.clone(), __new_row.1.clone()),
+                                                                    );
+                                                                    __changed = true;
+                                                                }
+                                                            }
+                                                        });
+                                                }
+                                            }
+                                        });
+                                }
+                            }
+                        }
+                        ascent::internal::comment(
+                            "name <-- proc_indices_none_delta, if let ⋯",
+                        );
+                        {
+                            if let Some(__matching) = proc_indices_none_delta
+                                .to_rel_index(&__proc_ind_common_delta)
+                                .index_get(&())
+                            {
+                                __matching
+                                    .for_each(|__val| {
+                                        let __val = __val.tuple_of_borrowed();
+                                        let t: &Proc = __val.0;
+                                        if let Proc::PDrop(field_0) = t {
+                                            let __new_row: (Name,) = (*field_0.clone(),);
+                                            if !::ascent::internal::RelFullIndexRead::contains_key(
+                                                &name_indices_0_total
+                                                    .to_rel_index(&__name_ind_common_total),
+                                                &__new_row,
+                                            )
+                                                && !::ascent::internal::RelFullIndexRead::contains_key(
+                                                    &name_indices_0_delta
+                                                        .to_rel_index(&__name_ind_common_delta),
+                                                    &__new_row,
+                                                )
+                                            {
+                                                if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
+                                                    &mut name_indices_0_new
+                                                        .to_rel_index_write(&mut __name_ind_common_new),
+                                                    &__new_row,
+                                                    (),
+                                                ) {
+                                                    let __new_row_ind = _self.name.len();
+                                                    _self.name.push((__new_row.0.clone(),));
+                                                    ::ascent::internal::RelIndexWrite::index_insert(
+                                                        &mut name_indices_none_new
+                                                            .to_rel_index_write(&mut __name_ind_common_new),
+                                                        (),
+                                                        (__new_row.0.clone(),),
+                                                    );
+                                                    __changed = true;
+                                                }
+                                            }
+                                        }
+                                    });
+                            }
+                        }
+                        ascent::internal::comment(
+                            "name <-- name_indices_0_delta, rw_name_indices_0_total+delta [SIMPLE JOIN]",
+                        );
+                        {
+                            if name_indices_0_delta
+                                .to_rel_index(&__name_ind_common_delta)
+                                .len_estimate()
+                                <= ascent::internal::RelIndexCombined::new(
+                                        &rw_name_indices_0_total
+                                            .to_rel_index(&__rw_name_ind_common_total),
+                                        &rw_name_indices_0_delta
+                                            .to_rel_index(&__rw_name_ind_common_delta),
+                                    )
+                                    .len_estimate()
+                            {
+                                name_indices_0_delta
+                                    .to_rel_index(&__name_ind_common_delta)
+                                    .iter_all()
+                                    .for_each(|(__cl1_joined_columns, __cl1_tuple_indices)| {
+                                        let __cl1_joined_columns = __cl1_joined_columns
+                                            .tuple_of_borrowed();
+                                        let c0 = __cl1_joined_columns.0;
+                                        if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                &rw_name_indices_0_total
+                                                    .to_rel_index(&__rw_name_ind_common_total),
+                                                &rw_name_indices_0_delta
+                                                    .to_rel_index(&__rw_name_ind_common_delta),
+                                            )
+                                            .index_get(&(c0.clone(),))
+                                        {
+                                            __cl1_tuple_indices
+                                                .for_each(|cl1_val| {
+                                                    __matching
+                                                        .clone()
+                                                        .for_each(|__val| {
+                                                            let __val = __val.tuple_of_borrowed();
+                                                            let c1: &Name = __val.0;
+                                                            let __new_row: (Name,) = (
+                                                                ascent::internal::Convert::convert(c1),
+                                                            );
+                                                            if !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                &name_indices_0_total
+                                                                    .to_rel_index(&__name_ind_common_total),
+                                                                &__new_row,
+                                                            )
+                                                                && !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                    &name_indices_0_delta
+                                                                        .to_rel_index(&__name_ind_common_delta),
+                                                                    &__new_row,
+                                                                )
+                                                            {
+                                                                if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
+                                                                    &mut name_indices_0_new
+                                                                        .to_rel_index_write(&mut __name_ind_common_new),
+                                                                    &__new_row,
+                                                                    (),
+                                                                ) {
+                                                                    let __new_row_ind = _self.name.len();
+                                                                    _self.name.push((__new_row.0.clone(),));
+                                                                    ::ascent::internal::RelIndexWrite::index_insert(
+                                                                        &mut name_indices_none_new
+                                                                            .to_rel_index_write(&mut __name_ind_common_new),
+                                                                        (),
+                                                                        (__new_row.0.clone(),),
+                                                                    );
+                                                                    __changed = true;
+                                                                }
+                                                            }
+                                                        });
+                                                });
+                                        }
+                                    });
+                            } else {
+                                ascent::internal::RelIndexCombined::new(
+                                        &rw_name_indices_0_total
+                                            .to_rel_index(&__rw_name_ind_common_total),
+                                        &rw_name_indices_0_delta
+                                            .to_rel_index(&__rw_name_ind_common_delta),
+                                    )
+                                    .iter_all()
+                                    .for_each(|(__cl1_joined_columns, __cl1_tuple_indices)| {
+                                        let __cl1_joined_columns = __cl1_joined_columns
+                                            .tuple_of_borrowed();
+                                        let c0 = __cl1_joined_columns.0;
+                                        if let Some(__matching) = name_indices_0_delta
+                                            .to_rel_index(&__name_ind_common_delta)
+                                            .index_get(&(c0.clone(),))
+                                        {
+                                            __cl1_tuple_indices
+                                                .for_each(|cl1_val| {
+                                                    let cl1_val = cl1_val.tuple_of_borrowed();
+                                                    let c1: &Name = cl1_val.0;
+                                                    __matching
+                                                        .clone()
+                                                        .for_each(|__val| {
+                                                            let __new_row: (Name,) = (
+                                                                ascent::internal::Convert::convert(c1),
+                                                            );
+                                                            if !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                &name_indices_0_total
+                                                                    .to_rel_index(&__name_ind_common_total),
+                                                                &__new_row,
+                                                            )
+                                                                && !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                    &name_indices_0_delta
+                                                                        .to_rel_index(&__name_ind_common_delta),
+                                                                    &__new_row,
+                                                                )
+                                                            {
+                                                                if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
+                                                                    &mut name_indices_0_new
+                                                                        .to_rel_index_write(&mut __name_ind_common_new),
+                                                                    &__new_row,
+                                                                    (),
+                                                                ) {
+                                                                    let __new_row_ind = _self.name.len();
+                                                                    _self.name.push((__new_row.0.clone(),));
+                                                                    ::ascent::internal::RelIndexWrite::index_insert(
+                                                                        &mut name_indices_none_new
+                                                                            .to_rel_index_write(&mut __name_ind_common_new),
+                                                                        (),
+                                                                        (__new_row.0.clone(),),
+                                                                    );
+                                                                    __changed = true;
+                                                                }
+                                                            }
+                                                        });
+                                                });
+                                        }
+                                    });
+                            }
+                        }
+                        ascent::internal::comment(
+                            "name <-- name_indices_0_total, rw_name_indices_0_delta [SIMPLE JOIN]",
+                        );
+                        {
+                            if name_indices_0_total
+                                .to_rel_index(&__name_ind_common_total)
+                                .len_estimate()
+                                <= rw_name_indices_0_delta
+                                    .to_rel_index(&__rw_name_ind_common_delta)
+                                    .len_estimate()
+                            {
+                                name_indices_0_total
+                                    .to_rel_index(&__name_ind_common_total)
+                                    .iter_all()
+                                    .for_each(|(__cl1_joined_columns, __cl1_tuple_indices)| {
+                                        let __cl1_joined_columns = __cl1_joined_columns
+                                            .tuple_of_borrowed();
+                                        let c0 = __cl1_joined_columns.0;
+                                        if let Some(__matching) = rw_name_indices_0_delta
+                                            .to_rel_index(&__rw_name_ind_common_delta)
+                                            .index_get(&(c0.clone(),))
+                                        {
+                                            __cl1_tuple_indices
+                                                .for_each(|cl1_val| {
+                                                    __matching
+                                                        .clone()
+                                                        .for_each(|__val| {
+                                                            let __val = __val.tuple_of_borrowed();
+                                                            let c1: &Name = __val.0;
+                                                            let __new_row: (Name,) = (
+                                                                ascent::internal::Convert::convert(c1),
+                                                            );
+                                                            if !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                &name_indices_0_total
+                                                                    .to_rel_index(&__name_ind_common_total),
+                                                                &__new_row,
+                                                            )
+                                                                && !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                    &name_indices_0_delta
+                                                                        .to_rel_index(&__name_ind_common_delta),
+                                                                    &__new_row,
+                                                                )
+                                                            {
+                                                                if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
+                                                                    &mut name_indices_0_new
+                                                                        .to_rel_index_write(&mut __name_ind_common_new),
+                                                                    &__new_row,
+                                                                    (),
+                                                                ) {
+                                                                    let __new_row_ind = _self.name.len();
+                                                                    _self.name.push((__new_row.0.clone(),));
+                                                                    ::ascent::internal::RelIndexWrite::index_insert(
+                                                                        &mut name_indices_none_new
+                                                                            .to_rel_index_write(&mut __name_ind_common_new),
+                                                                        (),
+                                                                        (__new_row.0.clone(),),
+                                                                    );
+                                                                    __changed = true;
+                                                                }
+                                                            }
+                                                        });
+                                                });
+                                        }
+                                    });
+                            } else {
+                                rw_name_indices_0_delta
+                                    .to_rel_index(&__rw_name_ind_common_delta)
+                                    .iter_all()
+                                    .for_each(|(__cl1_joined_columns, __cl1_tuple_indices)| {
+                                        let __cl1_joined_columns = __cl1_joined_columns
+                                            .tuple_of_borrowed();
+                                        let c0 = __cl1_joined_columns.0;
+                                        if let Some(__matching) = name_indices_0_total
+                                            .to_rel_index(&__name_ind_common_total)
+                                            .index_get(&(c0.clone(),))
+                                        {
+                                            __cl1_tuple_indices
+                                                .for_each(|cl1_val| {
+                                                    let cl1_val = cl1_val.tuple_of_borrowed();
+                                                    let c1: &Name = cl1_val.0;
+                                                    __matching
+                                                        .clone()
+                                                        .for_each(|__val| {
+                                                            let __new_row: (Name,) = (
+                                                                ascent::internal::Convert::convert(c1),
+                                                            );
+                                                            if !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                &name_indices_0_total
+                                                                    .to_rel_index(&__name_ind_common_total),
+                                                                &__new_row,
+                                                            )
+                                                                && !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                    &name_indices_0_delta
+                                                                        .to_rel_index(&__name_ind_common_delta),
+                                                                    &__new_row,
+                                                                )
+                                                            {
+                                                                if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
+                                                                    &mut name_indices_0_new
+                                                                        .to_rel_index_write(&mut __name_ind_common_new),
+                                                                    &__new_row,
+                                                                    (),
+                                                                ) {
+                                                                    let __new_row_ind = _self.name.len();
+                                                                    _self.name.push((__new_row.0.clone(),));
+                                                                    ::ascent::internal::RelIndexWrite::index_insert(
+                                                                        &mut name_indices_none_new
+                                                                            .to_rel_index_write(&mut __name_ind_common_new),
+                                                                        (),
+                                                                        (__new_row.0.clone(),),
+                                                                    );
+                                                                    __changed = true;
+                                                                }
+                                                            }
+                                                        });
+                                                });
+                                        }
+                                    });
+                            }
+                        }
+                        ascent::internal::comment(
+                            "rw_name <-- rw_name_indices_0_delta, eq_name_indices_0_total+delta [SIMPLE JOIN]",
+                        );
+                        {
+                            if rw_name_indices_0_delta
+                                .to_rel_index(&__rw_name_ind_common_delta)
+                                .len_estimate()
+                                <= ascent::internal::RelIndexCombined::new(
+                                        &eq_name_indices_0_total
+                                            .to_rel_index(&__eq_name_ind_common_total),
+                                        &eq_name_indices_0_delta
+                                            .to_rel_index(&__eq_name_ind_common_delta),
+                                    )
+                                    .len_estimate()
+                            {
+                                rw_name_indices_0_delta
+                                    .to_rel_index(&__rw_name_ind_common_delta)
+                                    .iter_all()
+                                    .for_each(|(__cl1_joined_columns, __cl1_tuple_indices)| {
+                                        let __cl1_joined_columns = __cl1_joined_columns
+                                            .tuple_of_borrowed();
+                                        let s0 = __cl1_joined_columns.0;
+                                        if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                &eq_name_indices_0_total
+                                                    .to_rel_index(&__eq_name_ind_common_total),
+                                                &eq_name_indices_0_delta
+                                                    .to_rel_index(&__eq_name_ind_common_delta),
+                                            )
+                                            .index_get(&(s0.clone(),))
+                                        {
+                                            __cl1_tuple_indices
+                                                .for_each(|cl1_val| {
+                                                    let cl1_val = cl1_val.tuple_of_borrowed();
+                                                    let t: &Name = cl1_val.0;
+                                                    __matching
+                                                        .clone()
+                                                        .for_each(|__val| {
+                                                            let __val = __val.tuple_of_borrowed();
+                                                            let s1: &Name = __val.0;
+                                                            let __new_row: (Name, Name) = (
+                                                                ascent::internal::Convert::convert(s1),
+                                                                ascent::internal::Convert::convert(t),
+                                                            );
+                                                            if !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                &rw_name_indices_0_1_total
+                                                                    .to_rel_index(&__rw_name_ind_common_total),
+                                                                &__new_row,
+                                                            )
+                                                                && !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                    &rw_name_indices_0_1_delta
+                                                                        .to_rel_index(&__rw_name_ind_common_delta),
+                                                                    &__new_row,
+                                                                )
+                                                            {
+                                                                if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
+                                                                    &mut rw_name_indices_0_1_new
+                                                                        .to_rel_index_write(&mut __rw_name_ind_common_new),
+                                                                    &__new_row,
+                                                                    (),
+                                                                ) {
+                                                                    let __new_row_ind = _self.rw_name.len();
+                                                                    _self
+                                                                        .rw_name
+                                                                        .push((__new_row.0.clone(), __new_row.1.clone()));
+                                                                    ::ascent::internal::RelIndexWrite::index_insert(
+                                                                        &mut rw_name_indices_0_new
+                                                                            .to_rel_index_write(&mut __rw_name_ind_common_new),
+                                                                        (__new_row.0.clone(),),
+                                                                        (__new_row.1.clone(),),
+                                                                    );
+                                                                    ::ascent::internal::RelIndexWrite::index_insert(
+                                                                        &mut rw_name_indices_1_new
+                                                                            .to_rel_index_write(&mut __rw_name_ind_common_new),
+                                                                        (__new_row.1.clone(),),
+                                                                        (__new_row.0.clone(),),
+                                                                    );
+                                                                    __changed = true;
+                                                                }
+                                                            }
+                                                        });
+                                                });
+                                        }
+                                    });
+                            } else {
+                                ascent::internal::RelIndexCombined::new(
+                                        &eq_name_indices_0_total
+                                            .to_rel_index(&__eq_name_ind_common_total),
+                                        &eq_name_indices_0_delta
+                                            .to_rel_index(&__eq_name_ind_common_delta),
+                                    )
+                                    .iter_all()
+                                    .for_each(|(__cl1_joined_columns, __cl1_tuple_indices)| {
+                                        let __cl1_joined_columns = __cl1_joined_columns
+                                            .tuple_of_borrowed();
+                                        let s0 = __cl1_joined_columns.0;
+                                        if let Some(__matching) = rw_name_indices_0_delta
+                                            .to_rel_index(&__rw_name_ind_common_delta)
+                                            .index_get(&(s0.clone(),))
+                                        {
+                                            __cl1_tuple_indices
+                                                .for_each(|cl1_val| {
+                                                    let cl1_val = cl1_val.tuple_of_borrowed();
+                                                    let s1: &Name = cl1_val.0;
+                                                    __matching
+                                                        .clone()
+                                                        .for_each(|__val| {
+                                                            let __val = __val.tuple_of_borrowed();
+                                                            let t: &Name = __val.0;
+                                                            let __new_row: (Name, Name) = (
+                                                                ascent::internal::Convert::convert(s1),
+                                                                ascent::internal::Convert::convert(t),
+                                                            );
+                                                            if !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                &rw_name_indices_0_1_total
+                                                                    .to_rel_index(&__rw_name_ind_common_total),
+                                                                &__new_row,
+                                                            )
+                                                                && !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                    &rw_name_indices_0_1_delta
+                                                                        .to_rel_index(&__rw_name_ind_common_delta),
+                                                                    &__new_row,
+                                                                )
+                                                            {
+                                                                if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
+                                                                    &mut rw_name_indices_0_1_new
+                                                                        .to_rel_index_write(&mut __rw_name_ind_common_new),
+                                                                    &__new_row,
+                                                                    (),
+                                                                ) {
+                                                                    let __new_row_ind = _self.rw_name.len();
+                                                                    _self
+                                                                        .rw_name
+                                                                        .push((__new_row.0.clone(), __new_row.1.clone()));
+                                                                    ::ascent::internal::RelIndexWrite::index_insert(
+                                                                        &mut rw_name_indices_0_new
+                                                                            .to_rel_index_write(&mut __rw_name_ind_common_new),
+                                                                        (__new_row.0.clone(),),
+                                                                        (__new_row.1.clone(),),
+                                                                    );
+                                                                    ::ascent::internal::RelIndexWrite::index_insert(
+                                                                        &mut rw_name_indices_1_new
+                                                                            .to_rel_index_write(&mut __rw_name_ind_common_new),
+                                                                        (__new_row.1.clone(),),
+                                                                        (__new_row.0.clone(),),
+                                                                    );
+                                                                    __changed = true;
+                                                                }
+                                                            }
+                                                        });
+                                                });
+                                        }
+                                    });
+                            }
+                        }
+                        ascent::internal::comment(
+                            "rw_name <-- rw_name_indices_0_total, eq_name_indices_0_delta [SIMPLE JOIN]",
+                        );
+                        {
+                            if rw_name_indices_0_total
+                                .to_rel_index(&__rw_name_ind_common_total)
+                                .len_estimate()
+                                <= eq_name_indices_0_delta
+                                    .to_rel_index(&__eq_name_ind_common_delta)
+                                    .len_estimate()
+                            {
+                                rw_name_indices_0_total
+                                    .to_rel_index(&__rw_name_ind_common_total)
+                                    .iter_all()
+                                    .for_each(|(__cl1_joined_columns, __cl1_tuple_indices)| {
+                                        let __cl1_joined_columns = __cl1_joined_columns
+                                            .tuple_of_borrowed();
+                                        let s0 = __cl1_joined_columns.0;
+                                        if let Some(__matching) = eq_name_indices_0_delta
+                                            .to_rel_index(&__eq_name_ind_common_delta)
+                                            .index_get(&(s0.clone(),))
+                                        {
+                                            __cl1_tuple_indices
+                                                .for_each(|cl1_val| {
+                                                    let cl1_val = cl1_val.tuple_of_borrowed();
+                                                    let t: &Name = cl1_val.0;
+                                                    __matching
+                                                        .clone()
+                                                        .for_each(|__val| {
+                                                            let __val = __val.tuple_of_borrowed();
+                                                            let s1: &Name = __val.0;
+                                                            let __new_row: (Name, Name) = (
+                                                                ascent::internal::Convert::convert(s1),
+                                                                ascent::internal::Convert::convert(t),
+                                                            );
+                                                            if !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                &rw_name_indices_0_1_total
+                                                                    .to_rel_index(&__rw_name_ind_common_total),
+                                                                &__new_row,
+                                                            )
+                                                                && !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                    &rw_name_indices_0_1_delta
+                                                                        .to_rel_index(&__rw_name_ind_common_delta),
+                                                                    &__new_row,
+                                                                )
+                                                            {
+                                                                if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
+                                                                    &mut rw_name_indices_0_1_new
+                                                                        .to_rel_index_write(&mut __rw_name_ind_common_new),
+                                                                    &__new_row,
+                                                                    (),
+                                                                ) {
+                                                                    let __new_row_ind = _self.rw_name.len();
+                                                                    _self
+                                                                        .rw_name
+                                                                        .push((__new_row.0.clone(), __new_row.1.clone()));
+                                                                    ::ascent::internal::RelIndexWrite::index_insert(
+                                                                        &mut rw_name_indices_0_new
+                                                                            .to_rel_index_write(&mut __rw_name_ind_common_new),
+                                                                        (__new_row.0.clone(),),
+                                                                        (__new_row.1.clone(),),
+                                                                    );
+                                                                    ::ascent::internal::RelIndexWrite::index_insert(
+                                                                        &mut rw_name_indices_1_new
+                                                                            .to_rel_index_write(&mut __rw_name_ind_common_new),
+                                                                        (__new_row.1.clone(),),
+                                                                        (__new_row.0.clone(),),
+                                                                    );
+                                                                    __changed = true;
+                                                                }
+                                                            }
+                                                        });
+                                                });
+                                        }
+                                    });
+                            } else {
+                                eq_name_indices_0_delta
+                                    .to_rel_index(&__eq_name_ind_common_delta)
+                                    .iter_all()
+                                    .for_each(|(__cl1_joined_columns, __cl1_tuple_indices)| {
+                                        let __cl1_joined_columns = __cl1_joined_columns
+                                            .tuple_of_borrowed();
+                                        let s0 = __cl1_joined_columns.0;
+                                        if let Some(__matching) = rw_name_indices_0_total
+                                            .to_rel_index(&__rw_name_ind_common_total)
+                                            .index_get(&(s0.clone(),))
+                                        {
+                                            __cl1_tuple_indices
+                                                .for_each(|cl1_val| {
+                                                    let cl1_val = cl1_val.tuple_of_borrowed();
+                                                    let s1: &Name = cl1_val.0;
+                                                    __matching
+                                                        .clone()
+                                                        .for_each(|__val| {
+                                                            let __val = __val.tuple_of_borrowed();
+                                                            let t: &Name = __val.0;
+                                                            let __new_row: (Name, Name) = (
+                                                                ascent::internal::Convert::convert(s1),
+                                                                ascent::internal::Convert::convert(t),
+                                                            );
+                                                            if !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                &rw_name_indices_0_1_total
+                                                                    .to_rel_index(&__rw_name_ind_common_total),
+                                                                &__new_row,
+                                                            )
+                                                                && !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                    &rw_name_indices_0_1_delta
+                                                                        .to_rel_index(&__rw_name_ind_common_delta),
+                                                                    &__new_row,
+                                                                )
+                                                            {
+                                                                if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
+                                                                    &mut rw_name_indices_0_1_new
+                                                                        .to_rel_index_write(&mut __rw_name_ind_common_new),
+                                                                    &__new_row,
+                                                                    (),
+                                                                ) {
+                                                                    let __new_row_ind = _self.rw_name.len();
+                                                                    _self
+                                                                        .rw_name
+                                                                        .push((__new_row.0.clone(), __new_row.1.clone()));
+                                                                    ::ascent::internal::RelIndexWrite::index_insert(
+                                                                        &mut rw_name_indices_0_new
+                                                                            .to_rel_index_write(&mut __rw_name_ind_common_new),
+                                                                        (__new_row.0.clone(),),
+                                                                        (__new_row.1.clone(),),
+                                                                    );
+                                                                    ::ascent::internal::RelIndexWrite::index_insert(
+                                                                        &mut rw_name_indices_1_new
+                                                                            .to_rel_index_write(&mut __rw_name_ind_common_new),
+                                                                        (__new_row.1.clone(),),
+                                                                        (__new_row.0.clone(),),
+                                                                    );
+                                                                    __changed = true;
+                                                                }
+                                                            }
+                                                        });
+                                                });
+                                        }
+                                    });
+                            }
+                        }
+                        ascent::internal::comment(
+                            "rw_name <-- rw_name_indices_1_delta, eq_name_indices_0_total+delta [SIMPLE JOIN]",
+                        );
+                        {
+                            if rw_name_indices_1_delta
+                                .to_rel_index(&__rw_name_ind_common_delta)
+                                .len_estimate()
+                                <= ascent::internal::RelIndexCombined::new(
+                                        &eq_name_indices_0_total
+                                            .to_rel_index(&__eq_name_ind_common_total),
+                                        &eq_name_indices_0_delta
+                                            .to_rel_index(&__eq_name_ind_common_delta),
+                                    )
+                                    .len_estimate()
+                            {
+                                rw_name_indices_1_delta
+                                    .to_rel_index(&__rw_name_ind_common_delta)
+                                    .iter_all()
+                                    .for_each(|(__cl1_joined_columns, __cl1_tuple_indices)| {
+                                        let __cl1_joined_columns = __cl1_joined_columns
+                                            .tuple_of_borrowed();
+                                        let t0 = __cl1_joined_columns.0;
+                                        if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                &eq_name_indices_0_total
+                                                    .to_rel_index(&__eq_name_ind_common_total),
+                                                &eq_name_indices_0_delta
+                                                    .to_rel_index(&__eq_name_ind_common_delta),
+                                            )
+                                            .index_get(&(t0.clone(),))
+                                        {
+                                            __cl1_tuple_indices
+                                                .for_each(|cl1_val| {
+                                                    let cl1_val = cl1_val.tuple_of_borrowed();
+                                                    let s: &Name = cl1_val.0;
+                                                    __matching
+                                                        .clone()
+                                                        .for_each(|__val| {
+                                                            let __val = __val.tuple_of_borrowed();
+                                                            let t1: &Name = __val.0;
+                                                            let __new_row: (Name, Name) = (
+                                                                ascent::internal::Convert::convert(s),
+                                                                ascent::internal::Convert::convert(t1),
+                                                            );
+                                                            if !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                &rw_name_indices_0_1_total
+                                                                    .to_rel_index(&__rw_name_ind_common_total),
+                                                                &__new_row,
+                                                            )
+                                                                && !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                    &rw_name_indices_0_1_delta
+                                                                        .to_rel_index(&__rw_name_ind_common_delta),
+                                                                    &__new_row,
+                                                                )
+                                                            {
+                                                                if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
+                                                                    &mut rw_name_indices_0_1_new
+                                                                        .to_rel_index_write(&mut __rw_name_ind_common_new),
+                                                                    &__new_row,
+                                                                    (),
+                                                                ) {
+                                                                    let __new_row_ind = _self.rw_name.len();
+                                                                    _self
+                                                                        .rw_name
+                                                                        .push((__new_row.0.clone(), __new_row.1.clone()));
+                                                                    ::ascent::internal::RelIndexWrite::index_insert(
+                                                                        &mut rw_name_indices_0_new
+                                                                            .to_rel_index_write(&mut __rw_name_ind_common_new),
+                                                                        (__new_row.0.clone(),),
+                                                                        (__new_row.1.clone(),),
+                                                                    );
+                                                                    ::ascent::internal::RelIndexWrite::index_insert(
+                                                                        &mut rw_name_indices_1_new
+                                                                            .to_rel_index_write(&mut __rw_name_ind_common_new),
+                                                                        (__new_row.1.clone(),),
+                                                                        (__new_row.0.clone(),),
+                                                                    );
+                                                                    __changed = true;
+                                                                }
+                                                            }
+                                                        });
+                                                });
+                                        }
+                                    });
+                            } else {
+                                ascent::internal::RelIndexCombined::new(
+                                        &eq_name_indices_0_total
+                                            .to_rel_index(&__eq_name_ind_common_total),
+                                        &eq_name_indices_0_delta
+                                            .to_rel_index(&__eq_name_ind_common_delta),
+                                    )
+                                    .iter_all()
+                                    .for_each(|(__cl1_joined_columns, __cl1_tuple_indices)| {
+                                        let __cl1_joined_columns = __cl1_joined_columns
+                                            .tuple_of_borrowed();
+                                        let t0 = __cl1_joined_columns.0;
+                                        if let Some(__matching) = rw_name_indices_1_delta
+                                            .to_rel_index(&__rw_name_ind_common_delta)
+                                            .index_get(&(t0.clone(),))
+                                        {
+                                            __cl1_tuple_indices
+                                                .for_each(|cl1_val| {
+                                                    let cl1_val = cl1_val.tuple_of_borrowed();
+                                                    let t1: &Name = cl1_val.0;
+                                                    __matching
+                                                        .clone()
+                                                        .for_each(|__val| {
+                                                            let __val = __val.tuple_of_borrowed();
+                                                            let s: &Name = __val.0;
+                                                            let __new_row: (Name, Name) = (
+                                                                ascent::internal::Convert::convert(s),
+                                                                ascent::internal::Convert::convert(t1),
+                                                            );
+                                                            if !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                &rw_name_indices_0_1_total
+                                                                    .to_rel_index(&__rw_name_ind_common_total),
+                                                                &__new_row,
+                                                            )
+                                                                && !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                    &rw_name_indices_0_1_delta
+                                                                        .to_rel_index(&__rw_name_ind_common_delta),
+                                                                    &__new_row,
+                                                                )
+                                                            {
+                                                                if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
+                                                                    &mut rw_name_indices_0_1_new
+                                                                        .to_rel_index_write(&mut __rw_name_ind_common_new),
+                                                                    &__new_row,
+                                                                    (),
+                                                                ) {
+                                                                    let __new_row_ind = _self.rw_name.len();
+                                                                    _self
+                                                                        .rw_name
+                                                                        .push((__new_row.0.clone(), __new_row.1.clone()));
+                                                                    ::ascent::internal::RelIndexWrite::index_insert(
+                                                                        &mut rw_name_indices_0_new
+                                                                            .to_rel_index_write(&mut __rw_name_ind_common_new),
+                                                                        (__new_row.0.clone(),),
+                                                                        (__new_row.1.clone(),),
+                                                                    );
+                                                                    ::ascent::internal::RelIndexWrite::index_insert(
+                                                                        &mut rw_name_indices_1_new
+                                                                            .to_rel_index_write(&mut __rw_name_ind_common_new),
+                                                                        (__new_row.1.clone(),),
+                                                                        (__new_row.0.clone(),),
+                                                                    );
+                                                                    __changed = true;
+                                                                }
+                                                            }
+                                                        });
+                                                });
+                                        }
+                                    });
+                            }
+                        }
+                        ascent::internal::comment(
+                            "rw_name <-- rw_name_indices_1_total, eq_name_indices_0_delta [SIMPLE JOIN]",
+                        );
+                        {
+                            if rw_name_indices_1_total
+                                .to_rel_index(&__rw_name_ind_common_total)
+                                .len_estimate()
+                                <= eq_name_indices_0_delta
+                                    .to_rel_index(&__eq_name_ind_common_delta)
+                                    .len_estimate()
+                            {
+                                rw_name_indices_1_total
+                                    .to_rel_index(&__rw_name_ind_common_total)
+                                    .iter_all()
+                                    .for_each(|(__cl1_joined_columns, __cl1_tuple_indices)| {
+                                        let __cl1_joined_columns = __cl1_joined_columns
+                                            .tuple_of_borrowed();
+                                        let t0 = __cl1_joined_columns.0;
+                                        if let Some(__matching) = eq_name_indices_0_delta
+                                            .to_rel_index(&__eq_name_ind_common_delta)
+                                            .index_get(&(t0.clone(),))
+                                        {
+                                            __cl1_tuple_indices
+                                                .for_each(|cl1_val| {
+                                                    let cl1_val = cl1_val.tuple_of_borrowed();
+                                                    let s: &Name = cl1_val.0;
+                                                    __matching
+                                                        .clone()
+                                                        .for_each(|__val| {
+                                                            let __val = __val.tuple_of_borrowed();
+                                                            let t1: &Name = __val.0;
+                                                            let __new_row: (Name, Name) = (
+                                                                ascent::internal::Convert::convert(s),
+                                                                ascent::internal::Convert::convert(t1),
+                                                            );
+                                                            if !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                &rw_name_indices_0_1_total
+                                                                    .to_rel_index(&__rw_name_ind_common_total),
+                                                                &__new_row,
+                                                            )
+                                                                && !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                    &rw_name_indices_0_1_delta
+                                                                        .to_rel_index(&__rw_name_ind_common_delta),
+                                                                    &__new_row,
+                                                                )
+                                                            {
+                                                                if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
+                                                                    &mut rw_name_indices_0_1_new
+                                                                        .to_rel_index_write(&mut __rw_name_ind_common_new),
+                                                                    &__new_row,
+                                                                    (),
+                                                                ) {
+                                                                    let __new_row_ind = _self.rw_name.len();
+                                                                    _self
+                                                                        .rw_name
+                                                                        .push((__new_row.0.clone(), __new_row.1.clone()));
+                                                                    ::ascent::internal::RelIndexWrite::index_insert(
+                                                                        &mut rw_name_indices_0_new
+                                                                            .to_rel_index_write(&mut __rw_name_ind_common_new),
+                                                                        (__new_row.0.clone(),),
+                                                                        (__new_row.1.clone(),),
+                                                                    );
+                                                                    ::ascent::internal::RelIndexWrite::index_insert(
+                                                                        &mut rw_name_indices_1_new
+                                                                            .to_rel_index_write(&mut __rw_name_ind_common_new),
+                                                                        (__new_row.1.clone(),),
+                                                                        (__new_row.0.clone(),),
+                                                                    );
+                                                                    __changed = true;
+                                                                }
+                                                            }
+                                                        });
+                                                });
+                                        }
+                                    });
+                            } else {
+                                eq_name_indices_0_delta
+                                    .to_rel_index(&__eq_name_ind_common_delta)
+                                    .iter_all()
+                                    .for_each(|(__cl1_joined_columns, __cl1_tuple_indices)| {
+                                        let __cl1_joined_columns = __cl1_joined_columns
+                                            .tuple_of_borrowed();
+                                        let t0 = __cl1_joined_columns.0;
+                                        if let Some(__matching) = rw_name_indices_1_total
+                                            .to_rel_index(&__rw_name_ind_common_total)
+                                            .index_get(&(t0.clone(),))
+                                        {
+                                            __cl1_tuple_indices
+                                                .for_each(|cl1_val| {
+                                                    let cl1_val = cl1_val.tuple_of_borrowed();
+                                                    let t1: &Name = cl1_val.0;
+                                                    __matching
+                                                        .clone()
+                                                        .for_each(|__val| {
+                                                            let __val = __val.tuple_of_borrowed();
+                                                            let s: &Name = __val.0;
+                                                            let __new_row: (Name, Name) = (
+                                                                ascent::internal::Convert::convert(s),
+                                                                ascent::internal::Convert::convert(t1),
+                                                            );
+                                                            if !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                &rw_name_indices_0_1_total
+                                                                    .to_rel_index(&__rw_name_ind_common_total),
+                                                                &__new_row,
+                                                            )
+                                                                && !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                    &rw_name_indices_0_1_delta
+                                                                        .to_rel_index(&__rw_name_ind_common_delta),
+                                                                    &__new_row,
+                                                                )
+                                                            {
+                                                                if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
+                                                                    &mut rw_name_indices_0_1_new
+                                                                        .to_rel_index_write(&mut __rw_name_ind_common_new),
+                                                                    &__new_row,
+                                                                    (),
+                                                                ) {
+                                                                    let __new_row_ind = _self.rw_name.len();
+                                                                    _self
+                                                                        .rw_name
+                                                                        .push((__new_row.0.clone(), __new_row.1.clone()));
+                                                                    ::ascent::internal::RelIndexWrite::index_insert(
+                                                                        &mut rw_name_indices_0_new
+                                                                            .to_rel_index_write(&mut __rw_name_ind_common_new),
+                                                                        (__new_row.0.clone(),),
+                                                                        (__new_row.1.clone(),),
+                                                                    );
+                                                                    ::ascent::internal::RelIndexWrite::index_insert(
+                                                                        &mut rw_name_indices_1_new
+                                                                            .to_rel_index_write(&mut __rw_name_ind_common_new),
+                                                                        (__new_row.1.clone(),),
+                                                                        (__new_row.0.clone(),),
+                                                                    );
+                                                                    __changed = true;
+                                                                }
+                                                            }
+                                                        });
+                                                });
+                                        }
+                                    });
+                            }
+                        }
+                        ascent::internal::comment("eq_proc <-- proc_indices_none_delta");
+                        {
+                            if let Some(__matching) = proc_indices_none_delta
+                                .to_rel_index(&__proc_ind_common_delta)
+                                .index_get(&())
+                            {
+                                __matching
+                                    .for_each(|__val| {
+                                        let __val = __val.tuple_of_borrowed();
+                                        let t: &Proc = __val.0;
+                                        let __new_row: (Proc, Proc) = (t.clone(), t.clone());
+                                        if !::ascent::internal::RelFullIndexRead::contains_key(
+                                            &eq_proc_indices_0_1_total
+                                                .to_rel_index(&__eq_proc_ind_common_total),
+                                            &__new_row,
+                                        )
+                                            && !::ascent::internal::RelFullIndexRead::contains_key(
+                                                &eq_proc_indices_0_1_delta
+                                                    .to_rel_index(&__eq_proc_ind_common_delta),
+                                                &__new_row,
+                                            )
+                                        {
+                                            if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
+                                                &mut eq_proc_indices_0_1_new
+                                                    .to_rel_index_write(&mut __eq_proc_ind_common_new),
+                                                &__new_row,
+                                                (),
+                                            ) {
+                                                let __new_row_ind = _self.eq_proc.len();
+                                                _self
+                                                    .eq_proc
+                                                    .push((__new_row.0.clone(), __new_row.1.clone()));
+                                                ::ascent::internal::RelIndexWrite::index_insert(
+                                                    &mut eq_proc_indices_0_new
+                                                        .to_rel_index_write(&mut __eq_proc_ind_common_new),
+                                                    (__new_row.0.clone(),),
+                                                    (__new_row.1.clone(),),
+                                                );
+                                                __changed = true;
+                                            }
+                                        }
+                                    });
+                            }
+                        }
+                        ascent::internal::comment("eq_name <-- name_indices_none_delta");
+                        {
+                            if let Some(__matching) = name_indices_none_delta
+                                .to_rel_index(&__name_ind_common_delta)
+                                .index_get(&())
+                            {
+                                __matching
+                                    .for_each(|__val| {
+                                        let __val = __val.tuple_of_borrowed();
+                                        let t: &Name = __val.0;
+                                        let __new_row: (Name, Name) = (t.clone(), t.clone());
+                                        if !::ascent::internal::RelFullIndexRead::contains_key(
+                                            &eq_name_indices_0_1_total
+                                                .to_rel_index(&__eq_name_ind_common_total),
+                                            &__new_row,
+                                        )
+                                            && !::ascent::internal::RelFullIndexRead::contains_key(
+                                                &eq_name_indices_0_1_delta
+                                                    .to_rel_index(&__eq_name_ind_common_delta),
+                                                &__new_row,
+                                            )
+                                        {
+                                            if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
+                                                &mut eq_name_indices_0_1_new
+                                                    .to_rel_index_write(&mut __eq_name_ind_common_new),
+                                                &__new_row,
+                                                (),
+                                            ) {
+                                                let __new_row_ind = _self.eq_name.len();
+                                                _self
+                                                    .eq_name
+                                                    .push((__new_row.0.clone(), __new_row.1.clone()));
+                                                ::ascent::internal::RelIndexWrite::index_insert(
+                                                    &mut eq_name_indices_0_new
+                                                        .to_rel_index_write(&mut __eq_name_ind_common_new),
+                                                    (__new_row.0.clone(),),
+                                                    (__new_row.1.clone(),),
+                                                );
+                                                __changed = true;
+                                            }
+                                        }
+                                    });
+                            }
+                        }
+                        ascent::internal::comment(
+                            "eq_proc <-- name_indices_none_delta, name_indices_none_total+delta, eq_name_indices_0_1_total+delta [SIMPLE JOIN]",
+                        );
+                        {
+                            let any_rel_empty = name_indices_none_delta
+                                .to_rel_index(&__name_ind_common_delta)
+                                .is_empty()
+                                || ascent::internal::RelIndexCombined::new(
+                                        &name_indices_none_total
+                                            .to_rel_index(&__name_ind_common_total),
+                                        &name_indices_none_delta
+                                            .to_rel_index(&__name_ind_common_delta),
+                                    )
+                                    .is_empty()
+                                || ascent::internal::RelIndexCombined::new(
+                                        &eq_name_indices_0_1_total
+                                            .to_rel_index(&__eq_name_ind_common_total),
+                                        &eq_name_indices_0_1_delta
+                                            .to_rel_index(&__eq_name_ind_common_delta),
+                                    )
+                                    .is_empty();
+                            if !any_rel_empty {
+                                if name_indices_none_delta
+                                    .to_rel_index(&__name_ind_common_delta)
+                                    .len_estimate()
+                                    <= ascent::internal::RelIndexCombined::new(
+                                            &name_indices_none_total
+                                                .to_rel_index(&__name_ind_common_total),
+                                            &name_indices_none_delta
+                                                .to_rel_index(&__name_ind_common_delta),
+                                        )
+                                        .len_estimate()
+                                {
+                                    name_indices_none_delta
+                                        .to_rel_index(&__name_ind_common_delta)
+                                        .iter_all()
+                                        .for_each(|(__cl1_joined_columns, __cl1_tuple_indices)| {
+                                            let __cl1_joined_columns = __cl1_joined_columns
+                                                .tuple_of_borrowed();
+                                            if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                    &name_indices_none_total
+                                                        .to_rel_index(&__name_ind_common_total),
+                                                    &name_indices_none_delta
+                                                        .to_rel_index(&__name_ind_common_delta),
+                                                )
+                                                .index_get(&())
+                                            {
+                                                __cl1_tuple_indices
+                                                    .for_each(|cl1_val| {
+                                                        let cl1_val = cl1_val.tuple_of_borrowed();
+                                                        let x0: &Name = cl1_val.0;
+                                                        __matching
+                                                            .clone()
+                                                            .for_each(|__val| {
+                                                                let __val = __val.tuple_of_borrowed();
+                                                                let y0: &Name = __val.0;
+                                                                if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                                        &eq_name_indices_0_1_total
+                                                                            .to_rel_index(&__eq_name_ind_common_total),
+                                                                        &eq_name_indices_0_1_delta
+                                                                            .to_rel_index(&__eq_name_ind_common_delta),
+                                                                    )
+                                                                    .index_get(&((x0.clone()).clone(), (y0.clone()).clone()))
+                                                                {
+                                                                    __matching
+                                                                        .for_each(|__val| {
+                                                                            let __new_row: (Proc, Proc) = (
+                                                                                Proc::PDrop(Box::new(x0.clone())),
+                                                                                Proc::PDrop(Box::new(y0.clone())),
+                                                                            );
+                                                                            if !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                &eq_proc_indices_0_1_total
+                                                                                    .to_rel_index(&__eq_proc_ind_common_total),
+                                                                                &__new_row,
+                                                                            )
+                                                                                && !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                    &eq_proc_indices_0_1_delta
+                                                                                        .to_rel_index(&__eq_proc_ind_common_delta),
+                                                                                    &__new_row,
+                                                                                )
+                                                                            {
+                                                                                if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
+                                                                                    &mut eq_proc_indices_0_1_new
+                                                                                        .to_rel_index_write(&mut __eq_proc_ind_common_new),
+                                                                                    &__new_row,
+                                                                                    (),
+                                                                                ) {
+                                                                                    let __new_row_ind = _self.eq_proc.len();
+                                                                                    _self
+                                                                                        .eq_proc
+                                                                                        .push((__new_row.0.clone(), __new_row.1.clone()));
+                                                                                    ::ascent::internal::RelIndexWrite::index_insert(
+                                                                                        &mut eq_proc_indices_0_new
+                                                                                            .to_rel_index_write(&mut __eq_proc_ind_common_new),
+                                                                                        (__new_row.0.clone(),),
+                                                                                        (__new_row.1.clone(),),
+                                                                                    );
+                                                                                    __changed = true;
+                                                                                }
+                                                                            }
+                                                                        });
+                                                                }
+                                                            });
+                                                    });
+                                            }
+                                        });
+                                } else {
+                                    ascent::internal::RelIndexCombined::new(
+                                            &name_indices_none_total
+                                                .to_rel_index(&__name_ind_common_total),
+                                            &name_indices_none_delta
+                                                .to_rel_index(&__name_ind_common_delta),
+                                        )
+                                        .iter_all()
+                                        .for_each(|(__cl1_joined_columns, __cl1_tuple_indices)| {
+                                            let __cl1_joined_columns = __cl1_joined_columns
+                                                .tuple_of_borrowed();
+                                            if let Some(__matching) = name_indices_none_delta
+                                                .to_rel_index(&__name_ind_common_delta)
+                                                .index_get(&())
+                                            {
+                                                __cl1_tuple_indices
+                                                    .for_each(|cl1_val| {
+                                                        let cl1_val = cl1_val.tuple_of_borrowed();
+                                                        let y0: &Name = cl1_val.0;
+                                                        __matching
+                                                            .clone()
+                                                            .for_each(|__val| {
+                                                                let __val = __val.tuple_of_borrowed();
+                                                                let x0: &Name = __val.0;
+                                                                if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                                        &eq_name_indices_0_1_total
+                                                                            .to_rel_index(&__eq_name_ind_common_total),
+                                                                        &eq_name_indices_0_1_delta
+                                                                            .to_rel_index(&__eq_name_ind_common_delta),
+                                                                    )
+                                                                    .index_get(&((x0.clone()).clone(), (y0.clone()).clone()))
+                                                                {
+                                                                    __matching
+                                                                        .for_each(|__val| {
+                                                                            let __new_row: (Proc, Proc) = (
+                                                                                Proc::PDrop(Box::new(x0.clone())),
+                                                                                Proc::PDrop(Box::new(y0.clone())),
+                                                                            );
+                                                                            if !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                &eq_proc_indices_0_1_total
+                                                                                    .to_rel_index(&__eq_proc_ind_common_total),
+                                                                                &__new_row,
+                                                                            )
+                                                                                && !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                    &eq_proc_indices_0_1_delta
+                                                                                        .to_rel_index(&__eq_proc_ind_common_delta),
+                                                                                    &__new_row,
+                                                                                )
+                                                                            {
+                                                                                if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
+                                                                                    &mut eq_proc_indices_0_1_new
+                                                                                        .to_rel_index_write(&mut __eq_proc_ind_common_new),
+                                                                                    &__new_row,
+                                                                                    (),
+                                                                                ) {
+                                                                                    let __new_row_ind = _self.eq_proc.len();
+                                                                                    _self
+                                                                                        .eq_proc
+                                                                                        .push((__new_row.0.clone(), __new_row.1.clone()));
+                                                                                    ::ascent::internal::RelIndexWrite::index_insert(
+                                                                                        &mut eq_proc_indices_0_new
+                                                                                            .to_rel_index_write(&mut __eq_proc_ind_common_new),
+                                                                                        (__new_row.0.clone(),),
+                                                                                        (__new_row.1.clone(),),
+                                                                                    );
+                                                                                    __changed = true;
+                                                                                }
+                                                                            }
+                                                                        });
+                                                                }
+                                                            });
+                                                    });
+                                            }
+                                        });
+                                }
+                            }
+                        }
+                        ascent::internal::comment(
+                            "eq_proc <-- name_indices_none_total, name_indices_none_delta, eq_name_indices_0_1_total+delta [SIMPLE JOIN]",
+                        );
+                        {
+                            let any_rel_empty = name_indices_none_total
+                                .to_rel_index(&__name_ind_common_total)
+                                .is_empty()
+                                || name_indices_none_delta
+                                    .to_rel_index(&__name_ind_common_delta)
+                                    .is_empty()
+                                || ascent::internal::RelIndexCombined::new(
+                                        &eq_name_indices_0_1_total
+                                            .to_rel_index(&__eq_name_ind_common_total),
+                                        &eq_name_indices_0_1_delta
+                                            .to_rel_index(&__eq_name_ind_common_delta),
+                                    )
+                                    .is_empty();
+                            if !any_rel_empty {
+                                if name_indices_none_total
+                                    .to_rel_index(&__name_ind_common_total)
+                                    .len_estimate()
+                                    <= name_indices_none_delta
+                                        .to_rel_index(&__name_ind_common_delta)
+                                        .len_estimate()
+                                {
+                                    name_indices_none_total
+                                        .to_rel_index(&__name_ind_common_total)
+                                        .iter_all()
+                                        .for_each(|(__cl1_joined_columns, __cl1_tuple_indices)| {
+                                            let __cl1_joined_columns = __cl1_joined_columns
+                                                .tuple_of_borrowed();
+                                            if let Some(__matching) = name_indices_none_delta
+                                                .to_rel_index(&__name_ind_common_delta)
+                                                .index_get(&())
+                                            {
+                                                __cl1_tuple_indices
+                                                    .for_each(|cl1_val| {
+                                                        let cl1_val = cl1_val.tuple_of_borrowed();
+                                                        let x0: &Name = cl1_val.0;
+                                                        __matching
+                                                            .clone()
+                                                            .for_each(|__val| {
+                                                                let __val = __val.tuple_of_borrowed();
+                                                                let y0: &Name = __val.0;
+                                                                if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                                        &eq_name_indices_0_1_total
+                                                                            .to_rel_index(&__eq_name_ind_common_total),
+                                                                        &eq_name_indices_0_1_delta
+                                                                            .to_rel_index(&__eq_name_ind_common_delta),
+                                                                    )
+                                                                    .index_get(&((x0.clone()).clone(), (y0.clone()).clone()))
+                                                                {
+                                                                    __matching
+                                                                        .for_each(|__val| {
+                                                                            let __new_row: (Proc, Proc) = (
+                                                                                Proc::PDrop(Box::new(x0.clone())),
+                                                                                Proc::PDrop(Box::new(y0.clone())),
+                                                                            );
+                                                                            if !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                &eq_proc_indices_0_1_total
+                                                                                    .to_rel_index(&__eq_proc_ind_common_total),
+                                                                                &__new_row,
+                                                                            )
+                                                                                && !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                    &eq_proc_indices_0_1_delta
+                                                                                        .to_rel_index(&__eq_proc_ind_common_delta),
+                                                                                    &__new_row,
+                                                                                )
+                                                                            {
+                                                                                if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
+                                                                                    &mut eq_proc_indices_0_1_new
+                                                                                        .to_rel_index_write(&mut __eq_proc_ind_common_new),
+                                                                                    &__new_row,
+                                                                                    (),
+                                                                                ) {
+                                                                                    let __new_row_ind = _self.eq_proc.len();
+                                                                                    _self
+                                                                                        .eq_proc
+                                                                                        .push((__new_row.0.clone(), __new_row.1.clone()));
+                                                                                    ::ascent::internal::RelIndexWrite::index_insert(
+                                                                                        &mut eq_proc_indices_0_new
+                                                                                            .to_rel_index_write(&mut __eq_proc_ind_common_new),
+                                                                                        (__new_row.0.clone(),),
+                                                                                        (__new_row.1.clone(),),
+                                                                                    );
+                                                                                    __changed = true;
+                                                                                }
+                                                                            }
+                                                                        });
+                                                                }
+                                                            });
+                                                    });
+                                            }
+                                        });
+                                } else {
+                                    name_indices_none_delta
+                                        .to_rel_index(&__name_ind_common_delta)
+                                        .iter_all()
+                                        .for_each(|(__cl1_joined_columns, __cl1_tuple_indices)| {
+                                            let __cl1_joined_columns = __cl1_joined_columns
+                                                .tuple_of_borrowed();
+                                            if let Some(__matching) = name_indices_none_total
+                                                .to_rel_index(&__name_ind_common_total)
+                                                .index_get(&())
+                                            {
+                                                __cl1_tuple_indices
+                                                    .for_each(|cl1_val| {
+                                                        let cl1_val = cl1_val.tuple_of_borrowed();
+                                                        let y0: &Name = cl1_val.0;
+                                                        __matching
+                                                            .clone()
+                                                            .for_each(|__val| {
+                                                                let __val = __val.tuple_of_borrowed();
+                                                                let x0: &Name = __val.0;
+                                                                if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                                        &eq_name_indices_0_1_total
+                                                                            .to_rel_index(&__eq_name_ind_common_total),
+                                                                        &eq_name_indices_0_1_delta
+                                                                            .to_rel_index(&__eq_name_ind_common_delta),
+                                                                    )
+                                                                    .index_get(&((x0.clone()).clone(), (y0.clone()).clone()))
+                                                                {
+                                                                    __matching
+                                                                        .for_each(|__val| {
+                                                                            let __new_row: (Proc, Proc) = (
+                                                                                Proc::PDrop(Box::new(x0.clone())),
+                                                                                Proc::PDrop(Box::new(y0.clone())),
+                                                                            );
+                                                                            if !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                &eq_proc_indices_0_1_total
+                                                                                    .to_rel_index(&__eq_proc_ind_common_total),
+                                                                                &__new_row,
+                                                                            )
+                                                                                && !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                    &eq_proc_indices_0_1_delta
+                                                                                        .to_rel_index(&__eq_proc_ind_common_delta),
+                                                                                    &__new_row,
+                                                                                )
+                                                                            {
+                                                                                if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
+                                                                                    &mut eq_proc_indices_0_1_new
+                                                                                        .to_rel_index_write(&mut __eq_proc_ind_common_new),
+                                                                                    &__new_row,
+                                                                                    (),
+                                                                                ) {
+                                                                                    let __new_row_ind = _self.eq_proc.len();
+                                                                                    _self
+                                                                                        .eq_proc
+                                                                                        .push((__new_row.0.clone(), __new_row.1.clone()));
+                                                                                    ::ascent::internal::RelIndexWrite::index_insert(
+                                                                                        &mut eq_proc_indices_0_new
+                                                                                            .to_rel_index_write(&mut __eq_proc_ind_common_new),
+                                                                                        (__new_row.0.clone(),),
+                                                                                        (__new_row.1.clone(),),
+                                                                                    );
+                                                                                    __changed = true;
+                                                                                }
+                                                                            }
+                                                                        });
+                                                                }
+                                                            });
+                                                    });
+                                            }
+                                        });
+                                }
+                            }
+                        }
+                        ascent::internal::comment(
+                            "eq_proc <-- name_indices_none_total, name_indices_none_total, eq_name_indices_0_1_delta [SIMPLE JOIN]",
+                        );
+                        {
+                            let any_rel_empty = name_indices_none_total
+                                .to_rel_index(&__name_ind_common_total)
+                                .is_empty()
+                                || name_indices_none_total
+                                    .to_rel_index(&__name_ind_common_total)
+                                    .is_empty()
+                                || eq_name_indices_0_1_delta
+                                    .to_rel_index(&__eq_name_ind_common_delta)
+                                    .is_empty();
+                            if !any_rel_empty {
+                                if name_indices_none_total
+                                    .to_rel_index(&__name_ind_common_total)
+                                    .len_estimate()
+                                    <= name_indices_none_total
+                                        .to_rel_index(&__name_ind_common_total)
+                                        .len_estimate()
+                                {
+                                    name_indices_none_total
+                                        .to_rel_index(&__name_ind_common_total)
+                                        .iter_all()
+                                        .for_each(|(__cl1_joined_columns, __cl1_tuple_indices)| {
+                                            let __cl1_joined_columns = __cl1_joined_columns
+                                                .tuple_of_borrowed();
+                                            if let Some(__matching) = name_indices_none_total
+                                                .to_rel_index(&__name_ind_common_total)
+                                                .index_get(&())
+                                            {
+                                                __cl1_tuple_indices
+                                                    .for_each(|cl1_val| {
+                                                        let cl1_val = cl1_val.tuple_of_borrowed();
+                                                        let x0: &Name = cl1_val.0;
+                                                        __matching
+                                                            .clone()
+                                                            .for_each(|__val| {
+                                                                let __val = __val.tuple_of_borrowed();
+                                                                let y0: &Name = __val.0;
+                                                                if let Some(__matching) = eq_name_indices_0_1_delta
+                                                                    .to_rel_index(&__eq_name_ind_common_delta)
+                                                                    .index_get(&((x0.clone()).clone(), (y0.clone()).clone()))
+                                                                {
+                                                                    __matching
+                                                                        .for_each(|__val| {
+                                                                            let __new_row: (Proc, Proc) = (
+                                                                                Proc::PDrop(Box::new(x0.clone())),
+                                                                                Proc::PDrop(Box::new(y0.clone())),
+                                                                            );
+                                                                            if !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                &eq_proc_indices_0_1_total
+                                                                                    .to_rel_index(&__eq_proc_ind_common_total),
+                                                                                &__new_row,
+                                                                            )
+                                                                                && !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                    &eq_proc_indices_0_1_delta
+                                                                                        .to_rel_index(&__eq_proc_ind_common_delta),
+                                                                                    &__new_row,
+                                                                                )
+                                                                            {
+                                                                                if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
+                                                                                    &mut eq_proc_indices_0_1_new
+                                                                                        .to_rel_index_write(&mut __eq_proc_ind_common_new),
+                                                                                    &__new_row,
+                                                                                    (),
+                                                                                ) {
+                                                                                    let __new_row_ind = _self.eq_proc.len();
+                                                                                    _self
+                                                                                        .eq_proc
+                                                                                        .push((__new_row.0.clone(), __new_row.1.clone()));
+                                                                                    ::ascent::internal::RelIndexWrite::index_insert(
+                                                                                        &mut eq_proc_indices_0_new
+                                                                                            .to_rel_index_write(&mut __eq_proc_ind_common_new),
+                                                                                        (__new_row.0.clone(),),
+                                                                                        (__new_row.1.clone(),),
+                                                                                    );
+                                                                                    __changed = true;
+                                                                                }
+                                                                            }
+                                                                        });
+                                                                }
+                                                            });
+                                                    });
+                                            }
+                                        });
+                                } else {
+                                    name_indices_none_total
+                                        .to_rel_index(&__name_ind_common_total)
+                                        .iter_all()
+                                        .for_each(|(__cl1_joined_columns, __cl1_tuple_indices)| {
+                                            let __cl1_joined_columns = __cl1_joined_columns
+                                                .tuple_of_borrowed();
+                                            if let Some(__matching) = name_indices_none_total
+                                                .to_rel_index(&__name_ind_common_total)
+                                                .index_get(&())
+                                            {
+                                                __cl1_tuple_indices
+                                                    .for_each(|cl1_val| {
+                                                        let cl1_val = cl1_val.tuple_of_borrowed();
+                                                        let y0: &Name = cl1_val.0;
+                                                        __matching
+                                                            .clone()
+                                                            .for_each(|__val| {
+                                                                let __val = __val.tuple_of_borrowed();
+                                                                let x0: &Name = __val.0;
+                                                                if let Some(__matching) = eq_name_indices_0_1_delta
+                                                                    .to_rel_index(&__eq_name_ind_common_delta)
+                                                                    .index_get(&((x0.clone()).clone(), (y0.clone()).clone()))
+                                                                {
+                                                                    __matching
+                                                                        .for_each(|__val| {
+                                                                            let __new_row: (Proc, Proc) = (
+                                                                                Proc::PDrop(Box::new(x0.clone())),
+                                                                                Proc::PDrop(Box::new(y0.clone())),
+                                                                            );
+                                                                            if !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                &eq_proc_indices_0_1_total
+                                                                                    .to_rel_index(&__eq_proc_ind_common_total),
+                                                                                &__new_row,
+                                                                            )
+                                                                                && !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                    &eq_proc_indices_0_1_delta
+                                                                                        .to_rel_index(&__eq_proc_ind_common_delta),
+                                                                                    &__new_row,
+                                                                                )
+                                                                            {
+                                                                                if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
+                                                                                    &mut eq_proc_indices_0_1_new
+                                                                                        .to_rel_index_write(&mut __eq_proc_ind_common_new),
+                                                                                    &__new_row,
+                                                                                    (),
+                                                                                ) {
+                                                                                    let __new_row_ind = _self.eq_proc.len();
+                                                                                    _self
+                                                                                        .eq_proc
+                                                                                        .push((__new_row.0.clone(), __new_row.1.clone()));
+                                                                                    ::ascent::internal::RelIndexWrite::index_insert(
+                                                                                        &mut eq_proc_indices_0_new
+                                                                                            .to_rel_index_write(&mut __eq_proc_ind_common_new),
+                                                                                        (__new_row.0.clone(),),
+                                                                                        (__new_row.1.clone(),),
+                                                                                    );
+                                                                                    __changed = true;
+                                                                                }
+                                                                            }
+                                                                        });
+                                                                }
+                                                            });
+                                                    });
+                                            }
+                                        });
+                                }
+                            }
+                        }
+                        ascent::internal::comment(
+                            "eq_name <-- proc_indices_none_delta, proc_indices_none_total+delta, eq_proc_indices_0_1_total+delta [SIMPLE JOIN]",
+                        );
+                        {
+                            let any_rel_empty = proc_indices_none_delta
+                                .to_rel_index(&__proc_ind_common_delta)
+                                .is_empty()
+                                || ascent::internal::RelIndexCombined::new(
+                                        &proc_indices_none_total
+                                            .to_rel_index(&__proc_ind_common_total),
+                                        &proc_indices_none_delta
+                                            .to_rel_index(&__proc_ind_common_delta),
+                                    )
+                                    .is_empty()
+                                || ascent::internal::RelIndexCombined::new(
+                                        &eq_proc_indices_0_1_total
+                                            .to_rel_index(&__eq_proc_ind_common_total),
+                                        &eq_proc_indices_0_1_delta
+                                            .to_rel_index(&__eq_proc_ind_common_delta),
+                                    )
+                                    .is_empty();
+                            if !any_rel_empty {
+                                if proc_indices_none_delta
+                                    .to_rel_index(&__proc_ind_common_delta)
+                                    .len_estimate()
+                                    <= ascent::internal::RelIndexCombined::new(
+                                            &proc_indices_none_total
+                                                .to_rel_index(&__proc_ind_common_total),
+                                            &proc_indices_none_delta
+                                                .to_rel_index(&__proc_ind_common_delta),
+                                        )
+                                        .len_estimate()
+                                {
+                                    proc_indices_none_delta
+                                        .to_rel_index(&__proc_ind_common_delta)
+                                        .iter_all()
+                                        .for_each(|(__cl1_joined_columns, __cl1_tuple_indices)| {
+                                            let __cl1_joined_columns = __cl1_joined_columns
+                                                .tuple_of_borrowed();
+                                            if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                    &proc_indices_none_total
+                                                        .to_rel_index(&__proc_ind_common_total),
+                                                    &proc_indices_none_delta
+                                                        .to_rel_index(&__proc_ind_common_delta),
+                                                )
+                                                .index_get(&())
+                                            {
+                                                __cl1_tuple_indices
+                                                    .for_each(|cl1_val| {
+                                                        let cl1_val = cl1_val.tuple_of_borrowed();
+                                                        let x0: &Proc = cl1_val.0;
+                                                        __matching
+                                                            .clone()
+                                                            .for_each(|__val| {
+                                                                let __val = __val.tuple_of_borrowed();
+                                                                let y0: &Proc = __val.0;
+                                                                if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                                        &eq_proc_indices_0_1_total
+                                                                            .to_rel_index(&__eq_proc_ind_common_total),
+                                                                        &eq_proc_indices_0_1_delta
+                                                                            .to_rel_index(&__eq_proc_ind_common_delta),
+                                                                    )
+                                                                    .index_get(&((x0.clone()).clone(), (y0.clone()).clone()))
+                                                                {
+                                                                    __matching
+                                                                        .for_each(|__val| {
+                                                                            let __new_row: (Name, Name) = (
+                                                                                Name::NQuote(Box::new(x0.clone())),
+                                                                                Name::NQuote(Box::new(y0.clone())),
+                                                                            );
+                                                                            if !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                &eq_name_indices_0_1_total
+                                                                                    .to_rel_index(&__eq_name_ind_common_total),
+                                                                                &__new_row,
+                                                                            )
+                                                                                && !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                    &eq_name_indices_0_1_delta
+                                                                                        .to_rel_index(&__eq_name_ind_common_delta),
+                                                                                    &__new_row,
+                                                                                )
+                                                                            {
+                                                                                if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
+                                                                                    &mut eq_name_indices_0_1_new
+                                                                                        .to_rel_index_write(&mut __eq_name_ind_common_new),
+                                                                                    &__new_row,
+                                                                                    (),
+                                                                                ) {
+                                                                                    let __new_row_ind = _self.eq_name.len();
+                                                                                    _self
+                                                                                        .eq_name
+                                                                                        .push((__new_row.0.clone(), __new_row.1.clone()));
+                                                                                    ::ascent::internal::RelIndexWrite::index_insert(
+                                                                                        &mut eq_name_indices_0_new
+                                                                                            .to_rel_index_write(&mut __eq_name_ind_common_new),
+                                                                                        (__new_row.0.clone(),),
+                                                                                        (__new_row.1.clone(),),
+                                                                                    );
+                                                                                    __changed = true;
+                                                                                }
+                                                                            }
+                                                                        });
+                                                                }
+                                                            });
+                                                    });
+                                            }
+                                        });
+                                } else {
+                                    ascent::internal::RelIndexCombined::new(
+                                            &proc_indices_none_total
+                                                .to_rel_index(&__proc_ind_common_total),
+                                            &proc_indices_none_delta
+                                                .to_rel_index(&__proc_ind_common_delta),
+                                        )
+                                        .iter_all()
+                                        .for_each(|(__cl1_joined_columns, __cl1_tuple_indices)| {
+                                            let __cl1_joined_columns = __cl1_joined_columns
+                                                .tuple_of_borrowed();
+                                            if let Some(__matching) = proc_indices_none_delta
+                                                .to_rel_index(&__proc_ind_common_delta)
+                                                .index_get(&())
+                                            {
+                                                __cl1_tuple_indices
+                                                    .for_each(|cl1_val| {
+                                                        let cl1_val = cl1_val.tuple_of_borrowed();
+                                                        let y0: &Proc = cl1_val.0;
+                                                        __matching
+                                                            .clone()
+                                                            .for_each(|__val| {
+                                                                let __val = __val.tuple_of_borrowed();
+                                                                let x0: &Proc = __val.0;
+                                                                if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                                        &eq_proc_indices_0_1_total
+                                                                            .to_rel_index(&__eq_proc_ind_common_total),
+                                                                        &eq_proc_indices_0_1_delta
+                                                                            .to_rel_index(&__eq_proc_ind_common_delta),
+                                                                    )
+                                                                    .index_get(&((x0.clone()).clone(), (y0.clone()).clone()))
+                                                                {
+                                                                    __matching
+                                                                        .for_each(|__val| {
+                                                                            let __new_row: (Name, Name) = (
+                                                                                Name::NQuote(Box::new(x0.clone())),
+                                                                                Name::NQuote(Box::new(y0.clone())),
+                                                                            );
+                                                                            if !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                &eq_name_indices_0_1_total
+                                                                                    .to_rel_index(&__eq_name_ind_common_total),
+                                                                                &__new_row,
+                                                                            )
+                                                                                && !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                    &eq_name_indices_0_1_delta
+                                                                                        .to_rel_index(&__eq_name_ind_common_delta),
+                                                                                    &__new_row,
+                                                                                )
+                                                                            {
+                                                                                if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
+                                                                                    &mut eq_name_indices_0_1_new
+                                                                                        .to_rel_index_write(&mut __eq_name_ind_common_new),
+                                                                                    &__new_row,
+                                                                                    (),
+                                                                                ) {
+                                                                                    let __new_row_ind = _self.eq_name.len();
+                                                                                    _self
+                                                                                        .eq_name
+                                                                                        .push((__new_row.0.clone(), __new_row.1.clone()));
+                                                                                    ::ascent::internal::RelIndexWrite::index_insert(
+                                                                                        &mut eq_name_indices_0_new
+                                                                                            .to_rel_index_write(&mut __eq_name_ind_common_new),
+                                                                                        (__new_row.0.clone(),),
+                                                                                        (__new_row.1.clone(),),
+                                                                                    );
+                                                                                    __changed = true;
+                                                                                }
+                                                                            }
+                                                                        });
+                                                                }
+                                                            });
+                                                    });
+                                            }
+                                        });
+                                }
+                            }
+                        }
+                        ascent::internal::comment(
+                            "eq_name <-- proc_indices_none_total, proc_indices_none_delta, eq_proc_indices_0_1_total+delta [SIMPLE JOIN]",
+                        );
+                        {
+                            let any_rel_empty = proc_indices_none_total
+                                .to_rel_index(&__proc_ind_common_total)
+                                .is_empty()
+                                || proc_indices_none_delta
+                                    .to_rel_index(&__proc_ind_common_delta)
+                                    .is_empty()
+                                || ascent::internal::RelIndexCombined::new(
+                                        &eq_proc_indices_0_1_total
+                                            .to_rel_index(&__eq_proc_ind_common_total),
+                                        &eq_proc_indices_0_1_delta
+                                            .to_rel_index(&__eq_proc_ind_common_delta),
+                                    )
+                                    .is_empty();
+                            if !any_rel_empty {
+                                if proc_indices_none_total
+                                    .to_rel_index(&__proc_ind_common_total)
+                                    .len_estimate()
+                                    <= proc_indices_none_delta
+                                        .to_rel_index(&__proc_ind_common_delta)
+                                        .len_estimate()
+                                {
+                                    proc_indices_none_total
+                                        .to_rel_index(&__proc_ind_common_total)
+                                        .iter_all()
+                                        .for_each(|(__cl1_joined_columns, __cl1_tuple_indices)| {
+                                            let __cl1_joined_columns = __cl1_joined_columns
+                                                .tuple_of_borrowed();
+                                            if let Some(__matching) = proc_indices_none_delta
+                                                .to_rel_index(&__proc_ind_common_delta)
+                                                .index_get(&())
+                                            {
+                                                __cl1_tuple_indices
+                                                    .for_each(|cl1_val| {
+                                                        let cl1_val = cl1_val.tuple_of_borrowed();
+                                                        let x0: &Proc = cl1_val.0;
+                                                        __matching
+                                                            .clone()
+                                                            .for_each(|__val| {
+                                                                let __val = __val.tuple_of_borrowed();
+                                                                let y0: &Proc = __val.0;
+                                                                if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                                        &eq_proc_indices_0_1_total
+                                                                            .to_rel_index(&__eq_proc_ind_common_total),
+                                                                        &eq_proc_indices_0_1_delta
+                                                                            .to_rel_index(&__eq_proc_ind_common_delta),
+                                                                    )
+                                                                    .index_get(&((x0.clone()).clone(), (y0.clone()).clone()))
+                                                                {
+                                                                    __matching
+                                                                        .for_each(|__val| {
+                                                                            let __new_row: (Name, Name) = (
+                                                                                Name::NQuote(Box::new(x0.clone())),
+                                                                                Name::NQuote(Box::new(y0.clone())),
+                                                                            );
+                                                                            if !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                &eq_name_indices_0_1_total
+                                                                                    .to_rel_index(&__eq_name_ind_common_total),
+                                                                                &__new_row,
+                                                                            )
+                                                                                && !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                    &eq_name_indices_0_1_delta
+                                                                                        .to_rel_index(&__eq_name_ind_common_delta),
+                                                                                    &__new_row,
+                                                                                )
+                                                                            {
+                                                                                if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
+                                                                                    &mut eq_name_indices_0_1_new
+                                                                                        .to_rel_index_write(&mut __eq_name_ind_common_new),
+                                                                                    &__new_row,
+                                                                                    (),
+                                                                                ) {
+                                                                                    let __new_row_ind = _self.eq_name.len();
+                                                                                    _self
+                                                                                        .eq_name
+                                                                                        .push((__new_row.0.clone(), __new_row.1.clone()));
+                                                                                    ::ascent::internal::RelIndexWrite::index_insert(
+                                                                                        &mut eq_name_indices_0_new
+                                                                                            .to_rel_index_write(&mut __eq_name_ind_common_new),
+                                                                                        (__new_row.0.clone(),),
+                                                                                        (__new_row.1.clone(),),
+                                                                                    );
+                                                                                    __changed = true;
+                                                                                }
+                                                                            }
+                                                                        });
+                                                                }
+                                                            });
+                                                    });
+                                            }
+                                        });
+                                } else {
+                                    proc_indices_none_delta
+                                        .to_rel_index(&__proc_ind_common_delta)
+                                        .iter_all()
+                                        .for_each(|(__cl1_joined_columns, __cl1_tuple_indices)| {
+                                            let __cl1_joined_columns = __cl1_joined_columns
+                                                .tuple_of_borrowed();
+                                            if let Some(__matching) = proc_indices_none_total
+                                                .to_rel_index(&__proc_ind_common_total)
+                                                .index_get(&())
+                                            {
+                                                __cl1_tuple_indices
+                                                    .for_each(|cl1_val| {
+                                                        let cl1_val = cl1_val.tuple_of_borrowed();
+                                                        let y0: &Proc = cl1_val.0;
+                                                        __matching
+                                                            .clone()
+                                                            .for_each(|__val| {
+                                                                let __val = __val.tuple_of_borrowed();
+                                                                let x0: &Proc = __val.0;
+                                                                if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                                        &eq_proc_indices_0_1_total
+                                                                            .to_rel_index(&__eq_proc_ind_common_total),
+                                                                        &eq_proc_indices_0_1_delta
+                                                                            .to_rel_index(&__eq_proc_ind_common_delta),
+                                                                    )
+                                                                    .index_get(&((x0.clone()).clone(), (y0.clone()).clone()))
+                                                                {
+                                                                    __matching
+                                                                        .for_each(|__val| {
+                                                                            let __new_row: (Name, Name) = (
+                                                                                Name::NQuote(Box::new(x0.clone())),
+                                                                                Name::NQuote(Box::new(y0.clone())),
+                                                                            );
+                                                                            if !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                &eq_name_indices_0_1_total
+                                                                                    .to_rel_index(&__eq_name_ind_common_total),
+                                                                                &__new_row,
+                                                                            )
+                                                                                && !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                    &eq_name_indices_0_1_delta
+                                                                                        .to_rel_index(&__eq_name_ind_common_delta),
+                                                                                    &__new_row,
+                                                                                )
+                                                                            {
+                                                                                if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
+                                                                                    &mut eq_name_indices_0_1_new
+                                                                                        .to_rel_index_write(&mut __eq_name_ind_common_new),
+                                                                                    &__new_row,
+                                                                                    (),
+                                                                                ) {
+                                                                                    let __new_row_ind = _self.eq_name.len();
+                                                                                    _self
+                                                                                        .eq_name
+                                                                                        .push((__new_row.0.clone(), __new_row.1.clone()));
+                                                                                    ::ascent::internal::RelIndexWrite::index_insert(
+                                                                                        &mut eq_name_indices_0_new
+                                                                                            .to_rel_index_write(&mut __eq_name_ind_common_new),
+                                                                                        (__new_row.0.clone(),),
+                                                                                        (__new_row.1.clone(),),
+                                                                                    );
+                                                                                    __changed = true;
+                                                                                }
+                                                                            }
+                                                                        });
+                                                                }
+                                                            });
+                                                    });
+                                            }
+                                        });
+                                }
+                            }
+                        }
+                        ascent::internal::comment(
+                            "eq_name <-- proc_indices_none_total, proc_indices_none_total, eq_proc_indices_0_1_delta [SIMPLE JOIN]",
+                        );
+                        {
+                            let any_rel_empty = proc_indices_none_total
+                                .to_rel_index(&__proc_ind_common_total)
+                                .is_empty()
+                                || proc_indices_none_total
+                                    .to_rel_index(&__proc_ind_common_total)
+                                    .is_empty()
+                                || eq_proc_indices_0_1_delta
+                                    .to_rel_index(&__eq_proc_ind_common_delta)
+                                    .is_empty();
+                            if !any_rel_empty {
+                                if proc_indices_none_total
+                                    .to_rel_index(&__proc_ind_common_total)
+                                    .len_estimate()
+                                    <= proc_indices_none_total
+                                        .to_rel_index(&__proc_ind_common_total)
+                                        .len_estimate()
+                                {
+                                    proc_indices_none_total
+                                        .to_rel_index(&__proc_ind_common_total)
+                                        .iter_all()
+                                        .for_each(|(__cl1_joined_columns, __cl1_tuple_indices)| {
+                                            let __cl1_joined_columns = __cl1_joined_columns
+                                                .tuple_of_borrowed();
+                                            if let Some(__matching) = proc_indices_none_total
+                                                .to_rel_index(&__proc_ind_common_total)
+                                                .index_get(&())
+                                            {
+                                                __cl1_tuple_indices
+                                                    .for_each(|cl1_val| {
+                                                        let cl1_val = cl1_val.tuple_of_borrowed();
+                                                        let x0: &Proc = cl1_val.0;
+                                                        __matching
+                                                            .clone()
+                                                            .for_each(|__val| {
+                                                                let __val = __val.tuple_of_borrowed();
+                                                                let y0: &Proc = __val.0;
+                                                                if let Some(__matching) = eq_proc_indices_0_1_delta
+                                                                    .to_rel_index(&__eq_proc_ind_common_delta)
+                                                                    .index_get(&((x0.clone()).clone(), (y0.clone()).clone()))
+                                                                {
+                                                                    __matching
+                                                                        .for_each(|__val| {
+                                                                            let __new_row: (Name, Name) = (
+                                                                                Name::NQuote(Box::new(x0.clone())),
+                                                                                Name::NQuote(Box::new(y0.clone())),
+                                                                            );
+                                                                            if !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                &eq_name_indices_0_1_total
+                                                                                    .to_rel_index(&__eq_name_ind_common_total),
+                                                                                &__new_row,
+                                                                            )
+                                                                                && !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                    &eq_name_indices_0_1_delta
+                                                                                        .to_rel_index(&__eq_name_ind_common_delta),
+                                                                                    &__new_row,
+                                                                                )
+                                                                            {
+                                                                                if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
+                                                                                    &mut eq_name_indices_0_1_new
+                                                                                        .to_rel_index_write(&mut __eq_name_ind_common_new),
+                                                                                    &__new_row,
+                                                                                    (),
+                                                                                ) {
+                                                                                    let __new_row_ind = _self.eq_name.len();
+                                                                                    _self
+                                                                                        .eq_name
+                                                                                        .push((__new_row.0.clone(), __new_row.1.clone()));
+                                                                                    ::ascent::internal::RelIndexWrite::index_insert(
+                                                                                        &mut eq_name_indices_0_new
+                                                                                            .to_rel_index_write(&mut __eq_name_ind_common_new),
+                                                                                        (__new_row.0.clone(),),
+                                                                                        (__new_row.1.clone(),),
+                                                                                    );
+                                                                                    __changed = true;
+                                                                                }
+                                                                            }
+                                                                        });
+                                                                }
+                                                            });
+                                                    });
+                                            }
+                                        });
+                                } else {
+                                    proc_indices_none_total
+                                        .to_rel_index(&__proc_ind_common_total)
+                                        .iter_all()
+                                        .for_each(|(__cl1_joined_columns, __cl1_tuple_indices)| {
+                                            let __cl1_joined_columns = __cl1_joined_columns
+                                                .tuple_of_borrowed();
+                                            if let Some(__matching) = proc_indices_none_total
+                                                .to_rel_index(&__proc_ind_common_total)
+                                                .index_get(&())
+                                            {
+                                                __cl1_tuple_indices
+                                                    .for_each(|cl1_val| {
+                                                        let cl1_val = cl1_val.tuple_of_borrowed();
+                                                        let y0: &Proc = cl1_val.0;
+                                                        __matching
+                                                            .clone()
+                                                            .for_each(|__val| {
+                                                                let __val = __val.tuple_of_borrowed();
+                                                                let x0: &Proc = __val.0;
+                                                                if let Some(__matching) = eq_proc_indices_0_1_delta
+                                                                    .to_rel_index(&__eq_proc_ind_common_delta)
+                                                                    .index_get(&((x0.clone()).clone(), (y0.clone()).clone()))
+                                                                {
+                                                                    __matching
+                                                                        .for_each(|__val| {
+                                                                            let __new_row: (Name, Name) = (
+                                                                                Name::NQuote(Box::new(x0.clone())),
+                                                                                Name::NQuote(Box::new(y0.clone())),
+                                                                            );
+                                                                            if !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                &eq_name_indices_0_1_total
+                                                                                    .to_rel_index(&__eq_name_ind_common_total),
+                                                                                &__new_row,
+                                                                            )
+                                                                                && !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                    &eq_name_indices_0_1_delta
+                                                                                        .to_rel_index(&__eq_name_ind_common_delta),
+                                                                                    &__new_row,
+                                                                                )
+                                                                            {
+                                                                                if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
+                                                                                    &mut eq_name_indices_0_1_new
+                                                                                        .to_rel_index_write(&mut __eq_name_ind_common_new),
+                                                                                    &__new_row,
+                                                                                    (),
+                                                                                ) {
+                                                                                    let __new_row_ind = _self.eq_name.len();
+                                                                                    _self
+                                                                                        .eq_name
+                                                                                        .push((__new_row.0.clone(), __new_row.1.clone()));
+                                                                                    ::ascent::internal::RelIndexWrite::index_insert(
+                                                                                        &mut eq_name_indices_0_new
+                                                                                            .to_rel_index_write(&mut __eq_name_ind_common_new),
+                                                                                        (__new_row.0.clone(),),
+                                                                                        (__new_row.1.clone(),),
+                                                                                    );
+                                                                                    __changed = true;
+                                                                                }
+                                                                            }
+                                                                        });
+                                                                }
+                                                            });
+                                                    });
+                                            }
+                                        });
+                                }
+                            }
+                        }
+                        ascent::internal::comment(
+                            "eq_name <-- name_indices_none_delta, if let ⋯, if let ⋯, let ⋯",
+                        );
+                        {
+                            if let Some(__matching) = name_indices_none_delta
+                                .to_rel_index(&__name_ind_common_delta)
+                                .index_get(&())
+                            {
+                                __matching
+                                    .for_each(|__val| {
+                                        let __val = __val.tuple_of_borrowed();
+                                        let p0: &Name = __val.0;
+                                        if let Name::NQuote(field_0) = p0 {
+                                            if let Proc::PDrop(n) = &**field_0 {
+                                                let p1 = (**n).clone();
+                                                let __new_row: (Name, Name) = (
+                                                    ascent::internal::Convert::convert(p0),
+                                                    ascent::internal::Convert::convert(p1),
+                                                );
+                                                if !::ascent::internal::RelFullIndexRead::contains_key(
+                                                    &eq_name_indices_0_1_total
+                                                        .to_rel_index(&__eq_name_ind_common_total),
+                                                    &__new_row,
+                                                )
+                                                    && !::ascent::internal::RelFullIndexRead::contains_key(
+                                                        &eq_name_indices_0_1_delta
+                                                            .to_rel_index(&__eq_name_ind_common_delta),
+                                                        &__new_row,
+                                                    )
+                                                {
+                                                    if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
+                                                        &mut eq_name_indices_0_1_new
+                                                            .to_rel_index_write(&mut __eq_name_ind_common_new),
+                                                        &__new_row,
+                                                        (),
+                                                    ) {
+                                                        let __new_row_ind = _self.eq_name.len();
+                                                        _self
+                                                            .eq_name
+                                                            .push((__new_row.0.clone(), __new_row.1.clone()));
+                                                        ::ascent::internal::RelIndexWrite::index_insert(
+                                                            &mut eq_name_indices_0_new
+                                                                .to_rel_index_write(&mut __eq_name_ind_common_new),
+                                                            (__new_row.0.clone(),),
+                                                            (__new_row.1.clone(),),
+                                                        );
+                                                        __changed = true;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    });
+                            }
+                        }
+                        ascent::internal::comment(
+                            "eq_proc <-- name_indices_none_delta, name_indices_none_total+delta, eq_name_indices_0_1_total+delta, proc_indices_none_total+delta, proc_indices_none_total+delta, eq_proc_indices_0_1_total+delta [SIMPLE JOIN]",
+                        );
+                        {
+                            let any_rel_empty = name_indices_none_delta
+                                .to_rel_index(&__name_ind_common_delta)
+                                .is_empty()
+                                || ascent::internal::RelIndexCombined::new(
+                                        &name_indices_none_total
+                                            .to_rel_index(&__name_ind_common_total),
+                                        &name_indices_none_delta
+                                            .to_rel_index(&__name_ind_common_delta),
+                                    )
+                                    .is_empty()
+                                || ascent::internal::RelIndexCombined::new(
+                                        &eq_name_indices_0_1_total
+                                            .to_rel_index(&__eq_name_ind_common_total),
+                                        &eq_name_indices_0_1_delta
+                                            .to_rel_index(&__eq_name_ind_common_delta),
+                                    )
+                                    .is_empty()
+                                || ascent::internal::RelIndexCombined::new(
+                                        &proc_indices_none_total
+                                            .to_rel_index(&__proc_ind_common_total),
+                                        &proc_indices_none_delta
+                                            .to_rel_index(&__proc_ind_common_delta),
+                                    )
+                                    .is_empty()
+                                || ascent::internal::RelIndexCombined::new(
+                                        &proc_indices_none_total
+                                            .to_rel_index(&__proc_ind_common_total),
+                                        &proc_indices_none_delta
+                                            .to_rel_index(&__proc_ind_common_delta),
+                                    )
+                                    .is_empty()
+                                || ascent::internal::RelIndexCombined::new(
+                                        &eq_proc_indices_0_1_total
+                                            .to_rel_index(&__eq_proc_ind_common_total),
+                                        &eq_proc_indices_0_1_delta
+                                            .to_rel_index(&__eq_proc_ind_common_delta),
+                                    )
+                                    .is_empty();
+                            if !any_rel_empty {
+                                if name_indices_none_delta
+                                    .to_rel_index(&__name_ind_common_delta)
+                                    .len_estimate()
+                                    <= ascent::internal::RelIndexCombined::new(
+                                            &name_indices_none_total
+                                                .to_rel_index(&__name_ind_common_total),
+                                            &name_indices_none_delta
+                                                .to_rel_index(&__name_ind_common_delta),
+                                        )
+                                        .len_estimate()
+                                {
+                                    name_indices_none_delta
+                                        .to_rel_index(&__name_ind_common_delta)
+                                        .iter_all()
+                                        .for_each(|(__cl1_joined_columns, __cl1_tuple_indices)| {
+                                            let __cl1_joined_columns = __cl1_joined_columns
+                                                .tuple_of_borrowed();
+                                            if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                    &name_indices_none_total
+                                                        .to_rel_index(&__name_ind_common_total),
+                                                    &name_indices_none_delta
+                                                        .to_rel_index(&__name_ind_common_delta),
+                                                )
+                                                .index_get(&())
+                                            {
+                                                __cl1_tuple_indices
+                                                    .for_each(|cl1_val| {
+                                                        let cl1_val = cl1_val.tuple_of_borrowed();
+                                                        let x0: &Name = cl1_val.0;
+                                                        __matching
+                                                            .clone()
+                                                            .for_each(|__val| {
+                                                                let __val = __val.tuple_of_borrowed();
+                                                                let y0: &Name = __val.0;
+                                                                if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                                        &eq_name_indices_0_1_total
+                                                                            .to_rel_index(&__eq_name_ind_common_total),
+                                                                        &eq_name_indices_0_1_delta
+                                                                            .to_rel_index(&__eq_name_ind_common_delta),
+                                                                    )
+                                                                    .index_get(&((x0.clone()).clone(), (y0.clone()).clone()))
+                                                                {
+                                                                    __matching
+                                                                        .for_each(|__val| {
+                                                                            if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                                                    &proc_indices_none_total
+                                                                                        .to_rel_index(&__proc_ind_common_total),
+                                                                                    &proc_indices_none_delta
+                                                                                        .to_rel_index(&__proc_ind_common_delta),
+                                                                                )
+                                                                                .index_get(&())
+                                                                            {
+                                                                                __matching
+                                                                                    .for_each(|__val| {
+                                                                                        let __val = __val.tuple_of_borrowed();
+                                                                                        let x1: &Proc = __val.0;
+                                                                                        if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                                                                &proc_indices_none_total
+                                                                                                    .to_rel_index(&__proc_ind_common_total),
+                                                                                                &proc_indices_none_delta
+                                                                                                    .to_rel_index(&__proc_ind_common_delta),
+                                                                                            )
+                                                                                            .index_get(&())
+                                                                                        {
+                                                                                            __matching
+                                                                                                .for_each(|__val| {
+                                                                                                    let __val = __val.tuple_of_borrowed();
+                                                                                                    let y1: &Proc = __val.0;
+                                                                                                    if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                                                                            &eq_proc_indices_0_1_total
+                                                                                                                .to_rel_index(&__eq_proc_ind_common_total),
+                                                                                                            &eq_proc_indices_0_1_delta
+                                                                                                                .to_rel_index(&__eq_proc_ind_common_delta),
+                                                                                                        )
+                                                                                                        .index_get(&((x1.clone()).clone(), (y1.clone()).clone()))
+                                                                                                    {
+                                                                                                        __matching
+                                                                                                            .for_each(|__val| {
+                                                                                                                let __new_row: (Proc, Proc) = (
+                                                                                                                    Proc::POutput(Box::new(x0.clone()), Box::new(x1.clone())),
+                                                                                                                    Proc::POutput(Box::new(y0.clone()), Box::new(y1.clone())),
+                                                                                                                );
+                                                                                                                if !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                                                    &eq_proc_indices_0_1_total
+                                                                                                                        .to_rel_index(&__eq_proc_ind_common_total),
+                                                                                                                    &__new_row,
+                                                                                                                )
+                                                                                                                    && !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                                                        &eq_proc_indices_0_1_delta
+                                                                                                                            .to_rel_index(&__eq_proc_ind_common_delta),
+                                                                                                                        &__new_row,
+                                                                                                                    )
+                                                                                                                {
+                                                                                                                    if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
+                                                                                                                        &mut eq_proc_indices_0_1_new
+                                                                                                                            .to_rel_index_write(&mut __eq_proc_ind_common_new),
+                                                                                                                        &__new_row,
+                                                                                                                        (),
+                                                                                                                    ) {
+                                                                                                                        let __new_row_ind = _self.eq_proc.len();
+                                                                                                                        _self
+                                                                                                                            .eq_proc
+                                                                                                                            .push((__new_row.0.clone(), __new_row.1.clone()));
+                                                                                                                        ::ascent::internal::RelIndexWrite::index_insert(
+                                                                                                                            &mut eq_proc_indices_0_new
+                                                                                                                                .to_rel_index_write(&mut __eq_proc_ind_common_new),
+                                                                                                                            (__new_row.0.clone(),),
+                                                                                                                            (__new_row.1.clone(),),
+                                                                                                                        );
+                                                                                                                        __changed = true;
+                                                                                                                    }
+                                                                                                                }
+                                                                                                            });
+                                                                                                    }
+                                                                                                });
+                                                                                        }
+                                                                                    });
+                                                                            }
+                                                                        });
+                                                                }
+                                                            });
+                                                    });
+                                            }
+                                        });
+                                } else {
+                                    ascent::internal::RelIndexCombined::new(
+                                            &name_indices_none_total
+                                                .to_rel_index(&__name_ind_common_total),
+                                            &name_indices_none_delta
+                                                .to_rel_index(&__name_ind_common_delta),
+                                        )
+                                        .iter_all()
+                                        .for_each(|(__cl1_joined_columns, __cl1_tuple_indices)| {
+                                            let __cl1_joined_columns = __cl1_joined_columns
+                                                .tuple_of_borrowed();
+                                            if let Some(__matching) = name_indices_none_delta
+                                                .to_rel_index(&__name_ind_common_delta)
+                                                .index_get(&())
+                                            {
+                                                __cl1_tuple_indices
+                                                    .for_each(|cl1_val| {
+                                                        let cl1_val = cl1_val.tuple_of_borrowed();
+                                                        let y0: &Name = cl1_val.0;
+                                                        __matching
+                                                            .clone()
+                                                            .for_each(|__val| {
+                                                                let __val = __val.tuple_of_borrowed();
+                                                                let x0: &Name = __val.0;
+                                                                if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                                        &eq_name_indices_0_1_total
+                                                                            .to_rel_index(&__eq_name_ind_common_total),
+                                                                        &eq_name_indices_0_1_delta
+                                                                            .to_rel_index(&__eq_name_ind_common_delta),
+                                                                    )
+                                                                    .index_get(&((x0.clone()).clone(), (y0.clone()).clone()))
+                                                                {
+                                                                    __matching
+                                                                        .for_each(|__val| {
+                                                                            if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                                                    &proc_indices_none_total
+                                                                                        .to_rel_index(&__proc_ind_common_total),
+                                                                                    &proc_indices_none_delta
+                                                                                        .to_rel_index(&__proc_ind_common_delta),
+                                                                                )
+                                                                                .index_get(&())
+                                                                            {
+                                                                                __matching
+                                                                                    .for_each(|__val| {
+                                                                                        let __val = __val.tuple_of_borrowed();
+                                                                                        let x1: &Proc = __val.0;
+                                                                                        if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                                                                &proc_indices_none_total
+                                                                                                    .to_rel_index(&__proc_ind_common_total),
+                                                                                                &proc_indices_none_delta
+                                                                                                    .to_rel_index(&__proc_ind_common_delta),
+                                                                                            )
+                                                                                            .index_get(&())
+                                                                                        {
+                                                                                            __matching
+                                                                                                .for_each(|__val| {
+                                                                                                    let __val = __val.tuple_of_borrowed();
+                                                                                                    let y1: &Proc = __val.0;
+                                                                                                    if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                                                                            &eq_proc_indices_0_1_total
+                                                                                                                .to_rel_index(&__eq_proc_ind_common_total),
+                                                                                                            &eq_proc_indices_0_1_delta
+                                                                                                                .to_rel_index(&__eq_proc_ind_common_delta),
+                                                                                                        )
+                                                                                                        .index_get(&((x1.clone()).clone(), (y1.clone()).clone()))
+                                                                                                    {
+                                                                                                        __matching
+                                                                                                            .for_each(|__val| {
+                                                                                                                let __new_row: (Proc, Proc) = (
+                                                                                                                    Proc::POutput(Box::new(x0.clone()), Box::new(x1.clone())),
+                                                                                                                    Proc::POutput(Box::new(y0.clone()), Box::new(y1.clone())),
+                                                                                                                );
+                                                                                                                if !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                                                    &eq_proc_indices_0_1_total
+                                                                                                                        .to_rel_index(&__eq_proc_ind_common_total),
+                                                                                                                    &__new_row,
+                                                                                                                )
+                                                                                                                    && !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                                                        &eq_proc_indices_0_1_delta
+                                                                                                                            .to_rel_index(&__eq_proc_ind_common_delta),
+                                                                                                                        &__new_row,
+                                                                                                                    )
+                                                                                                                {
+                                                                                                                    if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
+                                                                                                                        &mut eq_proc_indices_0_1_new
+                                                                                                                            .to_rel_index_write(&mut __eq_proc_ind_common_new),
+                                                                                                                        &__new_row,
+                                                                                                                        (),
+                                                                                                                    ) {
+                                                                                                                        let __new_row_ind = _self.eq_proc.len();
+                                                                                                                        _self
+                                                                                                                            .eq_proc
+                                                                                                                            .push((__new_row.0.clone(), __new_row.1.clone()));
+                                                                                                                        ::ascent::internal::RelIndexWrite::index_insert(
+                                                                                                                            &mut eq_proc_indices_0_new
+                                                                                                                                .to_rel_index_write(&mut __eq_proc_ind_common_new),
+                                                                                                                            (__new_row.0.clone(),),
+                                                                                                                            (__new_row.1.clone(),),
+                                                                                                                        );
+                                                                                                                        __changed = true;
+                                                                                                                    }
+                                                                                                                }
+                                                                                                            });
+                                                                                                    }
+                                                                                                });
+                                                                                        }
+                                                                                    });
+                                                                            }
+                                                                        });
+                                                                }
+                                                            });
+                                                    });
+                                            }
+                                        });
+                                }
+                            }
+                        }
+                        ascent::internal::comment(
+                            "eq_proc <-- name_indices_none_total, name_indices_none_delta, eq_name_indices_0_1_total+delta, proc_indices_none_total+delta, proc_indices_none_total+delta, eq_proc_indices_0_1_total+delta [SIMPLE JOIN]",
+                        );
+                        {
+                            let any_rel_empty = name_indices_none_total
+                                .to_rel_index(&__name_ind_common_total)
+                                .is_empty()
+                                || name_indices_none_delta
+                                    .to_rel_index(&__name_ind_common_delta)
+                                    .is_empty()
+                                || ascent::internal::RelIndexCombined::new(
+                                        &eq_name_indices_0_1_total
+                                            .to_rel_index(&__eq_name_ind_common_total),
+                                        &eq_name_indices_0_1_delta
+                                            .to_rel_index(&__eq_name_ind_common_delta),
+                                    )
+                                    .is_empty()
+                                || ascent::internal::RelIndexCombined::new(
+                                        &proc_indices_none_total
+                                            .to_rel_index(&__proc_ind_common_total),
+                                        &proc_indices_none_delta
+                                            .to_rel_index(&__proc_ind_common_delta),
+                                    )
+                                    .is_empty()
+                                || ascent::internal::RelIndexCombined::new(
+                                        &proc_indices_none_total
+                                            .to_rel_index(&__proc_ind_common_total),
+                                        &proc_indices_none_delta
+                                            .to_rel_index(&__proc_ind_common_delta),
+                                    )
+                                    .is_empty()
+                                || ascent::internal::RelIndexCombined::new(
+                                        &eq_proc_indices_0_1_total
+                                            .to_rel_index(&__eq_proc_ind_common_total),
+                                        &eq_proc_indices_0_1_delta
+                                            .to_rel_index(&__eq_proc_ind_common_delta),
+                                    )
+                                    .is_empty();
+                            if !any_rel_empty {
+                                if name_indices_none_total
+                                    .to_rel_index(&__name_ind_common_total)
+                                    .len_estimate()
+                                    <= name_indices_none_delta
+                                        .to_rel_index(&__name_ind_common_delta)
+                                        .len_estimate()
+                                {
+                                    name_indices_none_total
+                                        .to_rel_index(&__name_ind_common_total)
+                                        .iter_all()
+                                        .for_each(|(__cl1_joined_columns, __cl1_tuple_indices)| {
+                                            let __cl1_joined_columns = __cl1_joined_columns
+                                                .tuple_of_borrowed();
+                                            if let Some(__matching) = name_indices_none_delta
+                                                .to_rel_index(&__name_ind_common_delta)
+                                                .index_get(&())
+                                            {
+                                                __cl1_tuple_indices
+                                                    .for_each(|cl1_val| {
+                                                        let cl1_val = cl1_val.tuple_of_borrowed();
+                                                        let x0: &Name = cl1_val.0;
+                                                        __matching
+                                                            .clone()
+                                                            .for_each(|__val| {
+                                                                let __val = __val.tuple_of_borrowed();
+                                                                let y0: &Name = __val.0;
+                                                                if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                                        &eq_name_indices_0_1_total
+                                                                            .to_rel_index(&__eq_name_ind_common_total),
+                                                                        &eq_name_indices_0_1_delta
+                                                                            .to_rel_index(&__eq_name_ind_common_delta),
+                                                                    )
+                                                                    .index_get(&((x0.clone()).clone(), (y0.clone()).clone()))
+                                                                {
+                                                                    __matching
+                                                                        .for_each(|__val| {
+                                                                            if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                                                    &proc_indices_none_total
+                                                                                        .to_rel_index(&__proc_ind_common_total),
+                                                                                    &proc_indices_none_delta
+                                                                                        .to_rel_index(&__proc_ind_common_delta),
+                                                                                )
+                                                                                .index_get(&())
+                                                                            {
+                                                                                __matching
+                                                                                    .for_each(|__val| {
+                                                                                        let __val = __val.tuple_of_borrowed();
+                                                                                        let x1: &Proc = __val.0;
+                                                                                        if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                                                                &proc_indices_none_total
+                                                                                                    .to_rel_index(&__proc_ind_common_total),
+                                                                                                &proc_indices_none_delta
+                                                                                                    .to_rel_index(&__proc_ind_common_delta),
+                                                                                            )
+                                                                                            .index_get(&())
+                                                                                        {
+                                                                                            __matching
+                                                                                                .for_each(|__val| {
+                                                                                                    let __val = __val.tuple_of_borrowed();
+                                                                                                    let y1: &Proc = __val.0;
+                                                                                                    if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                                                                            &eq_proc_indices_0_1_total
+                                                                                                                .to_rel_index(&__eq_proc_ind_common_total),
+                                                                                                            &eq_proc_indices_0_1_delta
+                                                                                                                .to_rel_index(&__eq_proc_ind_common_delta),
+                                                                                                        )
+                                                                                                        .index_get(&((x1.clone()).clone(), (y1.clone()).clone()))
+                                                                                                    {
+                                                                                                        __matching
+                                                                                                            .for_each(|__val| {
+                                                                                                                let __new_row: (Proc, Proc) = (
+                                                                                                                    Proc::POutput(Box::new(x0.clone()), Box::new(x1.clone())),
+                                                                                                                    Proc::POutput(Box::new(y0.clone()), Box::new(y1.clone())),
+                                                                                                                );
+                                                                                                                if !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                                                    &eq_proc_indices_0_1_total
+                                                                                                                        .to_rel_index(&__eq_proc_ind_common_total),
+                                                                                                                    &__new_row,
+                                                                                                                )
+                                                                                                                    && !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                                                        &eq_proc_indices_0_1_delta
+                                                                                                                            .to_rel_index(&__eq_proc_ind_common_delta),
+                                                                                                                        &__new_row,
+                                                                                                                    )
+                                                                                                                {
+                                                                                                                    if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
+                                                                                                                        &mut eq_proc_indices_0_1_new
+                                                                                                                            .to_rel_index_write(&mut __eq_proc_ind_common_new),
+                                                                                                                        &__new_row,
+                                                                                                                        (),
+                                                                                                                    ) {
+                                                                                                                        let __new_row_ind = _self.eq_proc.len();
+                                                                                                                        _self
+                                                                                                                            .eq_proc
+                                                                                                                            .push((__new_row.0.clone(), __new_row.1.clone()));
+                                                                                                                        ::ascent::internal::RelIndexWrite::index_insert(
+                                                                                                                            &mut eq_proc_indices_0_new
+                                                                                                                                .to_rel_index_write(&mut __eq_proc_ind_common_new),
+                                                                                                                            (__new_row.0.clone(),),
+                                                                                                                            (__new_row.1.clone(),),
+                                                                                                                        );
+                                                                                                                        __changed = true;
+                                                                                                                    }
+                                                                                                                }
+                                                                                                            });
+                                                                                                    }
+                                                                                                });
+                                                                                        }
+                                                                                    });
+                                                                            }
+                                                                        });
+                                                                }
+                                                            });
+                                                    });
+                                            }
+                                        });
+                                } else {
+                                    name_indices_none_delta
+                                        .to_rel_index(&__name_ind_common_delta)
+                                        .iter_all()
+                                        .for_each(|(__cl1_joined_columns, __cl1_tuple_indices)| {
+                                            let __cl1_joined_columns = __cl1_joined_columns
+                                                .tuple_of_borrowed();
+                                            if let Some(__matching) = name_indices_none_total
+                                                .to_rel_index(&__name_ind_common_total)
+                                                .index_get(&())
+                                            {
+                                                __cl1_tuple_indices
+                                                    .for_each(|cl1_val| {
+                                                        let cl1_val = cl1_val.tuple_of_borrowed();
+                                                        let y0: &Name = cl1_val.0;
+                                                        __matching
+                                                            .clone()
+                                                            .for_each(|__val| {
+                                                                let __val = __val.tuple_of_borrowed();
+                                                                let x0: &Name = __val.0;
+                                                                if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                                        &eq_name_indices_0_1_total
+                                                                            .to_rel_index(&__eq_name_ind_common_total),
+                                                                        &eq_name_indices_0_1_delta
+                                                                            .to_rel_index(&__eq_name_ind_common_delta),
+                                                                    )
+                                                                    .index_get(&((x0.clone()).clone(), (y0.clone()).clone()))
+                                                                {
+                                                                    __matching
+                                                                        .for_each(|__val| {
+                                                                            if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                                                    &proc_indices_none_total
+                                                                                        .to_rel_index(&__proc_ind_common_total),
+                                                                                    &proc_indices_none_delta
+                                                                                        .to_rel_index(&__proc_ind_common_delta),
+                                                                                )
+                                                                                .index_get(&())
+                                                                            {
+                                                                                __matching
+                                                                                    .for_each(|__val| {
+                                                                                        let __val = __val.tuple_of_borrowed();
+                                                                                        let x1: &Proc = __val.0;
+                                                                                        if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                                                                &proc_indices_none_total
+                                                                                                    .to_rel_index(&__proc_ind_common_total),
+                                                                                                &proc_indices_none_delta
+                                                                                                    .to_rel_index(&__proc_ind_common_delta),
+                                                                                            )
+                                                                                            .index_get(&())
+                                                                                        {
+                                                                                            __matching
+                                                                                                .for_each(|__val| {
+                                                                                                    let __val = __val.tuple_of_borrowed();
+                                                                                                    let y1: &Proc = __val.0;
+                                                                                                    if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                                                                            &eq_proc_indices_0_1_total
+                                                                                                                .to_rel_index(&__eq_proc_ind_common_total),
+                                                                                                            &eq_proc_indices_0_1_delta
+                                                                                                                .to_rel_index(&__eq_proc_ind_common_delta),
+                                                                                                        )
+                                                                                                        .index_get(&((x1.clone()).clone(), (y1.clone()).clone()))
+                                                                                                    {
+                                                                                                        __matching
+                                                                                                            .for_each(|__val| {
+                                                                                                                let __new_row: (Proc, Proc) = (
+                                                                                                                    Proc::POutput(Box::new(x0.clone()), Box::new(x1.clone())),
+                                                                                                                    Proc::POutput(Box::new(y0.clone()), Box::new(y1.clone())),
+                                                                                                                );
+                                                                                                                if !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                                                    &eq_proc_indices_0_1_total
+                                                                                                                        .to_rel_index(&__eq_proc_ind_common_total),
+                                                                                                                    &__new_row,
+                                                                                                                )
+                                                                                                                    && !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                                                        &eq_proc_indices_0_1_delta
+                                                                                                                            .to_rel_index(&__eq_proc_ind_common_delta),
+                                                                                                                        &__new_row,
+                                                                                                                    )
+                                                                                                                {
+                                                                                                                    if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
+                                                                                                                        &mut eq_proc_indices_0_1_new
+                                                                                                                            .to_rel_index_write(&mut __eq_proc_ind_common_new),
+                                                                                                                        &__new_row,
+                                                                                                                        (),
+                                                                                                                    ) {
+                                                                                                                        let __new_row_ind = _self.eq_proc.len();
+                                                                                                                        _self
+                                                                                                                            .eq_proc
+                                                                                                                            .push((__new_row.0.clone(), __new_row.1.clone()));
+                                                                                                                        ::ascent::internal::RelIndexWrite::index_insert(
+                                                                                                                            &mut eq_proc_indices_0_new
+                                                                                                                                .to_rel_index_write(&mut __eq_proc_ind_common_new),
+                                                                                                                            (__new_row.0.clone(),),
+                                                                                                                            (__new_row.1.clone(),),
+                                                                                                                        );
+                                                                                                                        __changed = true;
+                                                                                                                    }
+                                                                                                                }
+                                                                                                            });
+                                                                                                    }
+                                                                                                });
+                                                                                        }
+                                                                                    });
+                                                                            }
+                                                                        });
+                                                                }
+                                                            });
+                                                    });
+                                            }
+                                        });
+                                }
+                            }
+                        }
+                        ascent::internal::comment(
+                            "eq_proc <-- name_indices_none_total, name_indices_none_total, eq_name_indices_0_1_delta, proc_indices_none_total+delta, proc_indices_none_total+delta, eq_proc_indices_0_1_total+delta [SIMPLE JOIN]",
+                        );
+                        {
+                            let any_rel_empty = name_indices_none_total
+                                .to_rel_index(&__name_ind_common_total)
+                                .is_empty()
+                                || name_indices_none_total
+                                    .to_rel_index(&__name_ind_common_total)
+                                    .is_empty()
+                                || eq_name_indices_0_1_delta
+                                    .to_rel_index(&__eq_name_ind_common_delta)
+                                    .is_empty()
+                                || ascent::internal::RelIndexCombined::new(
+                                        &proc_indices_none_total
+                                            .to_rel_index(&__proc_ind_common_total),
+                                        &proc_indices_none_delta
+                                            .to_rel_index(&__proc_ind_common_delta),
+                                    )
+                                    .is_empty()
+                                || ascent::internal::RelIndexCombined::new(
+                                        &proc_indices_none_total
+                                            .to_rel_index(&__proc_ind_common_total),
+                                        &proc_indices_none_delta
+                                            .to_rel_index(&__proc_ind_common_delta),
+                                    )
+                                    .is_empty()
+                                || ascent::internal::RelIndexCombined::new(
+                                        &eq_proc_indices_0_1_total
+                                            .to_rel_index(&__eq_proc_ind_common_total),
+                                        &eq_proc_indices_0_1_delta
+                                            .to_rel_index(&__eq_proc_ind_common_delta),
+                                    )
+                                    .is_empty();
+                            if !any_rel_empty {
+                                if name_indices_none_total
+                                    .to_rel_index(&__name_ind_common_total)
+                                    .len_estimate()
+                                    <= name_indices_none_total
+                                        .to_rel_index(&__name_ind_common_total)
+                                        .len_estimate()
+                                {
+                                    name_indices_none_total
+                                        .to_rel_index(&__name_ind_common_total)
+                                        .iter_all()
+                                        .for_each(|(__cl1_joined_columns, __cl1_tuple_indices)| {
+                                            let __cl1_joined_columns = __cl1_joined_columns
+                                                .tuple_of_borrowed();
+                                            if let Some(__matching) = name_indices_none_total
+                                                .to_rel_index(&__name_ind_common_total)
+                                                .index_get(&())
+                                            {
+                                                __cl1_tuple_indices
+                                                    .for_each(|cl1_val| {
+                                                        let cl1_val = cl1_val.tuple_of_borrowed();
+                                                        let x0: &Name = cl1_val.0;
+                                                        __matching
+                                                            .clone()
+                                                            .for_each(|__val| {
+                                                                let __val = __val.tuple_of_borrowed();
+                                                                let y0: &Name = __val.0;
+                                                                if let Some(__matching) = eq_name_indices_0_1_delta
+                                                                    .to_rel_index(&__eq_name_ind_common_delta)
+                                                                    .index_get(&((x0.clone()).clone(), (y0.clone()).clone()))
+                                                                {
+                                                                    __matching
+                                                                        .for_each(|__val| {
+                                                                            if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                                                    &proc_indices_none_total
+                                                                                        .to_rel_index(&__proc_ind_common_total),
+                                                                                    &proc_indices_none_delta
+                                                                                        .to_rel_index(&__proc_ind_common_delta),
+                                                                                )
+                                                                                .index_get(&())
+                                                                            {
+                                                                                __matching
+                                                                                    .for_each(|__val| {
+                                                                                        let __val = __val.tuple_of_borrowed();
+                                                                                        let x1: &Proc = __val.0;
+                                                                                        if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                                                                &proc_indices_none_total
+                                                                                                    .to_rel_index(&__proc_ind_common_total),
+                                                                                                &proc_indices_none_delta
+                                                                                                    .to_rel_index(&__proc_ind_common_delta),
+                                                                                            )
+                                                                                            .index_get(&())
+                                                                                        {
+                                                                                            __matching
+                                                                                                .for_each(|__val| {
+                                                                                                    let __val = __val.tuple_of_borrowed();
+                                                                                                    let y1: &Proc = __val.0;
+                                                                                                    if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                                                                            &eq_proc_indices_0_1_total
+                                                                                                                .to_rel_index(&__eq_proc_ind_common_total),
+                                                                                                            &eq_proc_indices_0_1_delta
+                                                                                                                .to_rel_index(&__eq_proc_ind_common_delta),
+                                                                                                        )
+                                                                                                        .index_get(&((x1.clone()).clone(), (y1.clone()).clone()))
+                                                                                                    {
+                                                                                                        __matching
+                                                                                                            .for_each(|__val| {
+                                                                                                                let __new_row: (Proc, Proc) = (
+                                                                                                                    Proc::POutput(Box::new(x0.clone()), Box::new(x1.clone())),
+                                                                                                                    Proc::POutput(Box::new(y0.clone()), Box::new(y1.clone())),
+                                                                                                                );
+                                                                                                                if !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                                                    &eq_proc_indices_0_1_total
+                                                                                                                        .to_rel_index(&__eq_proc_ind_common_total),
+                                                                                                                    &__new_row,
+                                                                                                                )
+                                                                                                                    && !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                                                        &eq_proc_indices_0_1_delta
+                                                                                                                            .to_rel_index(&__eq_proc_ind_common_delta),
+                                                                                                                        &__new_row,
+                                                                                                                    )
+                                                                                                                {
+                                                                                                                    if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
+                                                                                                                        &mut eq_proc_indices_0_1_new
+                                                                                                                            .to_rel_index_write(&mut __eq_proc_ind_common_new),
+                                                                                                                        &__new_row,
+                                                                                                                        (),
+                                                                                                                    ) {
+                                                                                                                        let __new_row_ind = _self.eq_proc.len();
+                                                                                                                        _self
+                                                                                                                            .eq_proc
+                                                                                                                            .push((__new_row.0.clone(), __new_row.1.clone()));
+                                                                                                                        ::ascent::internal::RelIndexWrite::index_insert(
+                                                                                                                            &mut eq_proc_indices_0_new
+                                                                                                                                .to_rel_index_write(&mut __eq_proc_ind_common_new),
+                                                                                                                            (__new_row.0.clone(),),
+                                                                                                                            (__new_row.1.clone(),),
+                                                                                                                        );
+                                                                                                                        __changed = true;
+                                                                                                                    }
+                                                                                                                }
+                                                                                                            });
+                                                                                                    }
+                                                                                                });
+                                                                                        }
+                                                                                    });
+                                                                            }
+                                                                        });
+                                                                }
+                                                            });
+                                                    });
+                                            }
+                                        });
+                                } else {
+                                    name_indices_none_total
+                                        .to_rel_index(&__name_ind_common_total)
+                                        .iter_all()
+                                        .for_each(|(__cl1_joined_columns, __cl1_tuple_indices)| {
+                                            let __cl1_joined_columns = __cl1_joined_columns
+                                                .tuple_of_borrowed();
+                                            if let Some(__matching) = name_indices_none_total
+                                                .to_rel_index(&__name_ind_common_total)
+                                                .index_get(&())
+                                            {
+                                                __cl1_tuple_indices
+                                                    .for_each(|cl1_val| {
+                                                        let cl1_val = cl1_val.tuple_of_borrowed();
+                                                        let y0: &Name = cl1_val.0;
+                                                        __matching
+                                                            .clone()
+                                                            .for_each(|__val| {
+                                                                let __val = __val.tuple_of_borrowed();
+                                                                let x0: &Name = __val.0;
+                                                                if let Some(__matching) = eq_name_indices_0_1_delta
+                                                                    .to_rel_index(&__eq_name_ind_common_delta)
+                                                                    .index_get(&((x0.clone()).clone(), (y0.clone()).clone()))
+                                                                {
+                                                                    __matching
+                                                                        .for_each(|__val| {
+                                                                            if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                                                    &proc_indices_none_total
+                                                                                        .to_rel_index(&__proc_ind_common_total),
+                                                                                    &proc_indices_none_delta
+                                                                                        .to_rel_index(&__proc_ind_common_delta),
+                                                                                )
+                                                                                .index_get(&())
+                                                                            {
+                                                                                __matching
+                                                                                    .for_each(|__val| {
+                                                                                        let __val = __val.tuple_of_borrowed();
+                                                                                        let x1: &Proc = __val.0;
+                                                                                        if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                                                                &proc_indices_none_total
+                                                                                                    .to_rel_index(&__proc_ind_common_total),
+                                                                                                &proc_indices_none_delta
+                                                                                                    .to_rel_index(&__proc_ind_common_delta),
+                                                                                            )
+                                                                                            .index_get(&())
+                                                                                        {
+                                                                                            __matching
+                                                                                                .for_each(|__val| {
+                                                                                                    let __val = __val.tuple_of_borrowed();
+                                                                                                    let y1: &Proc = __val.0;
+                                                                                                    if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                                                                            &eq_proc_indices_0_1_total
+                                                                                                                .to_rel_index(&__eq_proc_ind_common_total),
+                                                                                                            &eq_proc_indices_0_1_delta
+                                                                                                                .to_rel_index(&__eq_proc_ind_common_delta),
+                                                                                                        )
+                                                                                                        .index_get(&((x1.clone()).clone(), (y1.clone()).clone()))
+                                                                                                    {
+                                                                                                        __matching
+                                                                                                            .for_each(|__val| {
+                                                                                                                let __new_row: (Proc, Proc) = (
+                                                                                                                    Proc::POutput(Box::new(x0.clone()), Box::new(x1.clone())),
+                                                                                                                    Proc::POutput(Box::new(y0.clone()), Box::new(y1.clone())),
+                                                                                                                );
+                                                                                                                if !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                                                    &eq_proc_indices_0_1_total
+                                                                                                                        .to_rel_index(&__eq_proc_ind_common_total),
+                                                                                                                    &__new_row,
+                                                                                                                )
+                                                                                                                    && !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                                                        &eq_proc_indices_0_1_delta
+                                                                                                                            .to_rel_index(&__eq_proc_ind_common_delta),
+                                                                                                                        &__new_row,
+                                                                                                                    )
+                                                                                                                {
+                                                                                                                    if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
+                                                                                                                        &mut eq_proc_indices_0_1_new
+                                                                                                                            .to_rel_index_write(&mut __eq_proc_ind_common_new),
+                                                                                                                        &__new_row,
+                                                                                                                        (),
+                                                                                                                    ) {
+                                                                                                                        let __new_row_ind = _self.eq_proc.len();
+                                                                                                                        _self
+                                                                                                                            .eq_proc
+                                                                                                                            .push((__new_row.0.clone(), __new_row.1.clone()));
+                                                                                                                        ::ascent::internal::RelIndexWrite::index_insert(
+                                                                                                                            &mut eq_proc_indices_0_new
+                                                                                                                                .to_rel_index_write(&mut __eq_proc_ind_common_new),
+                                                                                                                            (__new_row.0.clone(),),
+                                                                                                                            (__new_row.1.clone(),),
+                                                                                                                        );
+                                                                                                                        __changed = true;
+                                                                                                                    }
+                                                                                                                }
+                                                                                                            });
+                                                                                                    }
+                                                                                                });
+                                                                                        }
+                                                                                    });
+                                                                            }
+                                                                        });
+                                                                }
+                                                            });
+                                                    });
+                                            }
+                                        });
+                                }
+                            }
+                        }
+                        ascent::internal::comment(
+                            "eq_proc <-- name_indices_none_total, name_indices_none_total, eq_name_indices_0_1_total, proc_indices_none_delta, proc_indices_none_total+delta, eq_proc_indices_0_1_total+delta [SIMPLE JOIN]",
+                        );
+                        {
+                            let any_rel_empty = name_indices_none_total
+                                .to_rel_index(&__name_ind_common_total)
+                                .is_empty()
+                                || name_indices_none_total
+                                    .to_rel_index(&__name_ind_common_total)
+                                    .is_empty()
+                                || eq_name_indices_0_1_total
+                                    .to_rel_index(&__eq_name_ind_common_total)
+                                    .is_empty()
+                                || proc_indices_none_delta
+                                    .to_rel_index(&__proc_ind_common_delta)
+                                    .is_empty()
+                                || ascent::internal::RelIndexCombined::new(
+                                        &proc_indices_none_total
+                                            .to_rel_index(&__proc_ind_common_total),
+                                        &proc_indices_none_delta
+                                            .to_rel_index(&__proc_ind_common_delta),
+                                    )
+                                    .is_empty()
+                                || ascent::internal::RelIndexCombined::new(
+                                        &eq_proc_indices_0_1_total
+                                            .to_rel_index(&__eq_proc_ind_common_total),
+                                        &eq_proc_indices_0_1_delta
+                                            .to_rel_index(&__eq_proc_ind_common_delta),
+                                    )
+                                    .is_empty();
+                            if !any_rel_empty {
+                                if name_indices_none_total
+                                    .to_rel_index(&__name_ind_common_total)
+                                    .len_estimate()
+                                    <= name_indices_none_total
+                                        .to_rel_index(&__name_ind_common_total)
+                                        .len_estimate()
+                                {
+                                    name_indices_none_total
+                                        .to_rel_index(&__name_ind_common_total)
+                                        .iter_all()
+                                        .for_each(|(__cl1_joined_columns, __cl1_tuple_indices)| {
+                                            let __cl1_joined_columns = __cl1_joined_columns
+                                                .tuple_of_borrowed();
+                                            if let Some(__matching) = name_indices_none_total
+                                                .to_rel_index(&__name_ind_common_total)
+                                                .index_get(&())
+                                            {
+                                                __cl1_tuple_indices
+                                                    .for_each(|cl1_val| {
+                                                        let cl1_val = cl1_val.tuple_of_borrowed();
+                                                        let x0: &Name = cl1_val.0;
+                                                        __matching
+                                                            .clone()
+                                                            .for_each(|__val| {
+                                                                let __val = __val.tuple_of_borrowed();
+                                                                let y0: &Name = __val.0;
+                                                                if let Some(__matching) = eq_name_indices_0_1_total
+                                                                    .to_rel_index(&__eq_name_ind_common_total)
+                                                                    .index_get(&((x0.clone()).clone(), (y0.clone()).clone()))
+                                                                {
+                                                                    __matching
+                                                                        .for_each(|__val| {
+                                                                            if let Some(__matching) = proc_indices_none_delta
+                                                                                .to_rel_index(&__proc_ind_common_delta)
+                                                                                .index_get(&())
+                                                                            {
+                                                                                __matching
+                                                                                    .for_each(|__val| {
+                                                                                        let __val = __val.tuple_of_borrowed();
+                                                                                        let x1: &Proc = __val.0;
+                                                                                        if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                                                                &proc_indices_none_total
+                                                                                                    .to_rel_index(&__proc_ind_common_total),
+                                                                                                &proc_indices_none_delta
+                                                                                                    .to_rel_index(&__proc_ind_common_delta),
+                                                                                            )
+                                                                                            .index_get(&())
+                                                                                        {
+                                                                                            __matching
+                                                                                                .for_each(|__val| {
+                                                                                                    let __val = __val.tuple_of_borrowed();
+                                                                                                    let y1: &Proc = __val.0;
+                                                                                                    if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                                                                            &eq_proc_indices_0_1_total
+                                                                                                                .to_rel_index(&__eq_proc_ind_common_total),
+                                                                                                            &eq_proc_indices_0_1_delta
+                                                                                                                .to_rel_index(&__eq_proc_ind_common_delta),
+                                                                                                        )
+                                                                                                        .index_get(&((x1.clone()).clone(), (y1.clone()).clone()))
+                                                                                                    {
+                                                                                                        __matching
+                                                                                                            .for_each(|__val| {
+                                                                                                                let __new_row: (Proc, Proc) = (
+                                                                                                                    Proc::POutput(Box::new(x0.clone()), Box::new(x1.clone())),
+                                                                                                                    Proc::POutput(Box::new(y0.clone()), Box::new(y1.clone())),
+                                                                                                                );
+                                                                                                                if !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                                                    &eq_proc_indices_0_1_total
+                                                                                                                        .to_rel_index(&__eq_proc_ind_common_total),
+                                                                                                                    &__new_row,
+                                                                                                                )
+                                                                                                                    && !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                                                        &eq_proc_indices_0_1_delta
+                                                                                                                            .to_rel_index(&__eq_proc_ind_common_delta),
+                                                                                                                        &__new_row,
+                                                                                                                    )
+                                                                                                                {
+                                                                                                                    if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
+                                                                                                                        &mut eq_proc_indices_0_1_new
+                                                                                                                            .to_rel_index_write(&mut __eq_proc_ind_common_new),
+                                                                                                                        &__new_row,
+                                                                                                                        (),
+                                                                                                                    ) {
+                                                                                                                        let __new_row_ind = _self.eq_proc.len();
+                                                                                                                        _self
+                                                                                                                            .eq_proc
+                                                                                                                            .push((__new_row.0.clone(), __new_row.1.clone()));
+                                                                                                                        ::ascent::internal::RelIndexWrite::index_insert(
+                                                                                                                            &mut eq_proc_indices_0_new
+                                                                                                                                .to_rel_index_write(&mut __eq_proc_ind_common_new),
+                                                                                                                            (__new_row.0.clone(),),
+                                                                                                                            (__new_row.1.clone(),),
+                                                                                                                        );
+                                                                                                                        __changed = true;
+                                                                                                                    }
+                                                                                                                }
+                                                                                                            });
+                                                                                                    }
+                                                                                                });
+                                                                                        }
+                                                                                    });
+                                                                            }
+                                                                        });
+                                                                }
+                                                            });
+                                                    });
+                                            }
+                                        });
+                                } else {
+                                    name_indices_none_total
+                                        .to_rel_index(&__name_ind_common_total)
+                                        .iter_all()
+                                        .for_each(|(__cl1_joined_columns, __cl1_tuple_indices)| {
+                                            let __cl1_joined_columns = __cl1_joined_columns
+                                                .tuple_of_borrowed();
+                                            if let Some(__matching) = name_indices_none_total
+                                                .to_rel_index(&__name_ind_common_total)
+                                                .index_get(&())
+                                            {
+                                                __cl1_tuple_indices
+                                                    .for_each(|cl1_val| {
+                                                        let cl1_val = cl1_val.tuple_of_borrowed();
+                                                        let y0: &Name = cl1_val.0;
+                                                        __matching
+                                                            .clone()
+                                                            .for_each(|__val| {
+                                                                let __val = __val.tuple_of_borrowed();
+                                                                let x0: &Name = __val.0;
+                                                                if let Some(__matching) = eq_name_indices_0_1_total
+                                                                    .to_rel_index(&__eq_name_ind_common_total)
+                                                                    .index_get(&((x0.clone()).clone(), (y0.clone()).clone()))
+                                                                {
+                                                                    __matching
+                                                                        .for_each(|__val| {
+                                                                            if let Some(__matching) = proc_indices_none_delta
+                                                                                .to_rel_index(&__proc_ind_common_delta)
+                                                                                .index_get(&())
+                                                                            {
+                                                                                __matching
+                                                                                    .for_each(|__val| {
+                                                                                        let __val = __val.tuple_of_borrowed();
+                                                                                        let x1: &Proc = __val.0;
+                                                                                        if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                                                                &proc_indices_none_total
+                                                                                                    .to_rel_index(&__proc_ind_common_total),
+                                                                                                &proc_indices_none_delta
+                                                                                                    .to_rel_index(&__proc_ind_common_delta),
+                                                                                            )
+                                                                                            .index_get(&())
+                                                                                        {
+                                                                                            __matching
+                                                                                                .for_each(|__val| {
+                                                                                                    let __val = __val.tuple_of_borrowed();
+                                                                                                    let y1: &Proc = __val.0;
+                                                                                                    if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                                                                            &eq_proc_indices_0_1_total
+                                                                                                                .to_rel_index(&__eq_proc_ind_common_total),
+                                                                                                            &eq_proc_indices_0_1_delta
+                                                                                                                .to_rel_index(&__eq_proc_ind_common_delta),
+                                                                                                        )
+                                                                                                        .index_get(&((x1.clone()).clone(), (y1.clone()).clone()))
+                                                                                                    {
+                                                                                                        __matching
+                                                                                                            .for_each(|__val| {
+                                                                                                                let __new_row: (Proc, Proc) = (
+                                                                                                                    Proc::POutput(Box::new(x0.clone()), Box::new(x1.clone())),
+                                                                                                                    Proc::POutput(Box::new(y0.clone()), Box::new(y1.clone())),
+                                                                                                                );
+                                                                                                                if !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                                                    &eq_proc_indices_0_1_total
+                                                                                                                        .to_rel_index(&__eq_proc_ind_common_total),
+                                                                                                                    &__new_row,
+                                                                                                                )
+                                                                                                                    && !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                                                        &eq_proc_indices_0_1_delta
+                                                                                                                            .to_rel_index(&__eq_proc_ind_common_delta),
+                                                                                                                        &__new_row,
+                                                                                                                    )
+                                                                                                                {
+                                                                                                                    if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
+                                                                                                                        &mut eq_proc_indices_0_1_new
+                                                                                                                            .to_rel_index_write(&mut __eq_proc_ind_common_new),
+                                                                                                                        &__new_row,
+                                                                                                                        (),
+                                                                                                                    ) {
+                                                                                                                        let __new_row_ind = _self.eq_proc.len();
+                                                                                                                        _self
+                                                                                                                            .eq_proc
+                                                                                                                            .push((__new_row.0.clone(), __new_row.1.clone()));
+                                                                                                                        ::ascent::internal::RelIndexWrite::index_insert(
+                                                                                                                            &mut eq_proc_indices_0_new
+                                                                                                                                .to_rel_index_write(&mut __eq_proc_ind_common_new),
+                                                                                                                            (__new_row.0.clone(),),
+                                                                                                                            (__new_row.1.clone(),),
+                                                                                                                        );
+                                                                                                                        __changed = true;
+                                                                                                                    }
+                                                                                                                }
+                                                                                                            });
+                                                                                                    }
+                                                                                                });
+                                                                                        }
+                                                                                    });
+                                                                            }
+                                                                        });
+                                                                }
+                                                            });
+                                                    });
+                                            }
+                                        });
+                                }
+                            }
+                        }
+                        ascent::internal::comment(
+                            "eq_proc <-- name_indices_none_total, name_indices_none_total, eq_name_indices_0_1_total, proc_indices_none_total, proc_indices_none_delta, eq_proc_indices_0_1_total+delta [SIMPLE JOIN]",
+                        );
+                        {
+                            let any_rel_empty = name_indices_none_total
+                                .to_rel_index(&__name_ind_common_total)
+                                .is_empty()
+                                || name_indices_none_total
+                                    .to_rel_index(&__name_ind_common_total)
+                                    .is_empty()
+                                || eq_name_indices_0_1_total
+                                    .to_rel_index(&__eq_name_ind_common_total)
+                                    .is_empty()
+                                || proc_indices_none_total
+                                    .to_rel_index(&__proc_ind_common_total)
+                                    .is_empty()
+                                || proc_indices_none_delta
+                                    .to_rel_index(&__proc_ind_common_delta)
+                                    .is_empty()
+                                || ascent::internal::RelIndexCombined::new(
+                                        &eq_proc_indices_0_1_total
+                                            .to_rel_index(&__eq_proc_ind_common_total),
+                                        &eq_proc_indices_0_1_delta
+                                            .to_rel_index(&__eq_proc_ind_common_delta),
+                                    )
+                                    .is_empty();
+                            if !any_rel_empty {
+                                if name_indices_none_total
+                                    .to_rel_index(&__name_ind_common_total)
+                                    .len_estimate()
+                                    <= name_indices_none_total
+                                        .to_rel_index(&__name_ind_common_total)
+                                        .len_estimate()
+                                {
+                                    name_indices_none_total
+                                        .to_rel_index(&__name_ind_common_total)
+                                        .iter_all()
+                                        .for_each(|(__cl1_joined_columns, __cl1_tuple_indices)| {
+                                            let __cl1_joined_columns = __cl1_joined_columns
+                                                .tuple_of_borrowed();
+                                            if let Some(__matching) = name_indices_none_total
+                                                .to_rel_index(&__name_ind_common_total)
+                                                .index_get(&())
+                                            {
+                                                __cl1_tuple_indices
+                                                    .for_each(|cl1_val| {
+                                                        let cl1_val = cl1_val.tuple_of_borrowed();
+                                                        let x0: &Name = cl1_val.0;
+                                                        __matching
+                                                            .clone()
+                                                            .for_each(|__val| {
+                                                                let __val = __val.tuple_of_borrowed();
+                                                                let y0: &Name = __val.0;
+                                                                if let Some(__matching) = eq_name_indices_0_1_total
+                                                                    .to_rel_index(&__eq_name_ind_common_total)
+                                                                    .index_get(&((x0.clone()).clone(), (y0.clone()).clone()))
+                                                                {
+                                                                    __matching
+                                                                        .for_each(|__val| {
+                                                                            if let Some(__matching) = proc_indices_none_total
+                                                                                .to_rel_index(&__proc_ind_common_total)
+                                                                                .index_get(&())
+                                                                            {
+                                                                                __matching
+                                                                                    .for_each(|__val| {
+                                                                                        let __val = __val.tuple_of_borrowed();
+                                                                                        let x1: &Proc = __val.0;
+                                                                                        if let Some(__matching) = proc_indices_none_delta
+                                                                                            .to_rel_index(&__proc_ind_common_delta)
+                                                                                            .index_get(&())
+                                                                                        {
+                                                                                            __matching
+                                                                                                .for_each(|__val| {
+                                                                                                    let __val = __val.tuple_of_borrowed();
+                                                                                                    let y1: &Proc = __val.0;
+                                                                                                    if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                                                                            &eq_proc_indices_0_1_total
+                                                                                                                .to_rel_index(&__eq_proc_ind_common_total),
+                                                                                                            &eq_proc_indices_0_1_delta
+                                                                                                                .to_rel_index(&__eq_proc_ind_common_delta),
+                                                                                                        )
+                                                                                                        .index_get(&((x1.clone()).clone(), (y1.clone()).clone()))
+                                                                                                    {
+                                                                                                        __matching
+                                                                                                            .for_each(|__val| {
+                                                                                                                let __new_row: (Proc, Proc) = (
+                                                                                                                    Proc::POutput(Box::new(x0.clone()), Box::new(x1.clone())),
+                                                                                                                    Proc::POutput(Box::new(y0.clone()), Box::new(y1.clone())),
+                                                                                                                );
+                                                                                                                if !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                                                    &eq_proc_indices_0_1_total
+                                                                                                                        .to_rel_index(&__eq_proc_ind_common_total),
+                                                                                                                    &__new_row,
+                                                                                                                )
+                                                                                                                    && !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                                                        &eq_proc_indices_0_1_delta
+                                                                                                                            .to_rel_index(&__eq_proc_ind_common_delta),
+                                                                                                                        &__new_row,
+                                                                                                                    )
+                                                                                                                {
+                                                                                                                    if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
+                                                                                                                        &mut eq_proc_indices_0_1_new
+                                                                                                                            .to_rel_index_write(&mut __eq_proc_ind_common_new),
+                                                                                                                        &__new_row,
+                                                                                                                        (),
+                                                                                                                    ) {
+                                                                                                                        let __new_row_ind = _self.eq_proc.len();
+                                                                                                                        _self
+                                                                                                                            .eq_proc
+                                                                                                                            .push((__new_row.0.clone(), __new_row.1.clone()));
+                                                                                                                        ::ascent::internal::RelIndexWrite::index_insert(
+                                                                                                                            &mut eq_proc_indices_0_new
+                                                                                                                                .to_rel_index_write(&mut __eq_proc_ind_common_new),
+                                                                                                                            (__new_row.0.clone(),),
+                                                                                                                            (__new_row.1.clone(),),
+                                                                                                                        );
+                                                                                                                        __changed = true;
+                                                                                                                    }
+                                                                                                                }
+                                                                                                            });
+                                                                                                    }
+                                                                                                });
+                                                                                        }
+                                                                                    });
+                                                                            }
+                                                                        });
+                                                                }
+                                                            });
+                                                    });
+                                            }
+                                        });
+                                } else {
+                                    name_indices_none_total
+                                        .to_rel_index(&__name_ind_common_total)
+                                        .iter_all()
+                                        .for_each(|(__cl1_joined_columns, __cl1_tuple_indices)| {
+                                            let __cl1_joined_columns = __cl1_joined_columns
+                                                .tuple_of_borrowed();
+                                            if let Some(__matching) = name_indices_none_total
+                                                .to_rel_index(&__name_ind_common_total)
+                                                .index_get(&())
+                                            {
+                                                __cl1_tuple_indices
+                                                    .for_each(|cl1_val| {
+                                                        let cl1_val = cl1_val.tuple_of_borrowed();
+                                                        let y0: &Name = cl1_val.0;
+                                                        __matching
+                                                            .clone()
+                                                            .for_each(|__val| {
+                                                                let __val = __val.tuple_of_borrowed();
+                                                                let x0: &Name = __val.0;
+                                                                if let Some(__matching) = eq_name_indices_0_1_total
+                                                                    .to_rel_index(&__eq_name_ind_common_total)
+                                                                    .index_get(&((x0.clone()).clone(), (y0.clone()).clone()))
+                                                                {
+                                                                    __matching
+                                                                        .for_each(|__val| {
+                                                                            if let Some(__matching) = proc_indices_none_total
+                                                                                .to_rel_index(&__proc_ind_common_total)
+                                                                                .index_get(&())
+                                                                            {
+                                                                                __matching
+                                                                                    .for_each(|__val| {
+                                                                                        let __val = __val.tuple_of_borrowed();
+                                                                                        let x1: &Proc = __val.0;
+                                                                                        if let Some(__matching) = proc_indices_none_delta
+                                                                                            .to_rel_index(&__proc_ind_common_delta)
+                                                                                            .index_get(&())
+                                                                                        {
+                                                                                            __matching
+                                                                                                .for_each(|__val| {
+                                                                                                    let __val = __val.tuple_of_borrowed();
+                                                                                                    let y1: &Proc = __val.0;
+                                                                                                    if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                                                                            &eq_proc_indices_0_1_total
+                                                                                                                .to_rel_index(&__eq_proc_ind_common_total),
+                                                                                                            &eq_proc_indices_0_1_delta
+                                                                                                                .to_rel_index(&__eq_proc_ind_common_delta),
+                                                                                                        )
+                                                                                                        .index_get(&((x1.clone()).clone(), (y1.clone()).clone()))
+                                                                                                    {
+                                                                                                        __matching
+                                                                                                            .for_each(|__val| {
+                                                                                                                let __new_row: (Proc, Proc) = (
+                                                                                                                    Proc::POutput(Box::new(x0.clone()), Box::new(x1.clone())),
+                                                                                                                    Proc::POutput(Box::new(y0.clone()), Box::new(y1.clone())),
+                                                                                                                );
+                                                                                                                if !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                                                    &eq_proc_indices_0_1_total
+                                                                                                                        .to_rel_index(&__eq_proc_ind_common_total),
+                                                                                                                    &__new_row,
+                                                                                                                )
+                                                                                                                    && !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                                                        &eq_proc_indices_0_1_delta
+                                                                                                                            .to_rel_index(&__eq_proc_ind_common_delta),
+                                                                                                                        &__new_row,
+                                                                                                                    )
+                                                                                                                {
+                                                                                                                    if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
+                                                                                                                        &mut eq_proc_indices_0_1_new
+                                                                                                                            .to_rel_index_write(&mut __eq_proc_ind_common_new),
+                                                                                                                        &__new_row,
+                                                                                                                        (),
+                                                                                                                    ) {
+                                                                                                                        let __new_row_ind = _self.eq_proc.len();
+                                                                                                                        _self
+                                                                                                                            .eq_proc
+                                                                                                                            .push((__new_row.0.clone(), __new_row.1.clone()));
+                                                                                                                        ::ascent::internal::RelIndexWrite::index_insert(
+                                                                                                                            &mut eq_proc_indices_0_new
+                                                                                                                                .to_rel_index_write(&mut __eq_proc_ind_common_new),
+                                                                                                                            (__new_row.0.clone(),),
+                                                                                                                            (__new_row.1.clone(),),
+                                                                                                                        );
+                                                                                                                        __changed = true;
+                                                                                                                    }
+                                                                                                                }
+                                                                                                            });
+                                                                                                    }
+                                                                                                });
+                                                                                        }
+                                                                                    });
+                                                                            }
+                                                                        });
+                                                                }
+                                                            });
+                                                    });
+                                            }
+                                        });
+                                }
+                            }
+                        }
+                        ascent::internal::comment(
+                            "eq_proc <-- name_indices_none_total, name_indices_none_total, eq_name_indices_0_1_total, proc_indices_none_total, proc_indices_none_total, eq_proc_indices_0_1_delta [SIMPLE JOIN]",
+                        );
+                        {
+                            let any_rel_empty = name_indices_none_total
+                                .to_rel_index(&__name_ind_common_total)
+                                .is_empty()
+                                || name_indices_none_total
+                                    .to_rel_index(&__name_ind_common_total)
+                                    .is_empty()
+                                || eq_name_indices_0_1_total
+                                    .to_rel_index(&__eq_name_ind_common_total)
+                                    .is_empty()
+                                || proc_indices_none_total
+                                    .to_rel_index(&__proc_ind_common_total)
+                                    .is_empty()
+                                || proc_indices_none_total
+                                    .to_rel_index(&__proc_ind_common_total)
+                                    .is_empty()
+                                || eq_proc_indices_0_1_delta
+                                    .to_rel_index(&__eq_proc_ind_common_delta)
+                                    .is_empty();
+                            if !any_rel_empty {
+                                if name_indices_none_total
+                                    .to_rel_index(&__name_ind_common_total)
+                                    .len_estimate()
+                                    <= name_indices_none_total
+                                        .to_rel_index(&__name_ind_common_total)
+                                        .len_estimate()
+                                {
+                                    name_indices_none_total
+                                        .to_rel_index(&__name_ind_common_total)
+                                        .iter_all()
+                                        .for_each(|(__cl1_joined_columns, __cl1_tuple_indices)| {
+                                            let __cl1_joined_columns = __cl1_joined_columns
+                                                .tuple_of_borrowed();
+                                            if let Some(__matching) = name_indices_none_total
+                                                .to_rel_index(&__name_ind_common_total)
+                                                .index_get(&())
+                                            {
+                                                __cl1_tuple_indices
+                                                    .for_each(|cl1_val| {
+                                                        let cl1_val = cl1_val.tuple_of_borrowed();
+                                                        let x0: &Name = cl1_val.0;
+                                                        __matching
+                                                            .clone()
+                                                            .for_each(|__val| {
+                                                                let __val = __val.tuple_of_borrowed();
+                                                                let y0: &Name = __val.0;
+                                                                if let Some(__matching) = eq_name_indices_0_1_total
+                                                                    .to_rel_index(&__eq_name_ind_common_total)
+                                                                    .index_get(&((x0.clone()).clone(), (y0.clone()).clone()))
+                                                                {
+                                                                    __matching
+                                                                        .for_each(|__val| {
+                                                                            if let Some(__matching) = proc_indices_none_total
+                                                                                .to_rel_index(&__proc_ind_common_total)
+                                                                                .index_get(&())
+                                                                            {
+                                                                                __matching
+                                                                                    .for_each(|__val| {
+                                                                                        let __val = __val.tuple_of_borrowed();
+                                                                                        let x1: &Proc = __val.0;
+                                                                                        if let Some(__matching) = proc_indices_none_total
+                                                                                            .to_rel_index(&__proc_ind_common_total)
+                                                                                            .index_get(&())
+                                                                                        {
+                                                                                            __matching
+                                                                                                .for_each(|__val| {
+                                                                                                    let __val = __val.tuple_of_borrowed();
+                                                                                                    let y1: &Proc = __val.0;
+                                                                                                    if let Some(__matching) = eq_proc_indices_0_1_delta
+                                                                                                        .to_rel_index(&__eq_proc_ind_common_delta)
+                                                                                                        .index_get(&((x1.clone()).clone(), (y1.clone()).clone()))
+                                                                                                    {
+                                                                                                        __matching
+                                                                                                            .for_each(|__val| {
+                                                                                                                let __new_row: (Proc, Proc) = (
+                                                                                                                    Proc::POutput(Box::new(x0.clone()), Box::new(x1.clone())),
+                                                                                                                    Proc::POutput(Box::new(y0.clone()), Box::new(y1.clone())),
+                                                                                                                );
+                                                                                                                if !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                                                    &eq_proc_indices_0_1_total
+                                                                                                                        .to_rel_index(&__eq_proc_ind_common_total),
+                                                                                                                    &__new_row,
+                                                                                                                )
+                                                                                                                    && !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                                                        &eq_proc_indices_0_1_delta
+                                                                                                                            .to_rel_index(&__eq_proc_ind_common_delta),
+                                                                                                                        &__new_row,
+                                                                                                                    )
+                                                                                                                {
+                                                                                                                    if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
+                                                                                                                        &mut eq_proc_indices_0_1_new
+                                                                                                                            .to_rel_index_write(&mut __eq_proc_ind_common_new),
+                                                                                                                        &__new_row,
+                                                                                                                        (),
+                                                                                                                    ) {
+                                                                                                                        let __new_row_ind = _self.eq_proc.len();
+                                                                                                                        _self
+                                                                                                                            .eq_proc
+                                                                                                                            .push((__new_row.0.clone(), __new_row.1.clone()));
+                                                                                                                        ::ascent::internal::RelIndexWrite::index_insert(
+                                                                                                                            &mut eq_proc_indices_0_new
+                                                                                                                                .to_rel_index_write(&mut __eq_proc_ind_common_new),
+                                                                                                                            (__new_row.0.clone(),),
+                                                                                                                            (__new_row.1.clone(),),
+                                                                                                                        );
+                                                                                                                        __changed = true;
+                                                                                                                    }
+                                                                                                                }
+                                                                                                            });
+                                                                                                    }
+                                                                                                });
+                                                                                        }
+                                                                                    });
+                                                                            }
+                                                                        });
+                                                                }
+                                                            });
+                                                    });
+                                            }
+                                        });
+                                } else {
+                                    name_indices_none_total
+                                        .to_rel_index(&__name_ind_common_total)
+                                        .iter_all()
+                                        .for_each(|(__cl1_joined_columns, __cl1_tuple_indices)| {
+                                            let __cl1_joined_columns = __cl1_joined_columns
+                                                .tuple_of_borrowed();
+                                            if let Some(__matching) = name_indices_none_total
+                                                .to_rel_index(&__name_ind_common_total)
+                                                .index_get(&())
+                                            {
+                                                __cl1_tuple_indices
+                                                    .for_each(|cl1_val| {
+                                                        let cl1_val = cl1_val.tuple_of_borrowed();
+                                                        let y0: &Name = cl1_val.0;
+                                                        __matching
+                                                            .clone()
+                                                            .for_each(|__val| {
+                                                                let __val = __val.tuple_of_borrowed();
+                                                                let x0: &Name = __val.0;
+                                                                if let Some(__matching) = eq_name_indices_0_1_total
+                                                                    .to_rel_index(&__eq_name_ind_common_total)
+                                                                    .index_get(&((x0.clone()).clone(), (y0.clone()).clone()))
+                                                                {
+                                                                    __matching
+                                                                        .for_each(|__val| {
+                                                                            if let Some(__matching) = proc_indices_none_total
+                                                                                .to_rel_index(&__proc_ind_common_total)
+                                                                                .index_get(&())
+                                                                            {
+                                                                                __matching
+                                                                                    .for_each(|__val| {
+                                                                                        let __val = __val.tuple_of_borrowed();
+                                                                                        let x1: &Proc = __val.0;
+                                                                                        if let Some(__matching) = proc_indices_none_total
+                                                                                            .to_rel_index(&__proc_ind_common_total)
+                                                                                            .index_get(&())
+                                                                                        {
+                                                                                            __matching
+                                                                                                .for_each(|__val| {
+                                                                                                    let __val = __val.tuple_of_borrowed();
+                                                                                                    let y1: &Proc = __val.0;
+                                                                                                    if let Some(__matching) = eq_proc_indices_0_1_delta
+                                                                                                        .to_rel_index(&__eq_proc_ind_common_delta)
+                                                                                                        .index_get(&((x1.clone()).clone(), (y1.clone()).clone()))
+                                                                                                    {
+                                                                                                        __matching
+                                                                                                            .for_each(|__val| {
+                                                                                                                let __new_row: (Proc, Proc) = (
+                                                                                                                    Proc::POutput(Box::new(x0.clone()), Box::new(x1.clone())),
+                                                                                                                    Proc::POutput(Box::new(y0.clone()), Box::new(y1.clone())),
+                                                                                                                );
+                                                                                                                if !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                                                    &eq_proc_indices_0_1_total
+                                                                                                                        .to_rel_index(&__eq_proc_ind_common_total),
+                                                                                                                    &__new_row,
+                                                                                                                )
+                                                                                                                    && !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                                                        &eq_proc_indices_0_1_delta
+                                                                                                                            .to_rel_index(&__eq_proc_ind_common_delta),
+                                                                                                                        &__new_row,
+                                                                                                                    )
+                                                                                                                {
+                                                                                                                    if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
+                                                                                                                        &mut eq_proc_indices_0_1_new
+                                                                                                                            .to_rel_index_write(&mut __eq_proc_ind_common_new),
+                                                                                                                        &__new_row,
+                                                                                                                        (),
+                                                                                                                    ) {
+                                                                                                                        let __new_row_ind = _self.eq_proc.len();
+                                                                                                                        _self
+                                                                                                                            .eq_proc
+                                                                                                                            .push((__new_row.0.clone(), __new_row.1.clone()));
+                                                                                                                        ::ascent::internal::RelIndexWrite::index_insert(
+                                                                                                                            &mut eq_proc_indices_0_new
+                                                                                                                                .to_rel_index_write(&mut __eq_proc_ind_common_new),
+                                                                                                                            (__new_row.0.clone(),),
+                                                                                                                            (__new_row.1.clone(),),
+                                                                                                                        );
+                                                                                                                        __changed = true;
+                                                                                                                    }
+                                                                                                                }
+                                                                                                            });
+                                                                                                    }
+                                                                                                });
+                                                                                        }
+                                                                                    });
+                                                                            }
+                                                                        });
+                                                                }
+                                                            });
+                                                    });
+                                            }
+                                        });
+                                }
+                            }
+                        }
+                        ascent::internal::comment(
+                            "eq_proc <-- proc_indices_none_delta, proc_indices_none_total+delta, eq_proc_indices_0_1_total+delta, proc_indices_none_total+delta, proc_indices_none_total+delta, eq_proc_indices_0_1_total+delta [SIMPLE JOIN]",
+                        );
+                        {
+                            let any_rel_empty = proc_indices_none_delta
+                                .to_rel_index(&__proc_ind_common_delta)
+                                .is_empty()
+                                || ascent::internal::RelIndexCombined::new(
+                                        &proc_indices_none_total
+                                            .to_rel_index(&__proc_ind_common_total),
+                                        &proc_indices_none_delta
+                                            .to_rel_index(&__proc_ind_common_delta),
+                                    )
+                                    .is_empty()
+                                || ascent::internal::RelIndexCombined::new(
+                                        &eq_proc_indices_0_1_total
+                                            .to_rel_index(&__eq_proc_ind_common_total),
+                                        &eq_proc_indices_0_1_delta
+                                            .to_rel_index(&__eq_proc_ind_common_delta),
+                                    )
+                                    .is_empty()
+                                || ascent::internal::RelIndexCombined::new(
+                                        &proc_indices_none_total
+                                            .to_rel_index(&__proc_ind_common_total),
+                                        &proc_indices_none_delta
+                                            .to_rel_index(&__proc_ind_common_delta),
+                                    )
+                                    .is_empty()
+                                || ascent::internal::RelIndexCombined::new(
+                                        &proc_indices_none_total
+                                            .to_rel_index(&__proc_ind_common_total),
+                                        &proc_indices_none_delta
+                                            .to_rel_index(&__proc_ind_common_delta),
+                                    )
+                                    .is_empty()
+                                || ascent::internal::RelIndexCombined::new(
+                                        &eq_proc_indices_0_1_total
+                                            .to_rel_index(&__eq_proc_ind_common_total),
+                                        &eq_proc_indices_0_1_delta
+                                            .to_rel_index(&__eq_proc_ind_common_delta),
+                                    )
+                                    .is_empty();
+                            if !any_rel_empty {
+                                if proc_indices_none_delta
+                                    .to_rel_index(&__proc_ind_common_delta)
+                                    .len_estimate()
+                                    <= ascent::internal::RelIndexCombined::new(
+                                            &proc_indices_none_total
+                                                .to_rel_index(&__proc_ind_common_total),
+                                            &proc_indices_none_delta
+                                                .to_rel_index(&__proc_ind_common_delta),
+                                        )
+                                        .len_estimate()
+                                {
+                                    proc_indices_none_delta
+                                        .to_rel_index(&__proc_ind_common_delta)
+                                        .iter_all()
+                                        .for_each(|(__cl1_joined_columns, __cl1_tuple_indices)| {
+                                            let __cl1_joined_columns = __cl1_joined_columns
+                                                .tuple_of_borrowed();
+                                            if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                    &proc_indices_none_total
+                                                        .to_rel_index(&__proc_ind_common_total),
+                                                    &proc_indices_none_delta
+                                                        .to_rel_index(&__proc_ind_common_delta),
+                                                )
+                                                .index_get(&())
+                                            {
+                                                __cl1_tuple_indices
+                                                    .for_each(|cl1_val| {
+                                                        let cl1_val = cl1_val.tuple_of_borrowed();
+                                                        let x0: &Proc = cl1_val.0;
+                                                        __matching
+                                                            .clone()
+                                                            .for_each(|__val| {
+                                                                let __val = __val.tuple_of_borrowed();
+                                                                let y0: &Proc = __val.0;
+                                                                if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                                        &eq_proc_indices_0_1_total
+                                                                            .to_rel_index(&__eq_proc_ind_common_total),
+                                                                        &eq_proc_indices_0_1_delta
+                                                                            .to_rel_index(&__eq_proc_ind_common_delta),
+                                                                    )
+                                                                    .index_get(&((x0.clone()).clone(), (y0.clone()).clone()))
+                                                                {
+                                                                    __matching
+                                                                        .for_each(|__val| {
+                                                                            if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                                                    &proc_indices_none_total
+                                                                                        .to_rel_index(&__proc_ind_common_total),
+                                                                                    &proc_indices_none_delta
+                                                                                        .to_rel_index(&__proc_ind_common_delta),
+                                                                                )
+                                                                                .index_get(&())
+                                                                            {
+                                                                                __matching
+                                                                                    .for_each(|__val| {
+                                                                                        let __val = __val.tuple_of_borrowed();
+                                                                                        let x1: &Proc = __val.0;
+                                                                                        if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                                                                &proc_indices_none_total
+                                                                                                    .to_rel_index(&__proc_ind_common_total),
+                                                                                                &proc_indices_none_delta
+                                                                                                    .to_rel_index(&__proc_ind_common_delta),
+                                                                                            )
+                                                                                            .index_get(&())
+                                                                                        {
+                                                                                            __matching
+                                                                                                .for_each(|__val| {
+                                                                                                    let __val = __val.tuple_of_borrowed();
+                                                                                                    let y1: &Proc = __val.0;
+                                                                                                    if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                                                                            &eq_proc_indices_0_1_total
+                                                                                                                .to_rel_index(&__eq_proc_ind_common_total),
+                                                                                                            &eq_proc_indices_0_1_delta
+                                                                                                                .to_rel_index(&__eq_proc_ind_common_delta),
+                                                                                                        )
+                                                                                                        .index_get(&((x1.clone()).clone(), (y1.clone()).clone()))
+                                                                                                    {
+                                                                                                        __matching
+                                                                                                            .for_each(|__val| {
+                                                                                                                let __new_row: (Proc, Proc) = (
+                                                                                                                    Proc::PPar(Box::new(x0.clone()), Box::new(x1.clone())),
+                                                                                                                    Proc::PPar(Box::new(y0.clone()), Box::new(y1.clone())),
+                                                                                                                );
+                                                                                                                if !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                                                    &eq_proc_indices_0_1_total
+                                                                                                                        .to_rel_index(&__eq_proc_ind_common_total),
+                                                                                                                    &__new_row,
+                                                                                                                )
+                                                                                                                    && !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                                                        &eq_proc_indices_0_1_delta
+                                                                                                                            .to_rel_index(&__eq_proc_ind_common_delta),
+                                                                                                                        &__new_row,
+                                                                                                                    )
+                                                                                                                {
+                                                                                                                    if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
+                                                                                                                        &mut eq_proc_indices_0_1_new
+                                                                                                                            .to_rel_index_write(&mut __eq_proc_ind_common_new),
+                                                                                                                        &__new_row,
+                                                                                                                        (),
+                                                                                                                    ) {
+                                                                                                                        let __new_row_ind = _self.eq_proc.len();
+                                                                                                                        _self
+                                                                                                                            .eq_proc
+                                                                                                                            .push((__new_row.0.clone(), __new_row.1.clone()));
+                                                                                                                        ::ascent::internal::RelIndexWrite::index_insert(
+                                                                                                                            &mut eq_proc_indices_0_new
+                                                                                                                                .to_rel_index_write(&mut __eq_proc_ind_common_new),
+                                                                                                                            (__new_row.0.clone(),),
+                                                                                                                            (__new_row.1.clone(),),
+                                                                                                                        );
+                                                                                                                        __changed = true;
+                                                                                                                    }
+                                                                                                                }
+                                                                                                            });
+                                                                                                    }
+                                                                                                });
+                                                                                        }
+                                                                                    });
+                                                                            }
+                                                                        });
+                                                                }
+                                                            });
+                                                    });
+                                            }
+                                        });
+                                } else {
+                                    ascent::internal::RelIndexCombined::new(
+                                            &proc_indices_none_total
+                                                .to_rel_index(&__proc_ind_common_total),
+                                            &proc_indices_none_delta
+                                                .to_rel_index(&__proc_ind_common_delta),
+                                        )
+                                        .iter_all()
+                                        .for_each(|(__cl1_joined_columns, __cl1_tuple_indices)| {
+                                            let __cl1_joined_columns = __cl1_joined_columns
+                                                .tuple_of_borrowed();
+                                            if let Some(__matching) = proc_indices_none_delta
+                                                .to_rel_index(&__proc_ind_common_delta)
+                                                .index_get(&())
+                                            {
+                                                __cl1_tuple_indices
+                                                    .for_each(|cl1_val| {
+                                                        let cl1_val = cl1_val.tuple_of_borrowed();
+                                                        let y0: &Proc = cl1_val.0;
+                                                        __matching
+                                                            .clone()
+                                                            .for_each(|__val| {
+                                                                let __val = __val.tuple_of_borrowed();
+                                                                let x0: &Proc = __val.0;
+                                                                if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                                        &eq_proc_indices_0_1_total
+                                                                            .to_rel_index(&__eq_proc_ind_common_total),
+                                                                        &eq_proc_indices_0_1_delta
+                                                                            .to_rel_index(&__eq_proc_ind_common_delta),
+                                                                    )
+                                                                    .index_get(&((x0.clone()).clone(), (y0.clone()).clone()))
+                                                                {
+                                                                    __matching
+                                                                        .for_each(|__val| {
+                                                                            if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                                                    &proc_indices_none_total
+                                                                                        .to_rel_index(&__proc_ind_common_total),
+                                                                                    &proc_indices_none_delta
+                                                                                        .to_rel_index(&__proc_ind_common_delta),
+                                                                                )
+                                                                                .index_get(&())
+                                                                            {
+                                                                                __matching
+                                                                                    .for_each(|__val| {
+                                                                                        let __val = __val.tuple_of_borrowed();
+                                                                                        let x1: &Proc = __val.0;
+                                                                                        if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                                                                &proc_indices_none_total
+                                                                                                    .to_rel_index(&__proc_ind_common_total),
+                                                                                                &proc_indices_none_delta
+                                                                                                    .to_rel_index(&__proc_ind_common_delta),
+                                                                                            )
+                                                                                            .index_get(&())
+                                                                                        {
+                                                                                            __matching
+                                                                                                .for_each(|__val| {
+                                                                                                    let __val = __val.tuple_of_borrowed();
+                                                                                                    let y1: &Proc = __val.0;
+                                                                                                    if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                                                                            &eq_proc_indices_0_1_total
+                                                                                                                .to_rel_index(&__eq_proc_ind_common_total),
+                                                                                                            &eq_proc_indices_0_1_delta
+                                                                                                                .to_rel_index(&__eq_proc_ind_common_delta),
+                                                                                                        )
+                                                                                                        .index_get(&((x1.clone()).clone(), (y1.clone()).clone()))
+                                                                                                    {
+                                                                                                        __matching
+                                                                                                            .for_each(|__val| {
+                                                                                                                let __new_row: (Proc, Proc) = (
+                                                                                                                    Proc::PPar(Box::new(x0.clone()), Box::new(x1.clone())),
+                                                                                                                    Proc::PPar(Box::new(y0.clone()), Box::new(y1.clone())),
+                                                                                                                );
+                                                                                                                if !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                                                    &eq_proc_indices_0_1_total
+                                                                                                                        .to_rel_index(&__eq_proc_ind_common_total),
+                                                                                                                    &__new_row,
+                                                                                                                )
+                                                                                                                    && !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                                                        &eq_proc_indices_0_1_delta
+                                                                                                                            .to_rel_index(&__eq_proc_ind_common_delta),
+                                                                                                                        &__new_row,
+                                                                                                                    )
+                                                                                                                {
+                                                                                                                    if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
+                                                                                                                        &mut eq_proc_indices_0_1_new
+                                                                                                                            .to_rel_index_write(&mut __eq_proc_ind_common_new),
+                                                                                                                        &__new_row,
+                                                                                                                        (),
+                                                                                                                    ) {
+                                                                                                                        let __new_row_ind = _self.eq_proc.len();
+                                                                                                                        _self
+                                                                                                                            .eq_proc
+                                                                                                                            .push((__new_row.0.clone(), __new_row.1.clone()));
+                                                                                                                        ::ascent::internal::RelIndexWrite::index_insert(
+                                                                                                                            &mut eq_proc_indices_0_new
+                                                                                                                                .to_rel_index_write(&mut __eq_proc_ind_common_new),
+                                                                                                                            (__new_row.0.clone(),),
+                                                                                                                            (__new_row.1.clone(),),
+                                                                                                                        );
+                                                                                                                        __changed = true;
+                                                                                                                    }
+                                                                                                                }
+                                                                                                            });
+                                                                                                    }
+                                                                                                });
+                                                                                        }
+                                                                                    });
+                                                                            }
+                                                                        });
+                                                                }
+                                                            });
+                                                    });
+                                            }
+                                        });
+                                }
+                            }
+                        }
+                        ascent::internal::comment(
+                            "eq_proc <-- proc_indices_none_total, proc_indices_none_delta, eq_proc_indices_0_1_total+delta, proc_indices_none_total+delta, proc_indices_none_total+delta, eq_proc_indices_0_1_total+delta [SIMPLE JOIN]",
+                        );
+                        {
+                            let any_rel_empty = proc_indices_none_total
+                                .to_rel_index(&__proc_ind_common_total)
+                                .is_empty()
+                                || proc_indices_none_delta
+                                    .to_rel_index(&__proc_ind_common_delta)
+                                    .is_empty()
+                                || ascent::internal::RelIndexCombined::new(
+                                        &eq_proc_indices_0_1_total
+                                            .to_rel_index(&__eq_proc_ind_common_total),
+                                        &eq_proc_indices_0_1_delta
+                                            .to_rel_index(&__eq_proc_ind_common_delta),
+                                    )
+                                    .is_empty()
+                                || ascent::internal::RelIndexCombined::new(
+                                        &proc_indices_none_total
+                                            .to_rel_index(&__proc_ind_common_total),
+                                        &proc_indices_none_delta
+                                            .to_rel_index(&__proc_ind_common_delta),
+                                    )
+                                    .is_empty()
+                                || ascent::internal::RelIndexCombined::new(
+                                        &proc_indices_none_total
+                                            .to_rel_index(&__proc_ind_common_total),
+                                        &proc_indices_none_delta
+                                            .to_rel_index(&__proc_ind_common_delta),
+                                    )
+                                    .is_empty()
+                                || ascent::internal::RelIndexCombined::new(
+                                        &eq_proc_indices_0_1_total
+                                            .to_rel_index(&__eq_proc_ind_common_total),
+                                        &eq_proc_indices_0_1_delta
+                                            .to_rel_index(&__eq_proc_ind_common_delta),
+                                    )
+                                    .is_empty();
+                            if !any_rel_empty {
+                                if proc_indices_none_total
+                                    .to_rel_index(&__proc_ind_common_total)
+                                    .len_estimate()
+                                    <= proc_indices_none_delta
+                                        .to_rel_index(&__proc_ind_common_delta)
+                                        .len_estimate()
+                                {
+                                    proc_indices_none_total
+                                        .to_rel_index(&__proc_ind_common_total)
+                                        .iter_all()
+                                        .for_each(|(__cl1_joined_columns, __cl1_tuple_indices)| {
+                                            let __cl1_joined_columns = __cl1_joined_columns
+                                                .tuple_of_borrowed();
+                                            if let Some(__matching) = proc_indices_none_delta
+                                                .to_rel_index(&__proc_ind_common_delta)
+                                                .index_get(&())
+                                            {
+                                                __cl1_tuple_indices
+                                                    .for_each(|cl1_val| {
+                                                        let cl1_val = cl1_val.tuple_of_borrowed();
+                                                        let x0: &Proc = cl1_val.0;
+                                                        __matching
+                                                            .clone()
+                                                            .for_each(|__val| {
+                                                                let __val = __val.tuple_of_borrowed();
+                                                                let y0: &Proc = __val.0;
+                                                                if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                                        &eq_proc_indices_0_1_total
+                                                                            .to_rel_index(&__eq_proc_ind_common_total),
+                                                                        &eq_proc_indices_0_1_delta
+                                                                            .to_rel_index(&__eq_proc_ind_common_delta),
+                                                                    )
+                                                                    .index_get(&((x0.clone()).clone(), (y0.clone()).clone()))
+                                                                {
+                                                                    __matching
+                                                                        .for_each(|__val| {
+                                                                            if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                                                    &proc_indices_none_total
+                                                                                        .to_rel_index(&__proc_ind_common_total),
+                                                                                    &proc_indices_none_delta
+                                                                                        .to_rel_index(&__proc_ind_common_delta),
+                                                                                )
+                                                                                .index_get(&())
+                                                                            {
+                                                                                __matching
+                                                                                    .for_each(|__val| {
+                                                                                        let __val = __val.tuple_of_borrowed();
+                                                                                        let x1: &Proc = __val.0;
+                                                                                        if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                                                                &proc_indices_none_total
+                                                                                                    .to_rel_index(&__proc_ind_common_total),
+                                                                                                &proc_indices_none_delta
+                                                                                                    .to_rel_index(&__proc_ind_common_delta),
+                                                                                            )
+                                                                                            .index_get(&())
+                                                                                        {
+                                                                                            __matching
+                                                                                                .for_each(|__val| {
+                                                                                                    let __val = __val.tuple_of_borrowed();
+                                                                                                    let y1: &Proc = __val.0;
+                                                                                                    if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                                                                            &eq_proc_indices_0_1_total
+                                                                                                                .to_rel_index(&__eq_proc_ind_common_total),
+                                                                                                            &eq_proc_indices_0_1_delta
+                                                                                                                .to_rel_index(&__eq_proc_ind_common_delta),
+                                                                                                        )
+                                                                                                        .index_get(&((x1.clone()).clone(), (y1.clone()).clone()))
+                                                                                                    {
+                                                                                                        __matching
+                                                                                                            .for_each(|__val| {
+                                                                                                                let __new_row: (Proc, Proc) = (
+                                                                                                                    Proc::PPar(Box::new(x0.clone()), Box::new(x1.clone())),
+                                                                                                                    Proc::PPar(Box::new(y0.clone()), Box::new(y1.clone())),
+                                                                                                                );
+                                                                                                                if !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                                                    &eq_proc_indices_0_1_total
+                                                                                                                        .to_rel_index(&__eq_proc_ind_common_total),
+                                                                                                                    &__new_row,
+                                                                                                                )
+                                                                                                                    && !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                                                        &eq_proc_indices_0_1_delta
+                                                                                                                            .to_rel_index(&__eq_proc_ind_common_delta),
+                                                                                                                        &__new_row,
+                                                                                                                    )
+                                                                                                                {
+                                                                                                                    if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
+                                                                                                                        &mut eq_proc_indices_0_1_new
+                                                                                                                            .to_rel_index_write(&mut __eq_proc_ind_common_new),
+                                                                                                                        &__new_row,
+                                                                                                                        (),
+                                                                                                                    ) {
+                                                                                                                        let __new_row_ind = _self.eq_proc.len();
+                                                                                                                        _self
+                                                                                                                            .eq_proc
+                                                                                                                            .push((__new_row.0.clone(), __new_row.1.clone()));
+                                                                                                                        ::ascent::internal::RelIndexWrite::index_insert(
+                                                                                                                            &mut eq_proc_indices_0_new
+                                                                                                                                .to_rel_index_write(&mut __eq_proc_ind_common_new),
+                                                                                                                            (__new_row.0.clone(),),
+                                                                                                                            (__new_row.1.clone(),),
+                                                                                                                        );
+                                                                                                                        __changed = true;
+                                                                                                                    }
+                                                                                                                }
+                                                                                                            });
+                                                                                                    }
+                                                                                                });
+                                                                                        }
+                                                                                    });
+                                                                            }
+                                                                        });
+                                                                }
+                                                            });
+                                                    });
+                                            }
+                                        });
+                                } else {
+                                    proc_indices_none_delta
+                                        .to_rel_index(&__proc_ind_common_delta)
+                                        .iter_all()
+                                        .for_each(|(__cl1_joined_columns, __cl1_tuple_indices)| {
+                                            let __cl1_joined_columns = __cl1_joined_columns
+                                                .tuple_of_borrowed();
+                                            if let Some(__matching) = proc_indices_none_total
+                                                .to_rel_index(&__proc_ind_common_total)
+                                                .index_get(&())
+                                            {
+                                                __cl1_tuple_indices
+                                                    .for_each(|cl1_val| {
+                                                        let cl1_val = cl1_val.tuple_of_borrowed();
+                                                        let y0: &Proc = cl1_val.0;
+                                                        __matching
+                                                            .clone()
+                                                            .for_each(|__val| {
+                                                                let __val = __val.tuple_of_borrowed();
+                                                                let x0: &Proc = __val.0;
+                                                                if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                                        &eq_proc_indices_0_1_total
+                                                                            .to_rel_index(&__eq_proc_ind_common_total),
+                                                                        &eq_proc_indices_0_1_delta
+                                                                            .to_rel_index(&__eq_proc_ind_common_delta),
+                                                                    )
+                                                                    .index_get(&((x0.clone()).clone(), (y0.clone()).clone()))
+                                                                {
+                                                                    __matching
+                                                                        .for_each(|__val| {
+                                                                            if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                                                    &proc_indices_none_total
+                                                                                        .to_rel_index(&__proc_ind_common_total),
+                                                                                    &proc_indices_none_delta
+                                                                                        .to_rel_index(&__proc_ind_common_delta),
+                                                                                )
+                                                                                .index_get(&())
+                                                                            {
+                                                                                __matching
+                                                                                    .for_each(|__val| {
+                                                                                        let __val = __val.tuple_of_borrowed();
+                                                                                        let x1: &Proc = __val.0;
+                                                                                        if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                                                                &proc_indices_none_total
+                                                                                                    .to_rel_index(&__proc_ind_common_total),
+                                                                                                &proc_indices_none_delta
+                                                                                                    .to_rel_index(&__proc_ind_common_delta),
+                                                                                            )
+                                                                                            .index_get(&())
+                                                                                        {
+                                                                                            __matching
+                                                                                                .for_each(|__val| {
+                                                                                                    let __val = __val.tuple_of_borrowed();
+                                                                                                    let y1: &Proc = __val.0;
+                                                                                                    if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                                                                            &eq_proc_indices_0_1_total
+                                                                                                                .to_rel_index(&__eq_proc_ind_common_total),
+                                                                                                            &eq_proc_indices_0_1_delta
+                                                                                                                .to_rel_index(&__eq_proc_ind_common_delta),
+                                                                                                        )
+                                                                                                        .index_get(&((x1.clone()).clone(), (y1.clone()).clone()))
+                                                                                                    {
+                                                                                                        __matching
+                                                                                                            .for_each(|__val| {
+                                                                                                                let __new_row: (Proc, Proc) = (
+                                                                                                                    Proc::PPar(Box::new(x0.clone()), Box::new(x1.clone())),
+                                                                                                                    Proc::PPar(Box::new(y0.clone()), Box::new(y1.clone())),
+                                                                                                                );
+                                                                                                                if !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                                                    &eq_proc_indices_0_1_total
+                                                                                                                        .to_rel_index(&__eq_proc_ind_common_total),
+                                                                                                                    &__new_row,
+                                                                                                                )
+                                                                                                                    && !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                                                        &eq_proc_indices_0_1_delta
+                                                                                                                            .to_rel_index(&__eq_proc_ind_common_delta),
+                                                                                                                        &__new_row,
+                                                                                                                    )
+                                                                                                                {
+                                                                                                                    if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
+                                                                                                                        &mut eq_proc_indices_0_1_new
+                                                                                                                            .to_rel_index_write(&mut __eq_proc_ind_common_new),
+                                                                                                                        &__new_row,
+                                                                                                                        (),
+                                                                                                                    ) {
+                                                                                                                        let __new_row_ind = _self.eq_proc.len();
+                                                                                                                        _self
+                                                                                                                            .eq_proc
+                                                                                                                            .push((__new_row.0.clone(), __new_row.1.clone()));
+                                                                                                                        ::ascent::internal::RelIndexWrite::index_insert(
+                                                                                                                            &mut eq_proc_indices_0_new
+                                                                                                                                .to_rel_index_write(&mut __eq_proc_ind_common_new),
+                                                                                                                            (__new_row.0.clone(),),
+                                                                                                                            (__new_row.1.clone(),),
+                                                                                                                        );
+                                                                                                                        __changed = true;
+                                                                                                                    }
+                                                                                                                }
+                                                                                                            });
+                                                                                                    }
+                                                                                                });
+                                                                                        }
+                                                                                    });
+                                                                            }
+                                                                        });
+                                                                }
+                                                            });
+                                                    });
+                                            }
+                                        });
+                                }
+                            }
+                        }
+                        ascent::internal::comment(
+                            "eq_proc <-- proc_indices_none_total, proc_indices_none_total, eq_proc_indices_0_1_delta, proc_indices_none_total+delta, proc_indices_none_total+delta, eq_proc_indices_0_1_total+delta [SIMPLE JOIN]",
+                        );
+                        {
+                            let any_rel_empty = proc_indices_none_total
+                                .to_rel_index(&__proc_ind_common_total)
+                                .is_empty()
+                                || proc_indices_none_total
+                                    .to_rel_index(&__proc_ind_common_total)
+                                    .is_empty()
+                                || eq_proc_indices_0_1_delta
+                                    .to_rel_index(&__eq_proc_ind_common_delta)
+                                    .is_empty()
+                                || ascent::internal::RelIndexCombined::new(
+                                        &proc_indices_none_total
+                                            .to_rel_index(&__proc_ind_common_total),
+                                        &proc_indices_none_delta
+                                            .to_rel_index(&__proc_ind_common_delta),
+                                    )
+                                    .is_empty()
+                                || ascent::internal::RelIndexCombined::new(
+                                        &proc_indices_none_total
+                                            .to_rel_index(&__proc_ind_common_total),
+                                        &proc_indices_none_delta
+                                            .to_rel_index(&__proc_ind_common_delta),
+                                    )
+                                    .is_empty()
+                                || ascent::internal::RelIndexCombined::new(
+                                        &eq_proc_indices_0_1_total
+                                            .to_rel_index(&__eq_proc_ind_common_total),
+                                        &eq_proc_indices_0_1_delta
+                                            .to_rel_index(&__eq_proc_ind_common_delta),
+                                    )
+                                    .is_empty();
+                            if !any_rel_empty {
+                                if proc_indices_none_total
+                                    .to_rel_index(&__proc_ind_common_total)
+                                    .len_estimate()
+                                    <= proc_indices_none_total
+                                        .to_rel_index(&__proc_ind_common_total)
+                                        .len_estimate()
+                                {
+                                    proc_indices_none_total
+                                        .to_rel_index(&__proc_ind_common_total)
+                                        .iter_all()
+                                        .for_each(|(__cl1_joined_columns, __cl1_tuple_indices)| {
+                                            let __cl1_joined_columns = __cl1_joined_columns
+                                                .tuple_of_borrowed();
+                                            if let Some(__matching) = proc_indices_none_total
+                                                .to_rel_index(&__proc_ind_common_total)
+                                                .index_get(&())
+                                            {
+                                                __cl1_tuple_indices
+                                                    .for_each(|cl1_val| {
+                                                        let cl1_val = cl1_val.tuple_of_borrowed();
+                                                        let x0: &Proc = cl1_val.0;
+                                                        __matching
+                                                            .clone()
+                                                            .for_each(|__val| {
+                                                                let __val = __val.tuple_of_borrowed();
+                                                                let y0: &Proc = __val.0;
+                                                                if let Some(__matching) = eq_proc_indices_0_1_delta
+                                                                    .to_rel_index(&__eq_proc_ind_common_delta)
+                                                                    .index_get(&((x0.clone()).clone(), (y0.clone()).clone()))
+                                                                {
+                                                                    __matching
+                                                                        .for_each(|__val| {
+                                                                            if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                                                    &proc_indices_none_total
+                                                                                        .to_rel_index(&__proc_ind_common_total),
+                                                                                    &proc_indices_none_delta
+                                                                                        .to_rel_index(&__proc_ind_common_delta),
+                                                                                )
+                                                                                .index_get(&())
+                                                                            {
+                                                                                __matching
+                                                                                    .for_each(|__val| {
+                                                                                        let __val = __val.tuple_of_borrowed();
+                                                                                        let x1: &Proc = __val.0;
+                                                                                        if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                                                                &proc_indices_none_total
+                                                                                                    .to_rel_index(&__proc_ind_common_total),
+                                                                                                &proc_indices_none_delta
+                                                                                                    .to_rel_index(&__proc_ind_common_delta),
+                                                                                            )
+                                                                                            .index_get(&())
+                                                                                        {
+                                                                                            __matching
+                                                                                                .for_each(|__val| {
+                                                                                                    let __val = __val.tuple_of_borrowed();
+                                                                                                    let y1: &Proc = __val.0;
+                                                                                                    if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                                                                            &eq_proc_indices_0_1_total
+                                                                                                                .to_rel_index(&__eq_proc_ind_common_total),
+                                                                                                            &eq_proc_indices_0_1_delta
+                                                                                                                .to_rel_index(&__eq_proc_ind_common_delta),
+                                                                                                        )
+                                                                                                        .index_get(&((x1.clone()).clone(), (y1.clone()).clone()))
+                                                                                                    {
+                                                                                                        __matching
+                                                                                                            .for_each(|__val| {
+                                                                                                                let __new_row: (Proc, Proc) = (
+                                                                                                                    Proc::PPar(Box::new(x0.clone()), Box::new(x1.clone())),
+                                                                                                                    Proc::PPar(Box::new(y0.clone()), Box::new(y1.clone())),
+                                                                                                                );
+                                                                                                                if !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                                                    &eq_proc_indices_0_1_total
+                                                                                                                        .to_rel_index(&__eq_proc_ind_common_total),
+                                                                                                                    &__new_row,
+                                                                                                                )
+                                                                                                                    && !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                                                        &eq_proc_indices_0_1_delta
+                                                                                                                            .to_rel_index(&__eq_proc_ind_common_delta),
+                                                                                                                        &__new_row,
+                                                                                                                    )
+                                                                                                                {
+                                                                                                                    if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
+                                                                                                                        &mut eq_proc_indices_0_1_new
+                                                                                                                            .to_rel_index_write(&mut __eq_proc_ind_common_new),
+                                                                                                                        &__new_row,
+                                                                                                                        (),
+                                                                                                                    ) {
+                                                                                                                        let __new_row_ind = _self.eq_proc.len();
+                                                                                                                        _self
+                                                                                                                            .eq_proc
+                                                                                                                            .push((__new_row.0.clone(), __new_row.1.clone()));
+                                                                                                                        ::ascent::internal::RelIndexWrite::index_insert(
+                                                                                                                            &mut eq_proc_indices_0_new
+                                                                                                                                .to_rel_index_write(&mut __eq_proc_ind_common_new),
+                                                                                                                            (__new_row.0.clone(),),
+                                                                                                                            (__new_row.1.clone(),),
+                                                                                                                        );
+                                                                                                                        __changed = true;
+                                                                                                                    }
+                                                                                                                }
+                                                                                                            });
+                                                                                                    }
+                                                                                                });
+                                                                                        }
+                                                                                    });
+                                                                            }
+                                                                        });
+                                                                }
+                                                            });
+                                                    });
+                                            }
+                                        });
+                                } else {
+                                    proc_indices_none_total
+                                        .to_rel_index(&__proc_ind_common_total)
+                                        .iter_all()
+                                        .for_each(|(__cl1_joined_columns, __cl1_tuple_indices)| {
+                                            let __cl1_joined_columns = __cl1_joined_columns
+                                                .tuple_of_borrowed();
+                                            if let Some(__matching) = proc_indices_none_total
+                                                .to_rel_index(&__proc_ind_common_total)
+                                                .index_get(&())
+                                            {
+                                                __cl1_tuple_indices
+                                                    .for_each(|cl1_val| {
+                                                        let cl1_val = cl1_val.tuple_of_borrowed();
+                                                        let y0: &Proc = cl1_val.0;
+                                                        __matching
+                                                            .clone()
+                                                            .for_each(|__val| {
+                                                                let __val = __val.tuple_of_borrowed();
+                                                                let x0: &Proc = __val.0;
+                                                                if let Some(__matching) = eq_proc_indices_0_1_delta
+                                                                    .to_rel_index(&__eq_proc_ind_common_delta)
+                                                                    .index_get(&((x0.clone()).clone(), (y0.clone()).clone()))
+                                                                {
+                                                                    __matching
+                                                                        .for_each(|__val| {
+                                                                            if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                                                    &proc_indices_none_total
+                                                                                        .to_rel_index(&__proc_ind_common_total),
+                                                                                    &proc_indices_none_delta
+                                                                                        .to_rel_index(&__proc_ind_common_delta),
+                                                                                )
+                                                                                .index_get(&())
+                                                                            {
+                                                                                __matching
+                                                                                    .for_each(|__val| {
+                                                                                        let __val = __val.tuple_of_borrowed();
+                                                                                        let x1: &Proc = __val.0;
+                                                                                        if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                                                                &proc_indices_none_total
+                                                                                                    .to_rel_index(&__proc_ind_common_total),
+                                                                                                &proc_indices_none_delta
+                                                                                                    .to_rel_index(&__proc_ind_common_delta),
+                                                                                            )
+                                                                                            .index_get(&())
+                                                                                        {
+                                                                                            __matching
+                                                                                                .for_each(|__val| {
+                                                                                                    let __val = __val.tuple_of_borrowed();
+                                                                                                    let y1: &Proc = __val.0;
+                                                                                                    if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                                                                            &eq_proc_indices_0_1_total
+                                                                                                                .to_rel_index(&__eq_proc_ind_common_total),
+                                                                                                            &eq_proc_indices_0_1_delta
+                                                                                                                .to_rel_index(&__eq_proc_ind_common_delta),
+                                                                                                        )
+                                                                                                        .index_get(&((x1.clone()).clone(), (y1.clone()).clone()))
+                                                                                                    {
+                                                                                                        __matching
+                                                                                                            .for_each(|__val| {
+                                                                                                                let __new_row: (Proc, Proc) = (
+                                                                                                                    Proc::PPar(Box::new(x0.clone()), Box::new(x1.clone())),
+                                                                                                                    Proc::PPar(Box::new(y0.clone()), Box::new(y1.clone())),
+                                                                                                                );
+                                                                                                                if !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                                                    &eq_proc_indices_0_1_total
+                                                                                                                        .to_rel_index(&__eq_proc_ind_common_total),
+                                                                                                                    &__new_row,
+                                                                                                                )
+                                                                                                                    && !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                                                        &eq_proc_indices_0_1_delta
+                                                                                                                            .to_rel_index(&__eq_proc_ind_common_delta),
+                                                                                                                        &__new_row,
+                                                                                                                    )
+                                                                                                                {
+                                                                                                                    if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
+                                                                                                                        &mut eq_proc_indices_0_1_new
+                                                                                                                            .to_rel_index_write(&mut __eq_proc_ind_common_new),
+                                                                                                                        &__new_row,
+                                                                                                                        (),
+                                                                                                                    ) {
+                                                                                                                        let __new_row_ind = _self.eq_proc.len();
+                                                                                                                        _self
+                                                                                                                            .eq_proc
+                                                                                                                            .push((__new_row.0.clone(), __new_row.1.clone()));
+                                                                                                                        ::ascent::internal::RelIndexWrite::index_insert(
+                                                                                                                            &mut eq_proc_indices_0_new
+                                                                                                                                .to_rel_index_write(&mut __eq_proc_ind_common_new),
+                                                                                                                            (__new_row.0.clone(),),
+                                                                                                                            (__new_row.1.clone(),),
+                                                                                                                        );
+                                                                                                                        __changed = true;
+                                                                                                                    }
+                                                                                                                }
+                                                                                                            });
+                                                                                                    }
+                                                                                                });
+                                                                                        }
+                                                                                    });
+                                                                            }
+                                                                        });
+                                                                }
+                                                            });
+                                                    });
+                                            }
+                                        });
+                                }
+                            }
+                        }
+                        ascent::internal::comment(
+                            "eq_proc <-- proc_indices_none_total, proc_indices_none_total, eq_proc_indices_0_1_total, proc_indices_none_delta, proc_indices_none_total+delta, eq_proc_indices_0_1_total+delta [SIMPLE JOIN]",
+                        );
+                        {
+                            let any_rel_empty = proc_indices_none_total
+                                .to_rel_index(&__proc_ind_common_total)
+                                .is_empty()
+                                || proc_indices_none_total
+                                    .to_rel_index(&__proc_ind_common_total)
+                                    .is_empty()
+                                || eq_proc_indices_0_1_total
+                                    .to_rel_index(&__eq_proc_ind_common_total)
+                                    .is_empty()
+                                || proc_indices_none_delta
+                                    .to_rel_index(&__proc_ind_common_delta)
+                                    .is_empty()
+                                || ascent::internal::RelIndexCombined::new(
+                                        &proc_indices_none_total
+                                            .to_rel_index(&__proc_ind_common_total),
+                                        &proc_indices_none_delta
+                                            .to_rel_index(&__proc_ind_common_delta),
+                                    )
+                                    .is_empty()
+                                || ascent::internal::RelIndexCombined::new(
+                                        &eq_proc_indices_0_1_total
+                                            .to_rel_index(&__eq_proc_ind_common_total),
+                                        &eq_proc_indices_0_1_delta
+                                            .to_rel_index(&__eq_proc_ind_common_delta),
+                                    )
+                                    .is_empty();
+                            if !any_rel_empty {
+                                if proc_indices_none_total
+                                    .to_rel_index(&__proc_ind_common_total)
+                                    .len_estimate()
+                                    <= proc_indices_none_total
+                                        .to_rel_index(&__proc_ind_common_total)
+                                        .len_estimate()
+                                {
+                                    proc_indices_none_total
+                                        .to_rel_index(&__proc_ind_common_total)
+                                        .iter_all()
+                                        .for_each(|(__cl1_joined_columns, __cl1_tuple_indices)| {
+                                            let __cl1_joined_columns = __cl1_joined_columns
+                                                .tuple_of_borrowed();
+                                            if let Some(__matching) = proc_indices_none_total
+                                                .to_rel_index(&__proc_ind_common_total)
+                                                .index_get(&())
+                                            {
+                                                __cl1_tuple_indices
+                                                    .for_each(|cl1_val| {
+                                                        let cl1_val = cl1_val.tuple_of_borrowed();
+                                                        let x0: &Proc = cl1_val.0;
+                                                        __matching
+                                                            .clone()
+                                                            .for_each(|__val| {
+                                                                let __val = __val.tuple_of_borrowed();
+                                                                let y0: &Proc = __val.0;
+                                                                if let Some(__matching) = eq_proc_indices_0_1_total
+                                                                    .to_rel_index(&__eq_proc_ind_common_total)
+                                                                    .index_get(&((x0.clone()).clone(), (y0.clone()).clone()))
+                                                                {
+                                                                    __matching
+                                                                        .for_each(|__val| {
+                                                                            if let Some(__matching) = proc_indices_none_delta
+                                                                                .to_rel_index(&__proc_ind_common_delta)
+                                                                                .index_get(&())
+                                                                            {
+                                                                                __matching
+                                                                                    .for_each(|__val| {
+                                                                                        let __val = __val.tuple_of_borrowed();
+                                                                                        let x1: &Proc = __val.0;
+                                                                                        if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                                                                &proc_indices_none_total
+                                                                                                    .to_rel_index(&__proc_ind_common_total),
+                                                                                                &proc_indices_none_delta
+                                                                                                    .to_rel_index(&__proc_ind_common_delta),
+                                                                                            )
+                                                                                            .index_get(&())
+                                                                                        {
+                                                                                            __matching
+                                                                                                .for_each(|__val| {
+                                                                                                    let __val = __val.tuple_of_borrowed();
+                                                                                                    let y1: &Proc = __val.0;
+                                                                                                    if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                                                                            &eq_proc_indices_0_1_total
+                                                                                                                .to_rel_index(&__eq_proc_ind_common_total),
+                                                                                                            &eq_proc_indices_0_1_delta
+                                                                                                                .to_rel_index(&__eq_proc_ind_common_delta),
+                                                                                                        )
+                                                                                                        .index_get(&((x1.clone()).clone(), (y1.clone()).clone()))
+                                                                                                    {
+                                                                                                        __matching
+                                                                                                            .for_each(|__val| {
+                                                                                                                let __new_row: (Proc, Proc) = (
+                                                                                                                    Proc::PPar(Box::new(x0.clone()), Box::new(x1.clone())),
+                                                                                                                    Proc::PPar(Box::new(y0.clone()), Box::new(y1.clone())),
+                                                                                                                );
+                                                                                                                if !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                                                    &eq_proc_indices_0_1_total
+                                                                                                                        .to_rel_index(&__eq_proc_ind_common_total),
+                                                                                                                    &__new_row,
+                                                                                                                )
+                                                                                                                    && !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                                                        &eq_proc_indices_0_1_delta
+                                                                                                                            .to_rel_index(&__eq_proc_ind_common_delta),
+                                                                                                                        &__new_row,
+                                                                                                                    )
+                                                                                                                {
+                                                                                                                    if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
+                                                                                                                        &mut eq_proc_indices_0_1_new
+                                                                                                                            .to_rel_index_write(&mut __eq_proc_ind_common_new),
+                                                                                                                        &__new_row,
+                                                                                                                        (),
+                                                                                                                    ) {
+                                                                                                                        let __new_row_ind = _self.eq_proc.len();
+                                                                                                                        _self
+                                                                                                                            .eq_proc
+                                                                                                                            .push((__new_row.0.clone(), __new_row.1.clone()));
+                                                                                                                        ::ascent::internal::RelIndexWrite::index_insert(
+                                                                                                                            &mut eq_proc_indices_0_new
+                                                                                                                                .to_rel_index_write(&mut __eq_proc_ind_common_new),
+                                                                                                                            (__new_row.0.clone(),),
+                                                                                                                            (__new_row.1.clone(),),
+                                                                                                                        );
+                                                                                                                        __changed = true;
+                                                                                                                    }
+                                                                                                                }
+                                                                                                            });
+                                                                                                    }
+                                                                                                });
+                                                                                        }
+                                                                                    });
+                                                                            }
+                                                                        });
+                                                                }
+                                                            });
+                                                    });
+                                            }
+                                        });
+                                } else {
+                                    proc_indices_none_total
+                                        .to_rel_index(&__proc_ind_common_total)
+                                        .iter_all()
+                                        .for_each(|(__cl1_joined_columns, __cl1_tuple_indices)| {
+                                            let __cl1_joined_columns = __cl1_joined_columns
+                                                .tuple_of_borrowed();
+                                            if let Some(__matching) = proc_indices_none_total
+                                                .to_rel_index(&__proc_ind_common_total)
+                                                .index_get(&())
+                                            {
+                                                __cl1_tuple_indices
+                                                    .for_each(|cl1_val| {
+                                                        let cl1_val = cl1_val.tuple_of_borrowed();
+                                                        let y0: &Proc = cl1_val.0;
+                                                        __matching
+                                                            .clone()
+                                                            .for_each(|__val| {
+                                                                let __val = __val.tuple_of_borrowed();
+                                                                let x0: &Proc = __val.0;
+                                                                if let Some(__matching) = eq_proc_indices_0_1_total
+                                                                    .to_rel_index(&__eq_proc_ind_common_total)
+                                                                    .index_get(&((x0.clone()).clone(), (y0.clone()).clone()))
+                                                                {
+                                                                    __matching
+                                                                        .for_each(|__val| {
+                                                                            if let Some(__matching) = proc_indices_none_delta
+                                                                                .to_rel_index(&__proc_ind_common_delta)
+                                                                                .index_get(&())
+                                                                            {
+                                                                                __matching
+                                                                                    .for_each(|__val| {
+                                                                                        let __val = __val.tuple_of_borrowed();
+                                                                                        let x1: &Proc = __val.0;
+                                                                                        if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                                                                &proc_indices_none_total
+                                                                                                    .to_rel_index(&__proc_ind_common_total),
+                                                                                                &proc_indices_none_delta
+                                                                                                    .to_rel_index(&__proc_ind_common_delta),
+                                                                                            )
+                                                                                            .index_get(&())
+                                                                                        {
+                                                                                            __matching
+                                                                                                .for_each(|__val| {
+                                                                                                    let __val = __val.tuple_of_borrowed();
+                                                                                                    let y1: &Proc = __val.0;
+                                                                                                    if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                                                                            &eq_proc_indices_0_1_total
+                                                                                                                .to_rel_index(&__eq_proc_ind_common_total),
+                                                                                                            &eq_proc_indices_0_1_delta
+                                                                                                                .to_rel_index(&__eq_proc_ind_common_delta),
+                                                                                                        )
+                                                                                                        .index_get(&((x1.clone()).clone(), (y1.clone()).clone()))
+                                                                                                    {
+                                                                                                        __matching
+                                                                                                            .for_each(|__val| {
+                                                                                                                let __new_row: (Proc, Proc) = (
+                                                                                                                    Proc::PPar(Box::new(x0.clone()), Box::new(x1.clone())),
+                                                                                                                    Proc::PPar(Box::new(y0.clone()), Box::new(y1.clone())),
+                                                                                                                );
+                                                                                                                if !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                                                    &eq_proc_indices_0_1_total
+                                                                                                                        .to_rel_index(&__eq_proc_ind_common_total),
+                                                                                                                    &__new_row,
+                                                                                                                )
+                                                                                                                    && !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                                                        &eq_proc_indices_0_1_delta
+                                                                                                                            .to_rel_index(&__eq_proc_ind_common_delta),
+                                                                                                                        &__new_row,
+                                                                                                                    )
+                                                                                                                {
+                                                                                                                    if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
+                                                                                                                        &mut eq_proc_indices_0_1_new
+                                                                                                                            .to_rel_index_write(&mut __eq_proc_ind_common_new),
+                                                                                                                        &__new_row,
+                                                                                                                        (),
+                                                                                                                    ) {
+                                                                                                                        let __new_row_ind = _self.eq_proc.len();
+                                                                                                                        _self
+                                                                                                                            .eq_proc
+                                                                                                                            .push((__new_row.0.clone(), __new_row.1.clone()));
+                                                                                                                        ::ascent::internal::RelIndexWrite::index_insert(
+                                                                                                                            &mut eq_proc_indices_0_new
+                                                                                                                                .to_rel_index_write(&mut __eq_proc_ind_common_new),
+                                                                                                                            (__new_row.0.clone(),),
+                                                                                                                            (__new_row.1.clone(),),
+                                                                                                                        );
+                                                                                                                        __changed = true;
+                                                                                                                    }
+                                                                                                                }
+                                                                                                            });
+                                                                                                    }
+                                                                                                });
+                                                                                        }
+                                                                                    });
+                                                                            }
+                                                                        });
+                                                                }
+                                                            });
+                                                    });
+                                            }
+                                        });
+                                }
+                            }
+                        }
+                        ascent::internal::comment(
+                            "eq_proc <-- proc_indices_none_total, proc_indices_none_total, eq_proc_indices_0_1_total, proc_indices_none_total, proc_indices_none_delta, eq_proc_indices_0_1_total+delta [SIMPLE JOIN]",
+                        );
+                        {
+                            let any_rel_empty = proc_indices_none_total
+                                .to_rel_index(&__proc_ind_common_total)
+                                .is_empty()
+                                || proc_indices_none_total
+                                    .to_rel_index(&__proc_ind_common_total)
+                                    .is_empty()
+                                || eq_proc_indices_0_1_total
+                                    .to_rel_index(&__eq_proc_ind_common_total)
+                                    .is_empty()
+                                || proc_indices_none_total
+                                    .to_rel_index(&__proc_ind_common_total)
+                                    .is_empty()
+                                || proc_indices_none_delta
+                                    .to_rel_index(&__proc_ind_common_delta)
+                                    .is_empty()
+                                || ascent::internal::RelIndexCombined::new(
+                                        &eq_proc_indices_0_1_total
+                                            .to_rel_index(&__eq_proc_ind_common_total),
+                                        &eq_proc_indices_0_1_delta
+                                            .to_rel_index(&__eq_proc_ind_common_delta),
+                                    )
+                                    .is_empty();
+                            if !any_rel_empty {
+                                if proc_indices_none_total
+                                    .to_rel_index(&__proc_ind_common_total)
+                                    .len_estimate()
+                                    <= proc_indices_none_total
+                                        .to_rel_index(&__proc_ind_common_total)
+                                        .len_estimate()
+                                {
+                                    proc_indices_none_total
+                                        .to_rel_index(&__proc_ind_common_total)
+                                        .iter_all()
+                                        .for_each(|(__cl1_joined_columns, __cl1_tuple_indices)| {
+                                            let __cl1_joined_columns = __cl1_joined_columns
+                                                .tuple_of_borrowed();
+                                            if let Some(__matching) = proc_indices_none_total
+                                                .to_rel_index(&__proc_ind_common_total)
+                                                .index_get(&())
+                                            {
+                                                __cl1_tuple_indices
+                                                    .for_each(|cl1_val| {
+                                                        let cl1_val = cl1_val.tuple_of_borrowed();
+                                                        let x0: &Proc = cl1_val.0;
+                                                        __matching
+                                                            .clone()
+                                                            .for_each(|__val| {
+                                                                let __val = __val.tuple_of_borrowed();
+                                                                let y0: &Proc = __val.0;
+                                                                if let Some(__matching) = eq_proc_indices_0_1_total
+                                                                    .to_rel_index(&__eq_proc_ind_common_total)
+                                                                    .index_get(&((x0.clone()).clone(), (y0.clone()).clone()))
+                                                                {
+                                                                    __matching
+                                                                        .for_each(|__val| {
+                                                                            if let Some(__matching) = proc_indices_none_total
+                                                                                .to_rel_index(&__proc_ind_common_total)
+                                                                                .index_get(&())
+                                                                            {
+                                                                                __matching
+                                                                                    .for_each(|__val| {
+                                                                                        let __val = __val.tuple_of_borrowed();
+                                                                                        let x1: &Proc = __val.0;
+                                                                                        if let Some(__matching) = proc_indices_none_delta
+                                                                                            .to_rel_index(&__proc_ind_common_delta)
+                                                                                            .index_get(&())
+                                                                                        {
+                                                                                            __matching
+                                                                                                .for_each(|__val| {
+                                                                                                    let __val = __val.tuple_of_borrowed();
+                                                                                                    let y1: &Proc = __val.0;
+                                                                                                    if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                                                                            &eq_proc_indices_0_1_total
+                                                                                                                .to_rel_index(&__eq_proc_ind_common_total),
+                                                                                                            &eq_proc_indices_0_1_delta
+                                                                                                                .to_rel_index(&__eq_proc_ind_common_delta),
+                                                                                                        )
+                                                                                                        .index_get(&((x1.clone()).clone(), (y1.clone()).clone()))
+                                                                                                    {
+                                                                                                        __matching
+                                                                                                            .for_each(|__val| {
+                                                                                                                let __new_row: (Proc, Proc) = (
+                                                                                                                    Proc::PPar(Box::new(x0.clone()), Box::new(x1.clone())),
+                                                                                                                    Proc::PPar(Box::new(y0.clone()), Box::new(y1.clone())),
+                                                                                                                );
+                                                                                                                if !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                                                    &eq_proc_indices_0_1_total
+                                                                                                                        .to_rel_index(&__eq_proc_ind_common_total),
+                                                                                                                    &__new_row,
+                                                                                                                )
+                                                                                                                    && !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                                                        &eq_proc_indices_0_1_delta
+                                                                                                                            .to_rel_index(&__eq_proc_ind_common_delta),
+                                                                                                                        &__new_row,
+                                                                                                                    )
+                                                                                                                {
+                                                                                                                    if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
+                                                                                                                        &mut eq_proc_indices_0_1_new
+                                                                                                                            .to_rel_index_write(&mut __eq_proc_ind_common_new),
+                                                                                                                        &__new_row,
+                                                                                                                        (),
+                                                                                                                    ) {
+                                                                                                                        let __new_row_ind = _self.eq_proc.len();
+                                                                                                                        _self
+                                                                                                                            .eq_proc
+                                                                                                                            .push((__new_row.0.clone(), __new_row.1.clone()));
+                                                                                                                        ::ascent::internal::RelIndexWrite::index_insert(
+                                                                                                                            &mut eq_proc_indices_0_new
+                                                                                                                                .to_rel_index_write(&mut __eq_proc_ind_common_new),
+                                                                                                                            (__new_row.0.clone(),),
+                                                                                                                            (__new_row.1.clone(),),
+                                                                                                                        );
+                                                                                                                        __changed = true;
+                                                                                                                    }
+                                                                                                                }
+                                                                                                            });
+                                                                                                    }
+                                                                                                });
+                                                                                        }
+                                                                                    });
+                                                                            }
+                                                                        });
+                                                                }
+                                                            });
+                                                    });
+                                            }
+                                        });
+                                } else {
+                                    proc_indices_none_total
+                                        .to_rel_index(&__proc_ind_common_total)
+                                        .iter_all()
+                                        .for_each(|(__cl1_joined_columns, __cl1_tuple_indices)| {
+                                            let __cl1_joined_columns = __cl1_joined_columns
+                                                .tuple_of_borrowed();
+                                            if let Some(__matching) = proc_indices_none_total
+                                                .to_rel_index(&__proc_ind_common_total)
+                                                .index_get(&())
+                                            {
+                                                __cl1_tuple_indices
+                                                    .for_each(|cl1_val| {
+                                                        let cl1_val = cl1_val.tuple_of_borrowed();
+                                                        let y0: &Proc = cl1_val.0;
+                                                        __matching
+                                                            .clone()
+                                                            .for_each(|__val| {
+                                                                let __val = __val.tuple_of_borrowed();
+                                                                let x0: &Proc = __val.0;
+                                                                if let Some(__matching) = eq_proc_indices_0_1_total
+                                                                    .to_rel_index(&__eq_proc_ind_common_total)
+                                                                    .index_get(&((x0.clone()).clone(), (y0.clone()).clone()))
+                                                                {
+                                                                    __matching
+                                                                        .for_each(|__val| {
+                                                                            if let Some(__matching) = proc_indices_none_total
+                                                                                .to_rel_index(&__proc_ind_common_total)
+                                                                                .index_get(&())
+                                                                            {
+                                                                                __matching
+                                                                                    .for_each(|__val| {
+                                                                                        let __val = __val.tuple_of_borrowed();
+                                                                                        let x1: &Proc = __val.0;
+                                                                                        if let Some(__matching) = proc_indices_none_delta
+                                                                                            .to_rel_index(&__proc_ind_common_delta)
+                                                                                            .index_get(&())
+                                                                                        {
+                                                                                            __matching
+                                                                                                .for_each(|__val| {
+                                                                                                    let __val = __val.tuple_of_borrowed();
+                                                                                                    let y1: &Proc = __val.0;
+                                                                                                    if let Some(__matching) = ascent::internal::RelIndexCombined::new(
+                                                                                                            &eq_proc_indices_0_1_total
+                                                                                                                .to_rel_index(&__eq_proc_ind_common_total),
+                                                                                                            &eq_proc_indices_0_1_delta
+                                                                                                                .to_rel_index(&__eq_proc_ind_common_delta),
+                                                                                                        )
+                                                                                                        .index_get(&((x1.clone()).clone(), (y1.clone()).clone()))
+                                                                                                    {
+                                                                                                        __matching
+                                                                                                            .for_each(|__val| {
+                                                                                                                let __new_row: (Proc, Proc) = (
+                                                                                                                    Proc::PPar(Box::new(x0.clone()), Box::new(x1.clone())),
+                                                                                                                    Proc::PPar(Box::new(y0.clone()), Box::new(y1.clone())),
+                                                                                                                );
+                                                                                                                if !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                                                    &eq_proc_indices_0_1_total
+                                                                                                                        .to_rel_index(&__eq_proc_ind_common_total),
+                                                                                                                    &__new_row,
+                                                                                                                )
+                                                                                                                    && !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                                                        &eq_proc_indices_0_1_delta
+                                                                                                                            .to_rel_index(&__eq_proc_ind_common_delta),
+                                                                                                                        &__new_row,
+                                                                                                                    )
+                                                                                                                {
+                                                                                                                    if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
+                                                                                                                        &mut eq_proc_indices_0_1_new
+                                                                                                                            .to_rel_index_write(&mut __eq_proc_ind_common_new),
+                                                                                                                        &__new_row,
+                                                                                                                        (),
+                                                                                                                    ) {
+                                                                                                                        let __new_row_ind = _self.eq_proc.len();
+                                                                                                                        _self
+                                                                                                                            .eq_proc
+                                                                                                                            .push((__new_row.0.clone(), __new_row.1.clone()));
+                                                                                                                        ::ascent::internal::RelIndexWrite::index_insert(
+                                                                                                                            &mut eq_proc_indices_0_new
+                                                                                                                                .to_rel_index_write(&mut __eq_proc_ind_common_new),
+                                                                                                                            (__new_row.0.clone(),),
+                                                                                                                            (__new_row.1.clone(),),
+                                                                                                                        );
+                                                                                                                        __changed = true;
+                                                                                                                    }
+                                                                                                                }
+                                                                                                            });
+                                                                                                    }
+                                                                                                });
+                                                                                        }
+                                                                                    });
+                                                                            }
+                                                                        });
+                                                                }
+                                                            });
+                                                    });
+                                            }
+                                        });
+                                }
+                            }
+                        }
+                        ascent::internal::comment(
+                            "eq_proc <-- proc_indices_none_total, proc_indices_none_total, eq_proc_indices_0_1_total, proc_indices_none_total, proc_indices_none_total, eq_proc_indices_0_1_delta [SIMPLE JOIN]",
+                        );
+                        {
+                            let any_rel_empty = proc_indices_none_total
+                                .to_rel_index(&__proc_ind_common_total)
+                                .is_empty()
+                                || proc_indices_none_total
+                                    .to_rel_index(&__proc_ind_common_total)
+                                    .is_empty()
+                                || eq_proc_indices_0_1_total
+                                    .to_rel_index(&__eq_proc_ind_common_total)
+                                    .is_empty()
+                                || proc_indices_none_total
+                                    .to_rel_index(&__proc_ind_common_total)
+                                    .is_empty()
+                                || proc_indices_none_total
+                                    .to_rel_index(&__proc_ind_common_total)
+                                    .is_empty()
+                                || eq_proc_indices_0_1_delta
+                                    .to_rel_index(&__eq_proc_ind_common_delta)
+                                    .is_empty();
+                            if !any_rel_empty {
+                                if proc_indices_none_total
+                                    .to_rel_index(&__proc_ind_common_total)
+                                    .len_estimate()
+                                    <= proc_indices_none_total
+                                        .to_rel_index(&__proc_ind_common_total)
+                                        .len_estimate()
+                                {
+                                    proc_indices_none_total
+                                        .to_rel_index(&__proc_ind_common_total)
+                                        .iter_all()
+                                        .for_each(|(__cl1_joined_columns, __cl1_tuple_indices)| {
+                                            let __cl1_joined_columns = __cl1_joined_columns
+                                                .tuple_of_borrowed();
+                                            if let Some(__matching) = proc_indices_none_total
+                                                .to_rel_index(&__proc_ind_common_total)
+                                                .index_get(&())
+                                            {
+                                                __cl1_tuple_indices
+                                                    .for_each(|cl1_val| {
+                                                        let cl1_val = cl1_val.tuple_of_borrowed();
+                                                        let x0: &Proc = cl1_val.0;
+                                                        __matching
+                                                            .clone()
+                                                            .for_each(|__val| {
+                                                                let __val = __val.tuple_of_borrowed();
+                                                                let y0: &Proc = __val.0;
+                                                                if let Some(__matching) = eq_proc_indices_0_1_total
+                                                                    .to_rel_index(&__eq_proc_ind_common_total)
+                                                                    .index_get(&((x0.clone()).clone(), (y0.clone()).clone()))
+                                                                {
+                                                                    __matching
+                                                                        .for_each(|__val| {
+                                                                            if let Some(__matching) = proc_indices_none_total
+                                                                                .to_rel_index(&__proc_ind_common_total)
+                                                                                .index_get(&())
+                                                                            {
+                                                                                __matching
+                                                                                    .for_each(|__val| {
+                                                                                        let __val = __val.tuple_of_borrowed();
+                                                                                        let x1: &Proc = __val.0;
+                                                                                        if let Some(__matching) = proc_indices_none_total
+                                                                                            .to_rel_index(&__proc_ind_common_total)
+                                                                                            .index_get(&())
+                                                                                        {
+                                                                                            __matching
+                                                                                                .for_each(|__val| {
+                                                                                                    let __val = __val.tuple_of_borrowed();
+                                                                                                    let y1: &Proc = __val.0;
+                                                                                                    if let Some(__matching) = eq_proc_indices_0_1_delta
+                                                                                                        .to_rel_index(&__eq_proc_ind_common_delta)
+                                                                                                        .index_get(&((x1.clone()).clone(), (y1.clone()).clone()))
+                                                                                                    {
+                                                                                                        __matching
+                                                                                                            .for_each(|__val| {
+                                                                                                                let __new_row: (Proc, Proc) = (
+                                                                                                                    Proc::PPar(Box::new(x0.clone()), Box::new(x1.clone())),
+                                                                                                                    Proc::PPar(Box::new(y0.clone()), Box::new(y1.clone())),
+                                                                                                                );
+                                                                                                                if !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                                                    &eq_proc_indices_0_1_total
+                                                                                                                        .to_rel_index(&__eq_proc_ind_common_total),
+                                                                                                                    &__new_row,
+                                                                                                                )
+                                                                                                                    && !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                                                        &eq_proc_indices_0_1_delta
+                                                                                                                            .to_rel_index(&__eq_proc_ind_common_delta),
+                                                                                                                        &__new_row,
+                                                                                                                    )
+                                                                                                                {
+                                                                                                                    if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
+                                                                                                                        &mut eq_proc_indices_0_1_new
+                                                                                                                            .to_rel_index_write(&mut __eq_proc_ind_common_new),
+                                                                                                                        &__new_row,
+                                                                                                                        (),
+                                                                                                                    ) {
+                                                                                                                        let __new_row_ind = _self.eq_proc.len();
+                                                                                                                        _self
+                                                                                                                            .eq_proc
+                                                                                                                            .push((__new_row.0.clone(), __new_row.1.clone()));
+                                                                                                                        ::ascent::internal::RelIndexWrite::index_insert(
+                                                                                                                            &mut eq_proc_indices_0_new
+                                                                                                                                .to_rel_index_write(&mut __eq_proc_ind_common_new),
+                                                                                                                            (__new_row.0.clone(),),
+                                                                                                                            (__new_row.1.clone(),),
+                                                                                                                        );
+                                                                                                                        __changed = true;
+                                                                                                                    }
+                                                                                                                }
+                                                                                                            });
+                                                                                                    }
+                                                                                                });
+                                                                                        }
+                                                                                    });
+                                                                            }
+                                                                        });
+                                                                }
+                                                            });
+                                                    });
+                                            }
+                                        });
+                                } else {
+                                    proc_indices_none_total
+                                        .to_rel_index(&__proc_ind_common_total)
+                                        .iter_all()
+                                        .for_each(|(__cl1_joined_columns, __cl1_tuple_indices)| {
+                                            let __cl1_joined_columns = __cl1_joined_columns
+                                                .tuple_of_borrowed();
+                                            if let Some(__matching) = proc_indices_none_total
+                                                .to_rel_index(&__proc_ind_common_total)
+                                                .index_get(&())
+                                            {
+                                                __cl1_tuple_indices
+                                                    .for_each(|cl1_val| {
+                                                        let cl1_val = cl1_val.tuple_of_borrowed();
+                                                        let y0: &Proc = cl1_val.0;
+                                                        __matching
+                                                            .clone()
+                                                            .for_each(|__val| {
+                                                                let __val = __val.tuple_of_borrowed();
+                                                                let x0: &Proc = __val.0;
+                                                                if let Some(__matching) = eq_proc_indices_0_1_total
+                                                                    .to_rel_index(&__eq_proc_ind_common_total)
+                                                                    .index_get(&((x0.clone()).clone(), (y0.clone()).clone()))
+                                                                {
+                                                                    __matching
+                                                                        .for_each(|__val| {
+                                                                            if let Some(__matching) = proc_indices_none_total
+                                                                                .to_rel_index(&__proc_ind_common_total)
+                                                                                .index_get(&())
+                                                                            {
+                                                                                __matching
+                                                                                    .for_each(|__val| {
+                                                                                        let __val = __val.tuple_of_borrowed();
+                                                                                        let x1: &Proc = __val.0;
+                                                                                        if let Some(__matching) = proc_indices_none_total
+                                                                                            .to_rel_index(&__proc_ind_common_total)
+                                                                                            .index_get(&())
+                                                                                        {
+                                                                                            __matching
+                                                                                                .for_each(|__val| {
+                                                                                                    let __val = __val.tuple_of_borrowed();
+                                                                                                    let y1: &Proc = __val.0;
+                                                                                                    if let Some(__matching) = eq_proc_indices_0_1_delta
+                                                                                                        .to_rel_index(&__eq_proc_ind_common_delta)
+                                                                                                        .index_get(&((x1.clone()).clone(), (y1.clone()).clone()))
+                                                                                                    {
+                                                                                                        __matching
+                                                                                                            .for_each(|__val| {
+                                                                                                                let __new_row: (Proc, Proc) = (
+                                                                                                                    Proc::PPar(Box::new(x0.clone()), Box::new(x1.clone())),
+                                                                                                                    Proc::PPar(Box::new(y0.clone()), Box::new(y1.clone())),
+                                                                                                                );
+                                                                                                                if !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                                                    &eq_proc_indices_0_1_total
+                                                                                                                        .to_rel_index(&__eq_proc_ind_common_total),
+                                                                                                                    &__new_row,
+                                                                                                                )
+                                                                                                                    && !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                                                                        &eq_proc_indices_0_1_delta
+                                                                                                                            .to_rel_index(&__eq_proc_ind_common_delta),
+                                                                                                                        &__new_row,
+                                                                                                                    )
+                                                                                                                {
+                                                                                                                    if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
+                                                                                                                        &mut eq_proc_indices_0_1_new
+                                                                                                                            .to_rel_index_write(&mut __eq_proc_ind_common_new),
+                                                                                                                        &__new_row,
+                                                                                                                        (),
+                                                                                                                    ) {
+                                                                                                                        let __new_row_ind = _self.eq_proc.len();
+                                                                                                                        _self
+                                                                                                                            .eq_proc
+                                                                                                                            .push((__new_row.0.clone(), __new_row.1.clone()));
+                                                                                                                        ::ascent::internal::RelIndexWrite::index_insert(
+                                                                                                                            &mut eq_proc_indices_0_new
+                                                                                                                                .to_rel_index_write(&mut __eq_proc_ind_common_new),
+                                                                                                                            (__new_row.0.clone(),),
+                                                                                                                            (__new_row.1.clone(),),
+                                                                                                                        );
+                                                                                                                        __changed = true;
+                                                                                                                    }
+                                                                                                                }
+                                                                                                            });
+                                                                                                    }
+                                                                                                });
+                                                                                        }
+                                                                                    });
+                                                                            }
+                                                                        });
+                                                                }
+                                                            });
+                                                    });
+                                            }
+                                        });
+                                }
+                            }
+                        }
+                        ascent::internal::comment(
+                            "eq_proc <-- proc_indices_none_delta, if let ⋯, let ⋯",
                         );
                         {
                             if let Some(__matching) = proc_indices_none_delta
@@ -5726,39 +11798,31 @@ logical indices: rw_indices_0; rw_indices_0_1; rw_indices_1; rw_indices_none*/
                                                 ascent::internal::Convert::convert(p1),
                                             );
                                             if !::ascent::internal::RelFullIndexRead::contains_key(
-                                                &eq_indices_0_1_total.to_rel_index(&__eq_ind_common_total),
+                                                &eq_proc_indices_0_1_total
+                                                    .to_rel_index(&__eq_proc_ind_common_total),
                                                 &__new_row,
                                             )
                                                 && !::ascent::internal::RelFullIndexRead::contains_key(
-                                                    &eq_indices_0_1_delta.to_rel_index(&__eq_ind_common_delta),
+                                                    &eq_proc_indices_0_1_delta
+                                                        .to_rel_index(&__eq_proc_ind_common_delta),
                                                     &__new_row,
                                                 )
                                             {
                                                 if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
-                                                    &mut eq_indices_0_1_new
-                                                        .to_rel_index_write(&mut __eq_ind_common_new),
+                                                    &mut eq_proc_indices_0_1_new
+                                                        .to_rel_index_write(&mut __eq_proc_ind_common_new),
                                                     &__new_row,
                                                     (),
                                                 ) {
-                                                    let __new_row_ind = _self.eq.len();
-                                                    _self.eq.push((__new_row.0.clone(), __new_row.1.clone()));
+                                                    let __new_row_ind = _self.eq_proc.len();
+                                                    _self
+                                                        .eq_proc
+                                                        .push((__new_row.0.clone(), __new_row.1.clone()));
                                                     ::ascent::internal::RelIndexWrite::index_insert(
-                                                        &mut eq_indices_0_new
-                                                            .to_rel_index_write(&mut __eq_ind_common_new),
+                                                        &mut eq_proc_indices_0_new
+                                                            .to_rel_index_write(&mut __eq_proc_ind_common_new),
                                                         (__new_row.0.clone(),),
                                                         (__new_row.1.clone(),),
-                                                    );
-                                                    ::ascent::internal::RelIndexWrite::index_insert(
-                                                        &mut eq_indices_1_new
-                                                            .to_rel_index_write(&mut __eq_ind_common_new),
-                                                        (__new_row.1.clone(),),
-                                                        (__new_row.0.clone(),),
-                                                    );
-                                                    ::ascent::internal::RelIndexWrite::index_insert(
-                                                        &mut eq_indices_none_new
-                                                            .to_rel_index_write(&mut __eq_ind_common_new),
-                                                        (),
-                                                        (__new_row.0.clone(), __new_row.1.clone()),
                                                     );
                                                     __changed = true;
                                                 }
@@ -5768,7 +11832,7 @@ logical indices: rw_indices_0; rw_indices_0_1; rw_indices_1; rw_indices_none*/
                             }
                         }
                         ascent::internal::comment(
-                            "eq <-- proc_indices_none_delta, if let ⋯, if let ⋯, let ⋯",
+                            "eq_proc <-- proc_indices_none_delta, if let ⋯, if let ⋯, let ⋯",
                         );
                         {
                             if let Some(__matching) = proc_indices_none_delta
@@ -5779,50 +11843,42 @@ logical indices: rw_indices_0; rw_indices_0_1; rw_indices_1; rw_indices_none*/
                                     .for_each(|__val| {
                                         let __val = __val.tuple_of_borrowed();
                                         let p0: &Proc = __val.0;
-                                        if let Proc::PPar(t, r) = p0 {
-                                            if let Proc::PPar(p, q) = &**t {
+                                        if let Proc::PPar(p, field_1) = p0 {
+                                            if let Proc::PPar(q, r) = &**field_1 {
                                                 let p1 = Proc::PPar(
-                                                    p.clone(),
-                                                    Box::new(Proc::PPar(q.clone(), r.clone())),
+                                                    Box::new(Proc::PPar(p.clone(), q.clone())),
+                                                    r.clone(),
                                                 );
                                                 let __new_row: (Proc, Proc) = (
                                                     ascent::internal::Convert::convert(p0),
                                                     ascent::internal::Convert::convert(p1),
                                                 );
                                                 if !::ascent::internal::RelFullIndexRead::contains_key(
-                                                    &eq_indices_0_1_total.to_rel_index(&__eq_ind_common_total),
+                                                    &eq_proc_indices_0_1_total
+                                                        .to_rel_index(&__eq_proc_ind_common_total),
                                                     &__new_row,
                                                 )
                                                     && !::ascent::internal::RelFullIndexRead::contains_key(
-                                                        &eq_indices_0_1_delta.to_rel_index(&__eq_ind_common_delta),
+                                                        &eq_proc_indices_0_1_delta
+                                                            .to_rel_index(&__eq_proc_ind_common_delta),
                                                         &__new_row,
                                                     )
                                                 {
                                                     if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
-                                                        &mut eq_indices_0_1_new
-                                                            .to_rel_index_write(&mut __eq_ind_common_new),
+                                                        &mut eq_proc_indices_0_1_new
+                                                            .to_rel_index_write(&mut __eq_proc_ind_common_new),
                                                         &__new_row,
                                                         (),
                                                     ) {
-                                                        let __new_row_ind = _self.eq.len();
-                                                        _self.eq.push((__new_row.0.clone(), __new_row.1.clone()));
+                                                        let __new_row_ind = _self.eq_proc.len();
+                                                        _self
+                                                            .eq_proc
+                                                            .push((__new_row.0.clone(), __new_row.1.clone()));
                                                         ::ascent::internal::RelIndexWrite::index_insert(
-                                                            &mut eq_indices_0_new
-                                                                .to_rel_index_write(&mut __eq_ind_common_new),
+                                                            &mut eq_proc_indices_0_new
+                                                                .to_rel_index_write(&mut __eq_proc_ind_common_new),
                                                             (__new_row.0.clone(),),
                                                             (__new_row.1.clone(),),
-                                                        );
-                                                        ::ascent::internal::RelIndexWrite::index_insert(
-                                                            &mut eq_indices_1_new
-                                                                .to_rel_index_write(&mut __eq_ind_common_new),
-                                                            (__new_row.1.clone(),),
-                                                            (__new_row.0.clone(),),
-                                                        );
-                                                        ::ascent::internal::RelIndexWrite::index_insert(
-                                                            &mut eq_indices_none_new
-                                                                .to_rel_index_write(&mut __eq_ind_common_new),
-                                                            (),
-                                                            (__new_row.0.clone(), __new_row.1.clone()),
                                                         );
                                                         __changed = true;
                                                     }
@@ -5832,54 +11888,43 @@ logical indices: rw_indices_0; rw_indices_0_1; rw_indices_1; rw_indices_none*/
                                     });
                             }
                         }
-                        ascent::internal::comment("eq <-- proc_indices_none_delta");
+                        ascent::internal::comment(
+                            "redex_eq <-- eq_proc_indices_0_delta",
+                        );
                         {
-                            if let Some(__matching) = proc_indices_none_delta
-                                .to_rel_index(&__proc_ind_common_delta)
-                                .index_get(&())
+                            if let Some(__matching) = eq_proc_indices_0_delta
+                                .to_rel_index(&__eq_proc_ind_common_delta)
+                                .index_get(&((redex.clone()).clone(),))
                             {
                                 __matching
                                     .for_each(|__val| {
                                         let __val = __val.tuple_of_borrowed();
-                                        let p: &Proc = __val.0;
-                                        let __new_row: (Proc, Proc) = (
-                                            ascent::internal::Convert::convert(p),
-                                            ascent::internal::Convert::convert(p),
-                                        );
+                                        let q: &Proc = __val.0;
+                                        let __new_row: (Proc,) = (q.clone(),);
                                         if !::ascent::internal::RelFullIndexRead::contains_key(
-                                            &eq_indices_0_1_total.to_rel_index(&__eq_ind_common_total),
+                                            &redex_eq_indices_0_total
+                                                .to_rel_index(&__redex_eq_ind_common_total),
                                             &__new_row,
                                         )
                                             && !::ascent::internal::RelFullIndexRead::contains_key(
-                                                &eq_indices_0_1_delta.to_rel_index(&__eq_ind_common_delta),
+                                                &redex_eq_indices_0_delta
+                                                    .to_rel_index(&__redex_eq_ind_common_delta),
                                                 &__new_row,
                                             )
                                         {
                                             if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
-                                                &mut eq_indices_0_1_new
-                                                    .to_rel_index_write(&mut __eq_ind_common_new),
+                                                &mut redex_eq_indices_0_new
+                                                    .to_rel_index_write(&mut __redex_eq_ind_common_new),
                                                 &__new_row,
                                                 (),
                                             ) {
-                                                let __new_row_ind = _self.eq.len();
-                                                _self.eq.push((__new_row.0.clone(), __new_row.1.clone()));
+                                                let __new_row_ind = _self.redex_eq.len();
+                                                _self.redex_eq.push((__new_row.0.clone(),));
                                                 ::ascent::internal::RelIndexWrite::index_insert(
-                                                    &mut eq_indices_0_new
-                                                        .to_rel_index_write(&mut __eq_ind_common_new),
-                                                    (__new_row.0.clone(),),
-                                                    (__new_row.1.clone(),),
-                                                );
-                                                ::ascent::internal::RelIndexWrite::index_insert(
-                                                    &mut eq_indices_1_new
-                                                        .to_rel_index_write(&mut __eq_ind_common_new),
-                                                    (__new_row.1.clone(),),
-                                                    (__new_row.0.clone(),),
-                                                );
-                                                ::ascent::internal::RelIndexWrite::index_insert(
-                                                    &mut eq_indices_none_new
-                                                        .to_rel_index_write(&mut __eq_ind_common_new),
+                                                    &mut redex_eq_indices_none_new
+                                                        .to_rel_index_write(&mut __redex_eq_ind_common_new),
                                                     (),
-                                                    (__new_row.0.clone(), __new_row.1.clone()),
+                                                    (__new_row.0.clone(),),
                                                 );
                                                 __changed = true;
                                             }
@@ -5887,396 +11932,68 @@ logical indices: rw_indices_0; rw_indices_0_1; rw_indices_1; rw_indices_none*/
                                     });
                             }
                         }
-                        ascent::internal::comment("eq <-- eq_indices_none_delta");
-                        {
-                            if let Some(__matching) = eq_indices_none_delta
-                                .to_rel_index(&__eq_ind_common_delta)
-                                .index_get(&())
-                            {
-                                __matching
-                                    .for_each(|__val| {
-                                        let __val = __val.tuple_of_borrowed();
-                                        let p: &Proc = __val.0;
-                                        let q: &Proc = __val.1;
-                                        let __new_row: (Proc, Proc) = (
-                                            ascent::internal::Convert::convert(q),
-                                            ascent::internal::Convert::convert(p),
-                                        );
-                                        if !::ascent::internal::RelFullIndexRead::contains_key(
-                                            &eq_indices_0_1_total.to_rel_index(&__eq_ind_common_total),
-                                            &__new_row,
-                                        )
-                                            && !::ascent::internal::RelFullIndexRead::contains_key(
-                                                &eq_indices_0_1_delta.to_rel_index(&__eq_ind_common_delta),
-                                                &__new_row,
-                                            )
-                                        {
-                                            if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
-                                                &mut eq_indices_0_1_new
-                                                    .to_rel_index_write(&mut __eq_ind_common_new),
-                                                &__new_row,
-                                                (),
-                                            ) {
-                                                let __new_row_ind = _self.eq.len();
-                                                _self.eq.push((__new_row.0.clone(), __new_row.1.clone()));
-                                                ::ascent::internal::RelIndexWrite::index_insert(
-                                                    &mut eq_indices_0_new
-                                                        .to_rel_index_write(&mut __eq_ind_common_new),
-                                                    (__new_row.0.clone(),),
-                                                    (__new_row.1.clone(),),
-                                                );
-                                                ::ascent::internal::RelIndexWrite::index_insert(
-                                                    &mut eq_indices_1_new
-                                                        .to_rel_index_write(&mut __eq_ind_common_new),
-                                                    (__new_row.1.clone(),),
-                                                    (__new_row.0.clone(),),
-                                                );
-                                                ::ascent::internal::RelIndexWrite::index_insert(
-                                                    &mut eq_indices_none_new
-                                                        .to_rel_index_write(&mut __eq_ind_common_new),
-                                                    (),
-                                                    (__new_row.0.clone(), __new_row.1.clone()),
-                                                );
-                                                __changed = true;
-                                            }
-                                        }
-                                    });
-                            }
-                        }
-                        ascent::internal::comment(
-                            "eq <-- eq_indices_1_delta, eq_indices_0_total+delta [SIMPLE JOIN]",
-                        );
-                        {
-                            if eq_indices_1_delta
-                                .to_rel_index(&__eq_ind_common_delta)
-                                .len_estimate()
-                                <= ascent::internal::RelIndexCombined::new(
-                                        &eq_indices_0_total.to_rel_index(&__eq_ind_common_total),
-                                        &eq_indices_0_delta.to_rel_index(&__eq_ind_common_delta),
-                                    )
-                                    .len_estimate()
-                            {
-                                eq_indices_1_delta
-                                    .to_rel_index(&__eq_ind_common_delta)
-                                    .iter_all()
-                                    .for_each(|(__cl1_joined_columns, __cl1_tuple_indices)| {
-                                        let __cl1_joined_columns = __cl1_joined_columns
-                                            .tuple_of_borrowed();
-                                        let q = __cl1_joined_columns.0;
-                                        if let Some(__matching) = ascent::internal::RelIndexCombined::new(
-                                                &eq_indices_0_total.to_rel_index(&__eq_ind_common_total),
-                                                &eq_indices_0_delta.to_rel_index(&__eq_ind_common_delta),
-                                            )
-                                            .index_get(&(q.clone(),))
-                                        {
-                                            __cl1_tuple_indices
-                                                .for_each(|cl1_val| {
-                                                    let cl1_val = cl1_val.tuple_of_borrowed();
-                                                    let p: &Proc = cl1_val.0;
-                                                    __matching
-                                                        .clone()
-                                                        .for_each(|__val| {
-                                                            let __val = __val.tuple_of_borrowed();
-                                                            let r: &Proc = __val.0;
-                                                            let __new_row: (Proc, Proc) = (
-                                                                ascent::internal::Convert::convert(p),
-                                                                ascent::internal::Convert::convert(r),
-                                                            );
-                                                            if !::ascent::internal::RelFullIndexRead::contains_key(
-                                                                &eq_indices_0_1_total.to_rel_index(&__eq_ind_common_total),
-                                                                &__new_row,
-                                                            )
-                                                                && !::ascent::internal::RelFullIndexRead::contains_key(
-                                                                    &eq_indices_0_1_delta.to_rel_index(&__eq_ind_common_delta),
-                                                                    &__new_row,
-                                                                )
-                                                            {
-                                                                if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
-                                                                    &mut eq_indices_0_1_new
-                                                                        .to_rel_index_write(&mut __eq_ind_common_new),
-                                                                    &__new_row,
-                                                                    (),
-                                                                ) {
-                                                                    let __new_row_ind = _self.eq.len();
-                                                                    _self.eq.push((__new_row.0.clone(), __new_row.1.clone()));
-                                                                    ::ascent::internal::RelIndexWrite::index_insert(
-                                                                        &mut eq_indices_0_new
-                                                                            .to_rel_index_write(&mut __eq_ind_common_new),
-                                                                        (__new_row.0.clone(),),
-                                                                        (__new_row.1.clone(),),
-                                                                    );
-                                                                    ::ascent::internal::RelIndexWrite::index_insert(
-                                                                        &mut eq_indices_1_new
-                                                                            .to_rel_index_write(&mut __eq_ind_common_new),
-                                                                        (__new_row.1.clone(),),
-                                                                        (__new_row.0.clone(),),
-                                                                    );
-                                                                    ::ascent::internal::RelIndexWrite::index_insert(
-                                                                        &mut eq_indices_none_new
-                                                                            .to_rel_index_write(&mut __eq_ind_common_new),
-                                                                        (),
-                                                                        (__new_row.0.clone(), __new_row.1.clone()),
-                                                                    );
-                                                                    __changed = true;
-                                                                }
-                                                            }
-                                                        });
-                                                });
-                                        }
-                                    });
-                            } else {
-                                ascent::internal::RelIndexCombined::new(
-                                        &eq_indices_0_total.to_rel_index(&__eq_ind_common_total),
-                                        &eq_indices_0_delta.to_rel_index(&__eq_ind_common_delta),
-                                    )
-                                    .iter_all()
-                                    .for_each(|(__cl1_joined_columns, __cl1_tuple_indices)| {
-                                        let __cl1_joined_columns = __cl1_joined_columns
-                                            .tuple_of_borrowed();
-                                        let q = __cl1_joined_columns.0;
-                                        if let Some(__matching) = eq_indices_1_delta
-                                            .to_rel_index(&__eq_ind_common_delta)
-                                            .index_get(&(q.clone(),))
-                                        {
-                                            __cl1_tuple_indices
-                                                .for_each(|cl1_val| {
-                                                    let cl1_val = cl1_val.tuple_of_borrowed();
-                                                    let r: &Proc = cl1_val.0;
-                                                    __matching
-                                                        .clone()
-                                                        .for_each(|__val| {
-                                                            let __val = __val.tuple_of_borrowed();
-                                                            let p: &Proc = __val.0;
-                                                            let __new_row: (Proc, Proc) = (
-                                                                ascent::internal::Convert::convert(p),
-                                                                ascent::internal::Convert::convert(r),
-                                                            );
-                                                            if !::ascent::internal::RelFullIndexRead::contains_key(
-                                                                &eq_indices_0_1_total.to_rel_index(&__eq_ind_common_total),
-                                                                &__new_row,
-                                                            )
-                                                                && !::ascent::internal::RelFullIndexRead::contains_key(
-                                                                    &eq_indices_0_1_delta.to_rel_index(&__eq_ind_common_delta),
-                                                                    &__new_row,
-                                                                )
-                                                            {
-                                                                if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
-                                                                    &mut eq_indices_0_1_new
-                                                                        .to_rel_index_write(&mut __eq_ind_common_new),
-                                                                    &__new_row,
-                                                                    (),
-                                                                ) {
-                                                                    let __new_row_ind = _self.eq.len();
-                                                                    _self.eq.push((__new_row.0.clone(), __new_row.1.clone()));
-                                                                    ::ascent::internal::RelIndexWrite::index_insert(
-                                                                        &mut eq_indices_0_new
-                                                                            .to_rel_index_write(&mut __eq_ind_common_new),
-                                                                        (__new_row.0.clone(),),
-                                                                        (__new_row.1.clone(),),
-                                                                    );
-                                                                    ::ascent::internal::RelIndexWrite::index_insert(
-                                                                        &mut eq_indices_1_new
-                                                                            .to_rel_index_write(&mut __eq_ind_common_new),
-                                                                        (__new_row.1.clone(),),
-                                                                        (__new_row.0.clone(),),
-                                                                    );
-                                                                    ::ascent::internal::RelIndexWrite::index_insert(
-                                                                        &mut eq_indices_none_new
-                                                                            .to_rel_index_write(&mut __eq_ind_common_new),
-                                                                        (),
-                                                                        (__new_row.0.clone(), __new_row.1.clone()),
-                                                                    );
-                                                                    __changed = true;
-                                                                }
-                                                            }
-                                                        });
-                                                });
-                                        }
-                                    });
-                            }
-                        }
-                        ascent::internal::comment(
-                            "eq <-- eq_indices_1_total, eq_indices_0_delta [SIMPLE JOIN]",
-                        );
-                        {
-                            if eq_indices_1_total
-                                .to_rel_index(&__eq_ind_common_total)
-                                .len_estimate()
-                                <= eq_indices_0_delta
-                                    .to_rel_index(&__eq_ind_common_delta)
-                                    .len_estimate()
-                            {
-                                eq_indices_1_total
-                                    .to_rel_index(&__eq_ind_common_total)
-                                    .iter_all()
-                                    .for_each(|(__cl1_joined_columns, __cl1_tuple_indices)| {
-                                        let __cl1_joined_columns = __cl1_joined_columns
-                                            .tuple_of_borrowed();
-                                        let q = __cl1_joined_columns.0;
-                                        if let Some(__matching) = eq_indices_0_delta
-                                            .to_rel_index(&__eq_ind_common_delta)
-                                            .index_get(&(q.clone(),))
-                                        {
-                                            __cl1_tuple_indices
-                                                .for_each(|cl1_val| {
-                                                    let cl1_val = cl1_val.tuple_of_borrowed();
-                                                    let p: &Proc = cl1_val.0;
-                                                    __matching
-                                                        .clone()
-                                                        .for_each(|__val| {
-                                                            let __val = __val.tuple_of_borrowed();
-                                                            let r: &Proc = __val.0;
-                                                            let __new_row: (Proc, Proc) = (
-                                                                ascent::internal::Convert::convert(p),
-                                                                ascent::internal::Convert::convert(r),
-                                                            );
-                                                            if !::ascent::internal::RelFullIndexRead::contains_key(
-                                                                &eq_indices_0_1_total.to_rel_index(&__eq_ind_common_total),
-                                                                &__new_row,
-                                                            )
-                                                                && !::ascent::internal::RelFullIndexRead::contains_key(
-                                                                    &eq_indices_0_1_delta.to_rel_index(&__eq_ind_common_delta),
-                                                                    &__new_row,
-                                                                )
-                                                            {
-                                                                if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
-                                                                    &mut eq_indices_0_1_new
-                                                                        .to_rel_index_write(&mut __eq_ind_common_new),
-                                                                    &__new_row,
-                                                                    (),
-                                                                ) {
-                                                                    let __new_row_ind = _self.eq.len();
-                                                                    _self.eq.push((__new_row.0.clone(), __new_row.1.clone()));
-                                                                    ::ascent::internal::RelIndexWrite::index_insert(
-                                                                        &mut eq_indices_0_new
-                                                                            .to_rel_index_write(&mut __eq_ind_common_new),
-                                                                        (__new_row.0.clone(),),
-                                                                        (__new_row.1.clone(),),
-                                                                    );
-                                                                    ::ascent::internal::RelIndexWrite::index_insert(
-                                                                        &mut eq_indices_1_new
-                                                                            .to_rel_index_write(&mut __eq_ind_common_new),
-                                                                        (__new_row.1.clone(),),
-                                                                        (__new_row.0.clone(),),
-                                                                    );
-                                                                    ::ascent::internal::RelIndexWrite::index_insert(
-                                                                        &mut eq_indices_none_new
-                                                                            .to_rel_index_write(&mut __eq_ind_common_new),
-                                                                        (),
-                                                                        (__new_row.0.clone(), __new_row.1.clone()),
-                                                                    );
-                                                                    __changed = true;
-                                                                }
-                                                            }
-                                                        });
-                                                });
-                                        }
-                                    });
-                            } else {
-                                eq_indices_0_delta
-                                    .to_rel_index(&__eq_ind_common_delta)
-                                    .iter_all()
-                                    .for_each(|(__cl1_joined_columns, __cl1_tuple_indices)| {
-                                        let __cl1_joined_columns = __cl1_joined_columns
-                                            .tuple_of_borrowed();
-                                        let q = __cl1_joined_columns.0;
-                                        if let Some(__matching) = eq_indices_1_total
-                                            .to_rel_index(&__eq_ind_common_total)
-                                            .index_get(&(q.clone(),))
-                                        {
-                                            __cl1_tuple_indices
-                                                .for_each(|cl1_val| {
-                                                    let cl1_val = cl1_val.tuple_of_borrowed();
-                                                    let r: &Proc = cl1_val.0;
-                                                    __matching
-                                                        .clone()
-                                                        .for_each(|__val| {
-                                                            let __val = __val.tuple_of_borrowed();
-                                                            let p: &Proc = __val.0;
-                                                            let __new_row: (Proc, Proc) = (
-                                                                ascent::internal::Convert::convert(p),
-                                                                ascent::internal::Convert::convert(r),
-                                                            );
-                                                            if !::ascent::internal::RelFullIndexRead::contains_key(
-                                                                &eq_indices_0_1_total.to_rel_index(&__eq_ind_common_total),
-                                                                &__new_row,
-                                                            )
-                                                                && !::ascent::internal::RelFullIndexRead::contains_key(
-                                                                    &eq_indices_0_1_delta.to_rel_index(&__eq_ind_common_delta),
-                                                                    &__new_row,
-                                                                )
-                                                            {
-                                                                if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
-                                                                    &mut eq_indices_0_1_new
-                                                                        .to_rel_index_write(&mut __eq_ind_common_new),
-                                                                    &__new_row,
-                                                                    (),
-                                                                ) {
-                                                                    let __new_row_ind = _self.eq.len();
-                                                                    _self.eq.push((__new_row.0.clone(), __new_row.1.clone()));
-                                                                    ::ascent::internal::RelIndexWrite::index_insert(
-                                                                        &mut eq_indices_0_new
-                                                                            .to_rel_index_write(&mut __eq_ind_common_new),
-                                                                        (__new_row.0.clone(),),
-                                                                        (__new_row.1.clone(),),
-                                                                    );
-                                                                    ::ascent::internal::RelIndexWrite::index_insert(
-                                                                        &mut eq_indices_1_new
-                                                                            .to_rel_index_write(&mut __eq_ind_common_new),
-                                                                        (__new_row.1.clone(),),
-                                                                        (__new_row.0.clone(),),
-                                                                    );
-                                                                    ::ascent::internal::RelIndexWrite::index_insert(
-                                                                        &mut eq_indices_none_new
-                                                                            .to_rel_index_write(&mut __eq_ind_common_new),
-                                                                        (),
-                                                                        (__new_row.0.clone(), __new_row.1.clone()),
-                                                                    );
-                                                                    __changed = true;
-                                                                }
-                                                            }
-                                                        });
-                                                });
-                                        }
-                                    });
-                            }
-                        }
                         ::ascent::internal::RelIndexMerge::merge_delta_to_total_new_to_delta(
-                            &mut __eq_ind_common_new,
-                            &mut __eq_ind_common_delta,
-                            &mut __eq_ind_common_total,
+                            &mut __eq_name_ind_common_new,
+                            &mut __eq_name_ind_common_delta,
+                            &mut __eq_name_ind_common_total,
                         );
                         ::ascent::internal::RelIndexMerge::merge_delta_to_total_new_to_delta(
-                            &mut eq_indices_0_new
-                                .to_rel_index_write(&mut __eq_ind_common_new),
-                            &mut eq_indices_0_delta
-                                .to_rel_index_write(&mut __eq_ind_common_delta),
-                            &mut eq_indices_0_total
-                                .to_rel_index_write(&mut __eq_ind_common_total),
+                            &mut eq_name_indices_0_new
+                                .to_rel_index_write(&mut __eq_name_ind_common_new),
+                            &mut eq_name_indices_0_delta
+                                .to_rel_index_write(&mut __eq_name_ind_common_delta),
+                            &mut eq_name_indices_0_total
+                                .to_rel_index_write(&mut __eq_name_ind_common_total),
                         );
                         ::ascent::internal::RelIndexMerge::merge_delta_to_total_new_to_delta(
-                            &mut eq_indices_0_1_new
-                                .to_rel_index_write(&mut __eq_ind_common_new),
-                            &mut eq_indices_0_1_delta
-                                .to_rel_index_write(&mut __eq_ind_common_delta),
-                            &mut eq_indices_0_1_total
-                                .to_rel_index_write(&mut __eq_ind_common_total),
+                            &mut eq_name_indices_0_1_new
+                                .to_rel_index_write(&mut __eq_name_ind_common_new),
+                            &mut eq_name_indices_0_1_delta
+                                .to_rel_index_write(&mut __eq_name_ind_common_delta),
+                            &mut eq_name_indices_0_1_total
+                                .to_rel_index_write(&mut __eq_name_ind_common_total),
                         );
                         ::ascent::internal::RelIndexMerge::merge_delta_to_total_new_to_delta(
-                            &mut eq_indices_1_new
-                                .to_rel_index_write(&mut __eq_ind_common_new),
-                            &mut eq_indices_1_delta
-                                .to_rel_index_write(&mut __eq_ind_common_delta),
-                            &mut eq_indices_1_total
-                                .to_rel_index_write(&mut __eq_ind_common_total),
+                            &mut __eq_proc_ind_common_new,
+                            &mut __eq_proc_ind_common_delta,
+                            &mut __eq_proc_ind_common_total,
                         );
                         ::ascent::internal::RelIndexMerge::merge_delta_to_total_new_to_delta(
-                            &mut eq_indices_none_new
-                                .to_rel_index_write(&mut __eq_ind_common_new),
-                            &mut eq_indices_none_delta
-                                .to_rel_index_write(&mut __eq_ind_common_delta),
-                            &mut eq_indices_none_total
-                                .to_rel_index_write(&mut __eq_ind_common_total),
+                            &mut eq_proc_indices_0_new
+                                .to_rel_index_write(&mut __eq_proc_ind_common_new),
+                            &mut eq_proc_indices_0_delta
+                                .to_rel_index_write(&mut __eq_proc_ind_common_delta),
+                            &mut eq_proc_indices_0_total
+                                .to_rel_index_write(&mut __eq_proc_ind_common_total),
+                        );
+                        ::ascent::internal::RelIndexMerge::merge_delta_to_total_new_to_delta(
+                            &mut eq_proc_indices_0_1_new
+                                .to_rel_index_write(&mut __eq_proc_ind_common_new),
+                            &mut eq_proc_indices_0_1_delta
+                                .to_rel_index_write(&mut __eq_proc_ind_common_delta),
+                            &mut eq_proc_indices_0_1_total
+                                .to_rel_index_write(&mut __eq_proc_ind_common_total),
+                        );
+                        ::ascent::internal::RelIndexMerge::merge_delta_to_total_new_to_delta(
+                            &mut __name_ind_common_new,
+                            &mut __name_ind_common_delta,
+                            &mut __name_ind_common_total,
+                        );
+                        ::ascent::internal::RelIndexMerge::merge_delta_to_total_new_to_delta(
+                            &mut name_indices_0_new
+                                .to_rel_index_write(&mut __name_ind_common_new),
+                            &mut name_indices_0_delta
+                                .to_rel_index_write(&mut __name_ind_common_delta),
+                            &mut name_indices_0_total
+                                .to_rel_index_write(&mut __name_ind_common_total),
+                        );
+                        ::ascent::internal::RelIndexMerge::merge_delta_to_total_new_to_delta(
+                            &mut name_indices_none_new
+                                .to_rel_index_write(&mut __name_ind_common_new),
+                            &mut name_indices_none_delta
+                                .to_rel_index_write(&mut __name_ind_common_delta),
+                            &mut name_indices_none_total
+                                .to_rel_index_write(&mut __name_ind_common_total),
                         );
                         ::ascent::internal::RelIndexMerge::merge_delta_to_total_new_to_delta(
                             &mut __proc_ind_common_new,
@@ -6300,60 +12017,121 @@ logical indices: rw_indices_0; rw_indices_0_1; rw_indices_1; rw_indices_none*/
                                 .to_rel_index_write(&mut __proc_ind_common_total),
                         );
                         ::ascent::internal::RelIndexMerge::merge_delta_to_total_new_to_delta(
-                            &mut __rw_ind_common_new,
-                            &mut __rw_ind_common_delta,
-                            &mut __rw_ind_common_total,
+                            &mut __redex_eq_ind_common_new,
+                            &mut __redex_eq_ind_common_delta,
+                            &mut __redex_eq_ind_common_total,
                         );
                         ::ascent::internal::RelIndexMerge::merge_delta_to_total_new_to_delta(
-                            &mut rw_indices_0_new
-                                .to_rel_index_write(&mut __rw_ind_common_new),
-                            &mut rw_indices_0_delta
-                                .to_rel_index_write(&mut __rw_ind_common_delta),
-                            &mut rw_indices_0_total
-                                .to_rel_index_write(&mut __rw_ind_common_total),
+                            &mut redex_eq_indices_0_new
+                                .to_rel_index_write(&mut __redex_eq_ind_common_new),
+                            &mut redex_eq_indices_0_delta
+                                .to_rel_index_write(&mut __redex_eq_ind_common_delta),
+                            &mut redex_eq_indices_0_total
+                                .to_rel_index_write(&mut __redex_eq_ind_common_total),
                         );
                         ::ascent::internal::RelIndexMerge::merge_delta_to_total_new_to_delta(
-                            &mut rw_indices_0_1_new
-                                .to_rel_index_write(&mut __rw_ind_common_new),
-                            &mut rw_indices_0_1_delta
-                                .to_rel_index_write(&mut __rw_ind_common_delta),
-                            &mut rw_indices_0_1_total
-                                .to_rel_index_write(&mut __rw_ind_common_total),
+                            &mut redex_eq_indices_none_new
+                                .to_rel_index_write(&mut __redex_eq_ind_common_new),
+                            &mut redex_eq_indices_none_delta
+                                .to_rel_index_write(&mut __redex_eq_ind_common_delta),
+                            &mut redex_eq_indices_none_total
+                                .to_rel_index_write(&mut __redex_eq_ind_common_total),
                         );
                         ::ascent::internal::RelIndexMerge::merge_delta_to_total_new_to_delta(
-                            &mut rw_indices_1_new
-                                .to_rel_index_write(&mut __rw_ind_common_new),
-                            &mut rw_indices_1_delta
-                                .to_rel_index_write(&mut __rw_ind_common_delta),
-                            &mut rw_indices_1_total
-                                .to_rel_index_write(&mut __rw_ind_common_total),
+                            &mut __rw_name_ind_common_new,
+                            &mut __rw_name_ind_common_delta,
+                            &mut __rw_name_ind_common_total,
                         );
                         ::ascent::internal::RelIndexMerge::merge_delta_to_total_new_to_delta(
-                            &mut rw_indices_none_new
-                                .to_rel_index_write(&mut __rw_ind_common_new),
-                            &mut rw_indices_none_delta
-                                .to_rel_index_write(&mut __rw_ind_common_delta),
-                            &mut rw_indices_none_total
-                                .to_rel_index_write(&mut __rw_ind_common_total),
+                            &mut rw_name_indices_0_new
+                                .to_rel_index_write(&mut __rw_name_ind_common_new),
+                            &mut rw_name_indices_0_delta
+                                .to_rel_index_write(&mut __rw_name_ind_common_delta),
+                            &mut rw_name_indices_0_total
+                                .to_rel_index_write(&mut __rw_name_ind_common_total),
+                        );
+                        ::ascent::internal::RelIndexMerge::merge_delta_to_total_new_to_delta(
+                            &mut rw_name_indices_0_1_new
+                                .to_rel_index_write(&mut __rw_name_ind_common_new),
+                            &mut rw_name_indices_0_1_delta
+                                .to_rel_index_write(&mut __rw_name_ind_common_delta),
+                            &mut rw_name_indices_0_1_total
+                                .to_rel_index_write(&mut __rw_name_ind_common_total),
+                        );
+                        ::ascent::internal::RelIndexMerge::merge_delta_to_total_new_to_delta(
+                            &mut rw_name_indices_1_new
+                                .to_rel_index_write(&mut __rw_name_ind_common_new),
+                            &mut rw_name_indices_1_delta
+                                .to_rel_index_write(&mut __rw_name_ind_common_delta),
+                            &mut rw_name_indices_1_total
+                                .to_rel_index_write(&mut __rw_name_ind_common_total),
+                        );
+                        ::ascent::internal::RelIndexMerge::merge_delta_to_total_new_to_delta(
+                            &mut __rw_proc_ind_common_new,
+                            &mut __rw_proc_ind_common_delta,
+                            &mut __rw_proc_ind_common_total,
+                        );
+                        ::ascent::internal::RelIndexMerge::merge_delta_to_total_new_to_delta(
+                            &mut rw_proc_indices_0_new
+                                .to_rel_index_write(&mut __rw_proc_ind_common_new),
+                            &mut rw_proc_indices_0_delta
+                                .to_rel_index_write(&mut __rw_proc_ind_common_delta),
+                            &mut rw_proc_indices_0_total
+                                .to_rel_index_write(&mut __rw_proc_ind_common_total),
+                        );
+                        ::ascent::internal::RelIndexMerge::merge_delta_to_total_new_to_delta(
+                            &mut rw_proc_indices_0_1_new
+                                .to_rel_index_write(&mut __rw_proc_ind_common_new),
+                            &mut rw_proc_indices_0_1_delta
+                                .to_rel_index_write(&mut __rw_proc_ind_common_delta),
+                            &mut rw_proc_indices_0_1_total
+                                .to_rel_index_write(&mut __rw_proc_ind_common_total),
+                        );
+                        ::ascent::internal::RelIndexMerge::merge_delta_to_total_new_to_delta(
+                            &mut rw_proc_indices_1_new
+                                .to_rel_index_write(&mut __rw_proc_ind_common_new),
+                            &mut rw_proc_indices_1_delta
+                                .to_rel_index_write(&mut __rw_proc_ind_common_delta),
+                            &mut rw_proc_indices_1_total
+                                .to_rel_index_write(&mut __rw_proc_ind_common_total),
+                        );
+                        ::ascent::internal::RelIndexMerge::merge_delta_to_total_new_to_delta(
+                            &mut rw_proc_indices_none_new
+                                .to_rel_index_write(&mut __rw_proc_ind_common_new),
+                            &mut rw_proc_indices_none_delta
+                                .to_rel_index_write(&mut __rw_proc_ind_common_delta),
+                            &mut rw_proc_indices_none_total
+                                .to_rel_index_write(&mut __rw_proc_ind_common_total),
                         );
                         _self.scc_iters[1usize] += 1;
                         if !__changed {
                             break;
                         }
                     }
-                    _self.__eq_ind_common = __eq_ind_common_total;
-                    _self.eq_indices_0 = eq_indices_0_total;
-                    _self.eq_indices_0_1 = eq_indices_0_1_total;
-                    _self.eq_indices_1 = eq_indices_1_total;
-                    _self.eq_indices_none = eq_indices_none_total;
+                    _self.__eq_name_ind_common = __eq_name_ind_common_total;
+                    _self.eq_name_indices_0 = eq_name_indices_0_total;
+                    _self.eq_name_indices_0_1 = eq_name_indices_0_1_total;
+                    _self.__eq_proc_ind_common = __eq_proc_ind_common_total;
+                    _self.eq_proc_indices_0 = eq_proc_indices_0_total;
+                    _self.eq_proc_indices_0_1 = eq_proc_indices_0_1_total;
+                    _self.__name_ind_common = __name_ind_common_total;
+                    _self.name_indices_0 = name_indices_0_total;
+                    _self.name_indices_none = name_indices_none_total;
                     _self.__proc_ind_common = __proc_ind_common_total;
                     _self.proc_indices_0 = proc_indices_0_total;
                     _self.proc_indices_none = proc_indices_none_total;
-                    _self.__rw_ind_common = __rw_ind_common_total;
-                    _self.rw_indices_0 = rw_indices_0_total;
-                    _self.rw_indices_0_1 = rw_indices_0_1_total;
-                    _self.rw_indices_1 = rw_indices_1_total;
-                    _self.rw_indices_none = rw_indices_none_total;
+                    _self.__redex_eq_ind_common = __redex_eq_ind_common_total;
+                    _self.redex_eq_indices_0 = redex_eq_indices_0_total;
+                    _self.redex_eq_indices_none = redex_eq_indices_none_total;
+                    _self.__rw_name_ind_common = __rw_name_ind_common_total;
+                    _self.rw_name_indices_0 = rw_name_indices_0_total;
+                    _self.rw_name_indices_0_1 = rw_name_indices_0_1_total;
+                    _self.rw_name_indices_1 = rw_name_indices_1_total;
+                    _self.__rw_proc_ind_common = __rw_proc_ind_common_total;
+                    _self.rw_proc_indices_0 = rw_proc_indices_0_total;
+                    _self.rw_proc_indices_0_1 = rw_proc_indices_0_1_total;
+                    _self.rw_proc_indices_1 = rw_proc_indices_1_total;
+                    _self.rw_proc_indices_none = rw_proc_indices_none_total;
                     _self.scc_times[1usize] += _scc_start_time.elapsed();
                 }
                 ascent::internal::comment("scc 2");
@@ -6371,15 +12149,15 @@ logical indices: rw_indices_0; rw_indices_0_1; rw_indices_1; rw_indices_none*/
                     );
                     let mut path_indices_0_delta: ascent::rel::ToRelIndexType<
                         (Proc,),
-                        (Vec<Proc>,),
+                        (Proc,),
                     > = ::std::mem::take(&mut _self.path_indices_0);
                     let mut path_indices_0_total: ascent::rel::ToRelIndexType<
                         (Proc,),
-                        (Vec<Proc>,),
+                        (Proc,),
                     > = Default::default();
                     let mut path_indices_0_new: ascent::rel::ToRelIndexType<
                         (Proc,),
-                        (Vec<Proc>,),
+                        (Proc,),
                     > = Default::default();
                     ::ascent::internal::RelIndexMerge::init(
                         &mut path_indices_0_new
@@ -6390,15 +12168,15 @@ logical indices: rw_indices_0; rw_indices_0_1; rw_indices_1; rw_indices_none*/
                             .to_rel_index_write(&mut __path_ind_common_total),
                     );
                     let mut path_indices_0_1_delta: ascent::internal::RelFullIndexType<
-                        (Proc, Vec<Proc>),
+                        (Proc, Proc),
                         (),
                     > = ::std::mem::take(&mut _self.path_indices_0_1);
                     let mut path_indices_0_1_total: ascent::internal::RelFullIndexType<
-                        (Proc, Vec<Proc>),
+                        (Proc, Proc),
                         (),
                     > = Default::default();
                     let mut path_indices_0_1_new: ascent::internal::RelFullIndexType<
-                        (Proc, Vec<Proc>),
+                        (Proc, Proc),
                         (),
                     > = Default::default();
                     ::ascent::internal::RelIndexMerge::init(
@@ -6409,51 +12187,29 @@ logical indices: rw_indices_0; rw_indices_0_1; rw_indices_1; rw_indices_none*/
                         &mut path_indices_0_1_total
                             .to_rel_index_write(&mut __path_ind_common_total),
                     );
-                    let mut path_indices_none_delta: ascent::rel::ToRelIndexType<
-                        (),
-                        (Proc, Vec<Proc>),
-                    > = ::std::mem::take(&mut _self.path_indices_none);
-                    let mut path_indices_none_total: ascent::rel::ToRelIndexType<
-                        (),
-                        (Proc, Vec<Proc>),
-                    > = Default::default();
-                    let mut path_indices_none_new: ascent::rel::ToRelIndexType<
-                        (),
-                        (Proc, Vec<Proc>),
-                    > = Default::default();
-                    ::ascent::internal::RelIndexMerge::init(
-                        &mut path_indices_none_new
-                            .to_rel_index_write(&mut __path_ind_common_new),
-                        &mut path_indices_none_delta
-                            .to_rel_index_write(&mut __path_ind_common_delta),
-                        &mut path_indices_none_total
-                            .to_rel_index_write(&mut __path_ind_common_total),
+                    let __redex_eq_ind_common_total: () = std::mem::take(
+                        &mut _self.__redex_eq_ind_common,
                     );
-                    let __rw_ind_common_total: () = std::mem::take(
-                        &mut _self.__rw_ind_common,
-                    );
-                    let rw_indices_none_total: ascent::rel::ToRelIndexType<
+                    let redex_eq_indices_none_total: ascent::rel::ToRelIndexType<
                         (),
-                        (Proc, Proc),
-                    > = std::mem::take(&mut _self.rw_indices_none);
+                        (Proc,),
+                    > = std::mem::take(&mut _self.redex_eq_indices_none);
                     #[allow(unused_assignments, unused_variables)]
                     {
                         let mut __changed = false;
-                        ascent::internal::comment("path <-- rw_indices_none_total");
+                        ascent::internal::comment(
+                            "path <-- redex_eq_indices_none_total",
+                        );
                         {
-                            if let Some(__matching) = rw_indices_none_total
-                                .to_rel_index(&__rw_ind_common_total)
+                            if let Some(__matching) = redex_eq_indices_none_total
+                                .to_rel_index(&__redex_eq_ind_common_total)
                                 .index_get(&())
                             {
                                 __matching
                                     .for_each(|__val| {
                                         let __val = __val.tuple_of_borrowed();
-                                        let p1: &Proc = __val.0;
-                                        let p2: &Proc = __val.1;
-                                        let __new_row: (Proc, Vec<Proc>) = (
-                                            ascent::internal::Convert::convert(p1),
-                                            <[_]>::into_vec(::alloc::boxed::box_new([p2.clone()])),
-                                        );
+                                        let q: &Proc = __val.0;
+                                        let __new_row: (Proc, Proc) = (redex.clone(), q.clone());
                                         if !::ascent::internal::RelFullIndexRead::contains_key(
                                             &path_indices_0_1_total
                                                 .to_rel_index(&__path_ind_common_total),
@@ -6479,11 +12235,162 @@ logical indices: rw_indices_0; rw_indices_0_1; rw_indices_1; rw_indices_none*/
                                                     (__new_row.0.clone(),),
                                                     (__new_row.1.clone(),),
                                                 );
+                                                __changed = true;
+                                            }
+                                        }
+                                    });
+                            }
+                        }
+                        ::ascent::internal::RelIndexMerge::merge_delta_to_total_new_to_delta(
+                            &mut __path_ind_common_new,
+                            &mut __path_ind_common_delta,
+                            &mut __path_ind_common_total,
+                        );
+                        ::ascent::internal::RelIndexMerge::merge_delta_to_total_new_to_delta(
+                            &mut path_indices_0_new
+                                .to_rel_index_write(&mut __path_ind_common_new),
+                            &mut path_indices_0_delta
+                                .to_rel_index_write(&mut __path_ind_common_delta),
+                            &mut path_indices_0_total
+                                .to_rel_index_write(&mut __path_ind_common_total),
+                        );
+                        ::ascent::internal::RelIndexMerge::merge_delta_to_total_new_to_delta(
+                            &mut path_indices_0_1_new
+                                .to_rel_index_write(&mut __path_ind_common_new),
+                            &mut path_indices_0_1_delta
+                                .to_rel_index_write(&mut __path_ind_common_delta),
+                            &mut path_indices_0_1_total
+                                .to_rel_index_write(&mut __path_ind_common_total),
+                        );
+                        ::ascent::internal::RelIndexMerge::merge_delta_to_total_new_to_delta(
+                            &mut __path_ind_common_new,
+                            &mut __path_ind_common_delta,
+                            &mut __path_ind_common_total,
+                        );
+                        ::ascent::internal::RelIndexMerge::merge_delta_to_total_new_to_delta(
+                            &mut path_indices_0_new
+                                .to_rel_index_write(&mut __path_ind_common_new),
+                            &mut path_indices_0_delta
+                                .to_rel_index_write(&mut __path_ind_common_delta),
+                            &mut path_indices_0_total
+                                .to_rel_index_write(&mut __path_ind_common_total),
+                        );
+                        ::ascent::internal::RelIndexMerge::merge_delta_to_total_new_to_delta(
+                            &mut path_indices_0_1_new
+                                .to_rel_index_write(&mut __path_ind_common_new),
+                            &mut path_indices_0_1_delta
+                                .to_rel_index_write(&mut __path_ind_common_delta),
+                            &mut path_indices_0_1_total
+                                .to_rel_index_write(&mut __path_ind_common_total),
+                        );
+                        _self.scc_iters[2usize] += 1;
+                    }
+                    _self.__path_ind_common = __path_ind_common_total;
+                    _self.path_indices_0 = path_indices_0_total;
+                    _self.path_indices_0_1 = path_indices_0_1_total;
+                    _self.__redex_eq_ind_common = __redex_eq_ind_common_total;
+                    _self.redex_eq_indices_none = redex_eq_indices_none_total;
+                    _self.scc_times[2usize] += _scc_start_time.elapsed();
+                }
+                ascent::internal::comment("scc 3");
+                {
+                    let _scc_start_time = ::ascent::internal::Instant::now();
+                    let mut __path_ind_common_delta: () = ::std::mem::take(
+                        &mut _self.__path_ind_common,
+                    );
+                    let mut __path_ind_common_total: () = Default::default();
+                    let mut __path_ind_common_new: () = Default::default();
+                    ::ascent::internal::RelIndexMerge::init(
+                        &mut __path_ind_common_new,
+                        &mut __path_ind_common_delta,
+                        &mut __path_ind_common_total,
+                    );
+                    let mut path_indices_0_delta: ascent::rel::ToRelIndexType<
+                        (Proc,),
+                        (Proc,),
+                    > = ::std::mem::take(&mut _self.path_indices_0);
+                    let mut path_indices_0_total: ascent::rel::ToRelIndexType<
+                        (Proc,),
+                        (Proc,),
+                    > = Default::default();
+                    let mut path_indices_0_new: ascent::rel::ToRelIndexType<
+                        (Proc,),
+                        (Proc,),
+                    > = Default::default();
+                    ::ascent::internal::RelIndexMerge::init(
+                        &mut path_indices_0_new
+                            .to_rel_index_write(&mut __path_ind_common_new),
+                        &mut path_indices_0_delta
+                            .to_rel_index_write(&mut __path_ind_common_delta),
+                        &mut path_indices_0_total
+                            .to_rel_index_write(&mut __path_ind_common_total),
+                    );
+                    let mut path_indices_0_1_delta: ascent::internal::RelFullIndexType<
+                        (Proc, Proc),
+                        (),
+                    > = ::std::mem::take(&mut _self.path_indices_0_1);
+                    let mut path_indices_0_1_total: ascent::internal::RelFullIndexType<
+                        (Proc, Proc),
+                        (),
+                    > = Default::default();
+                    let mut path_indices_0_1_new: ascent::internal::RelFullIndexType<
+                        (Proc, Proc),
+                        (),
+                    > = Default::default();
+                    ::ascent::internal::RelIndexMerge::init(
+                        &mut path_indices_0_1_new
+                            .to_rel_index_write(&mut __path_ind_common_new),
+                        &mut path_indices_0_1_delta
+                            .to_rel_index_write(&mut __path_ind_common_delta),
+                        &mut path_indices_0_1_total
+                            .to_rel_index_write(&mut __path_ind_common_total),
+                    );
+                    let __rw_proc_ind_common_total: () = std::mem::take(
+                        &mut _self.__rw_proc_ind_common,
+                    );
+                    let rw_proc_indices_none_total: ascent::rel::ToRelIndexType<
+                        (),
+                        (Proc, Proc),
+                    > = std::mem::take(&mut _self.rw_proc_indices_none);
+                    #[allow(unused_assignments, unused_variables)]
+                    {
+                        let mut __changed = false;
+                        ascent::internal::comment("path <-- rw_proc_indices_none_total");
+                        {
+                            if let Some(__matching) = rw_proc_indices_none_total
+                                .to_rel_index(&__rw_proc_ind_common_total)
+                                .index_get(&())
+                            {
+                                __matching
+                                    .for_each(|__val| {
+                                        let __val = __val.tuple_of_borrowed();
+                                        let p: &Proc = __val.0;
+                                        let q: &Proc = __val.1;
+                                        let __new_row: (Proc, Proc) = (p.clone(), q.clone());
+                                        if !::ascent::internal::RelFullIndexRead::contains_key(
+                                            &path_indices_0_1_total
+                                                .to_rel_index(&__path_ind_common_total),
+                                            &__new_row,
+                                        )
+                                            && !::ascent::internal::RelFullIndexRead::contains_key(
+                                                &path_indices_0_1_delta
+                                                    .to_rel_index(&__path_ind_common_delta),
+                                                &__new_row,
+                                            )
+                                        {
+                                            if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
+                                                &mut path_indices_0_1_new
+                                                    .to_rel_index_write(&mut __path_ind_common_new),
+                                                &__new_row,
+                                                (),
+                                            ) {
+                                                let __new_row_ind = _self.path.len();
+                                                _self.path.push((__new_row.0.clone(), __new_row.1.clone()));
                                                 ::ascent::internal::RelIndexWrite::index_insert(
-                                                    &mut path_indices_none_new
+                                                    &mut path_indices_0_new
                                                         .to_rel_index_write(&mut __path_ind_common_new),
-                                                    (),
-                                                    (__new_row.0.clone(), __new_row.1.clone()),
+                                                    (__new_row.0.clone(),),
+                                                    (__new_row.1.clone(),),
                                                 );
                                                 __changed = true;
                                             }
@@ -6513,14 +12420,6 @@ logical indices: rw_indices_0; rw_indices_0_1; rw_indices_1; rw_indices_none*/
                                 .to_rel_index_write(&mut __path_ind_common_total),
                         );
                         ::ascent::internal::RelIndexMerge::merge_delta_to_total_new_to_delta(
-                            &mut path_indices_none_new
-                                .to_rel_index_write(&mut __path_ind_common_new),
-                            &mut path_indices_none_delta
-                                .to_rel_index_write(&mut __path_ind_common_delta),
-                            &mut path_indices_none_total
-                                .to_rel_index_write(&mut __path_ind_common_total),
-                        );
-                        ::ascent::internal::RelIndexMerge::merge_delta_to_total_new_to_delta(
                             &mut __path_ind_common_new,
                             &mut __path_ind_common_delta,
                             &mut __path_ind_common_total,
@@ -6541,25 +12440,16 @@ logical indices: rw_indices_0; rw_indices_0_1; rw_indices_1; rw_indices_none*/
                             &mut path_indices_0_1_total
                                 .to_rel_index_write(&mut __path_ind_common_total),
                         );
-                        ::ascent::internal::RelIndexMerge::merge_delta_to_total_new_to_delta(
-                            &mut path_indices_none_new
-                                .to_rel_index_write(&mut __path_ind_common_new),
-                            &mut path_indices_none_delta
-                                .to_rel_index_write(&mut __path_ind_common_delta),
-                            &mut path_indices_none_total
-                                .to_rel_index_write(&mut __path_ind_common_total),
-                        );
-                        _self.scc_iters[2usize] += 1;
+                        _self.scc_iters[3usize] += 1;
                     }
                     _self.__path_ind_common = __path_ind_common_total;
                     _self.path_indices_0 = path_indices_0_total;
                     _self.path_indices_0_1 = path_indices_0_1_total;
-                    _self.path_indices_none = path_indices_none_total;
-                    _self.__rw_ind_common = __rw_ind_common_total;
-                    _self.rw_indices_none = rw_indices_none_total;
-                    _self.scc_times[2usize] += _scc_start_time.elapsed();
+                    _self.__rw_proc_ind_common = __rw_proc_ind_common_total;
+                    _self.rw_proc_indices_none = rw_proc_indices_none_total;
+                    _self.scc_times[3usize] += _scc_start_time.elapsed();
                 }
-                ascent::internal::comment("scc 3");
+                ascent::internal::comment("scc 4");
                 {
                     let _scc_start_time = ::ascent::internal::Instant::now();
                     let mut __path_ind_common_delta: () = ::std::mem::take(
@@ -6574,15 +12464,15 @@ logical indices: rw_indices_0; rw_indices_0_1; rw_indices_1; rw_indices_none*/
                     );
                     let mut path_indices_0_delta: ascent::rel::ToRelIndexType<
                         (Proc,),
-                        (Vec<Proc>,),
+                        (Proc,),
                     > = ::std::mem::take(&mut _self.path_indices_0);
                     let mut path_indices_0_total: ascent::rel::ToRelIndexType<
                         (Proc,),
-                        (Vec<Proc>,),
+                        (Proc,),
                     > = Default::default();
                     let mut path_indices_0_new: ascent::rel::ToRelIndexType<
                         (Proc,),
-                        (Vec<Proc>,),
+                        (Proc,),
                     > = Default::default();
                     ::ascent::internal::RelIndexMerge::init(
                         &mut path_indices_0_new
@@ -6593,15 +12483,15 @@ logical indices: rw_indices_0; rw_indices_0_1; rw_indices_1; rw_indices_none*/
                             .to_rel_index_write(&mut __path_ind_common_total),
                     );
                     let mut path_indices_0_1_delta: ascent::internal::RelFullIndexType<
-                        (Proc, Vec<Proc>),
+                        (Proc, Proc),
                         (),
                     > = ::std::mem::take(&mut _self.path_indices_0_1);
                     let mut path_indices_0_1_total: ascent::internal::RelFullIndexType<
-                        (Proc, Vec<Proc>),
+                        (Proc, Proc),
                         (),
                     > = Default::default();
                     let mut path_indices_0_1_new: ascent::internal::RelFullIndexType<
-                        (Proc, Vec<Proc>),
+                        (Proc, Proc),
                         (),
                     > = Default::default();
                     ::ascent::internal::RelIndexMerge::init(
@@ -6612,182 +12502,44 @@ logical indices: rw_indices_0; rw_indices_0_1; rw_indices_1; rw_indices_none*/
                         &mut path_indices_0_1_total
                             .to_rel_index_write(&mut __path_ind_common_total),
                     );
-                    let mut path_indices_none_delta: ascent::rel::ToRelIndexType<
-                        (),
-                        (Proc, Vec<Proc>),
-                    > = ::std::mem::take(&mut _self.path_indices_none);
-                    let mut path_indices_none_total: ascent::rel::ToRelIndexType<
-                        (),
-                        (Proc, Vec<Proc>),
-                    > = Default::default();
-                    let mut path_indices_none_new: ascent::rel::ToRelIndexType<
-                        (),
-                        (Proc, Vec<Proc>),
-                    > = Default::default();
-                    ::ascent::internal::RelIndexMerge::init(
-                        &mut path_indices_none_new
-                            .to_rel_index_write(&mut __path_ind_common_new),
-                        &mut path_indices_none_delta
-                            .to_rel_index_write(&mut __path_ind_common_delta),
-                        &mut path_indices_none_total
-                            .to_rel_index_write(&mut __path_ind_common_total),
-                    );
-                    let __rw_ind_common_total: () = std::mem::take(
-                        &mut _self.__rw_ind_common,
-                    );
-                    let rw_indices_1_total: ascent::rel::ToRelIndexType<
-                        (Proc,),
-                        (Proc,),
-                    > = std::mem::take(&mut _self.rw_indices_1);
                     #[allow(unused_assignments, unused_variables)]
-                    loop {
+                    {
                         let mut __changed = false;
-                        ascent::internal::comment(
-                            "path <-- rw_indices_1_total, path_indices_0_delta, let ⋯ [SIMPLE JOIN]",
-                        );
+                        ascent::internal::comment("path <-- for_");
                         {
-                            if rw_indices_1_total
-                                .to_rel_index(&__rw_ind_common_total)
-                                .len_estimate()
-                                <= path_indices_0_delta
-                                    .to_rel_index(&__path_ind_common_delta)
-                                    .len_estimate()
-                            {
-                                rw_indices_1_total
-                                    .to_rel_index(&__rw_ind_common_total)
-                                    .iter_all()
-                                    .for_each(|(__cl1_joined_columns, __cl1_tuple_indices)| {
-                                        let __cl1_joined_columns = __cl1_joined_columns
-                                            .tuple_of_borrowed();
-                                        let p2 = __cl1_joined_columns.0;
-                                        if let Some(__matching) = path_indices_0_delta
-                                            .to_rel_index(&__path_ind_common_delta)
-                                            .index_get(&(p2.clone(),))
-                                        {
-                                            __cl1_tuple_indices
-                                                .for_each(|cl1_val| {
-                                                    let cl1_val = cl1_val.tuple_of_borrowed();
-                                                    let p1: &Proc = cl1_val.0;
-                                                    __matching
-                                                        .clone()
-                                                        .for_each(|__val| {
-                                                            let __val = __val.tuple_of_borrowed();
-                                                            let qs: &Vec<Proc> = __val.0;
-                                                            let ps = [
-                                                                <[_]>::into_vec(::alloc::boxed::box_new([p2.clone()])),
-                                                                qs.clone(),
-                                                            ]
-                                                                .concat();
-                                                            let __new_row: (Proc, Vec<Proc>) = (
-                                                                ascent::internal::Convert::convert(p1),
-                                                                ascent::internal::Convert::convert(ps),
-                                                            );
-                                                            if !::ascent::internal::RelFullIndexRead::contains_key(
-                                                                &path_indices_0_1_total
-                                                                    .to_rel_index(&__path_ind_common_total),
-                                                                &__new_row,
-                                                            )
-                                                                && !::ascent::internal::RelFullIndexRead::contains_key(
-                                                                    &path_indices_0_1_delta
-                                                                        .to_rel_index(&__path_ind_common_delta),
-                                                                    &__new_row,
-                                                                )
-                                                            {
-                                                                if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
-                                                                    &mut path_indices_0_1_new
-                                                                        .to_rel_index_write(&mut __path_ind_common_new),
-                                                                    &__new_row,
-                                                                    (),
-                                                                ) {
-                                                                    let __new_row_ind = _self.path.len();
-                                                                    _self.path.push((__new_row.0.clone(), __new_row.1.clone()));
-                                                                    ::ascent::internal::RelIndexWrite::index_insert(
-                                                                        &mut path_indices_0_new
-                                                                            .to_rel_index_write(&mut __path_ind_common_new),
-                                                                        (__new_row.0.clone(),),
-                                                                        (__new_row.1.clone(),),
-                                                                    );
-                                                                    ::ascent::internal::RelIndexWrite::index_insert(
-                                                                        &mut path_indices_none_new
-                                                                            .to_rel_index_write(&mut __path_ind_common_new),
-                                                                        (),
-                                                                        (__new_row.0.clone(), __new_row.1.clone()),
-                                                                    );
-                                                                    __changed = true;
-                                                                }
-                                                            }
-                                                        });
-                                                });
-                                        }
-                                    });
-                            } else {
-                                path_indices_0_delta
-                                    .to_rel_index(&__path_ind_common_delta)
-                                    .iter_all()
-                                    .for_each(|(__cl1_joined_columns, __cl1_tuple_indices)| {
-                                        let __cl1_joined_columns = __cl1_joined_columns
-                                            .tuple_of_borrowed();
-                                        let p2 = __cl1_joined_columns.0;
-                                        if let Some(__matching) = rw_indices_1_total
-                                            .to_rel_index(&__rw_ind_common_total)
-                                            .index_get(&(p2.clone(),))
-                                        {
-                                            __cl1_tuple_indices
-                                                .for_each(|cl1_val| {
-                                                    let cl1_val = cl1_val.tuple_of_borrowed();
-                                                    let qs: &Vec<Proc> = cl1_val.0;
-                                                    __matching
-                                                        .clone()
-                                                        .for_each(|__val| {
-                                                            let __val = __val.tuple_of_borrowed();
-                                                            let p1: &Proc = __val.0;
-                                                            let ps = [
-                                                                <[_]>::into_vec(::alloc::boxed::box_new([p2.clone()])),
-                                                                qs.clone(),
-                                                            ]
-                                                                .concat();
-                                                            let __new_row: (Proc, Vec<Proc>) = (
-                                                                ascent::internal::Convert::convert(p1),
-                                                                ascent::internal::Convert::convert(ps),
-                                                            );
-                                                            if !::ascent::internal::RelFullIndexRead::contains_key(
-                                                                &path_indices_0_1_total
-                                                                    .to_rel_index(&__path_ind_common_total),
-                                                                &__new_row,
-                                                            )
-                                                                && !::ascent::internal::RelFullIndexRead::contains_key(
-                                                                    &path_indices_0_1_delta
-                                                                        .to_rel_index(&__path_ind_common_delta),
-                                                                    &__new_row,
-                                                                )
-                                                            {
-                                                                if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
-                                                                    &mut path_indices_0_1_new
-                                                                        .to_rel_index_write(&mut __path_ind_common_new),
-                                                                    &__new_row,
-                                                                    (),
-                                                                ) {
-                                                                    let __new_row_ind = _self.path.len();
-                                                                    _self.path.push((__new_row.0.clone(), __new_row.1.clone()));
-                                                                    ::ascent::internal::RelIndexWrite::index_insert(
-                                                                        &mut path_indices_0_new
-                                                                            .to_rel_index_write(&mut __path_ind_common_new),
-                                                                        (__new_row.0.clone(),),
-                                                                        (__new_row.1.clone(),),
-                                                                    );
-                                                                    ::ascent::internal::RelIndexWrite::index_insert(
-                                                                        &mut path_indices_none_new
-                                                                            .to_rel_index_write(&mut __path_ind_common_new),
-                                                                        (),
-                                                                        (__new_row.0.clone(), __new_row.1.clone()),
-                                                                    );
-                                                                    __changed = true;
-                                                                }
-                                                            }
-                                                        });
-                                                });
-                                        }
-                                    });
+                            for _ in [()] {
+                                let __new_row: (Proc, Proc) = (
+                                    redex.clone(),
+                                    redex.clone(),
+                                );
+                                if !::ascent::internal::RelFullIndexRead::contains_key(
+                                    &path_indices_0_1_total
+                                        .to_rel_index(&__path_ind_common_total),
+                                    &__new_row,
+                                )
+                                    && !::ascent::internal::RelFullIndexRead::contains_key(
+                                        &path_indices_0_1_delta
+                                            .to_rel_index(&__path_ind_common_delta),
+                                        &__new_row,
+                                    )
+                                {
+                                    if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
+                                        &mut path_indices_0_1_new
+                                            .to_rel_index_write(&mut __path_ind_common_new),
+                                        &__new_row,
+                                        (),
+                                    ) {
+                                        let __new_row_ind = _self.path.len();
+                                        _self.path.push((__new_row.0.clone(), __new_row.1.clone()));
+                                        ::ascent::internal::RelIndexWrite::index_insert(
+                                            &mut path_indices_0_new
+                                                .to_rel_index_write(&mut __path_ind_common_new),
+                                            (__new_row.0.clone(),),
+                                            (__new_row.1.clone(),),
+                                        );
+                                        __changed = true;
+                                    }
+                                }
                             }
                         }
                         ::ascent::internal::RelIndexMerge::merge_delta_to_total_new_to_delta(
@@ -6812,308 +12564,150 @@ logical indices: rw_indices_0; rw_indices_0_1; rw_indices_1; rw_indices_none*/
                                 .to_rel_index_write(&mut __path_ind_common_total),
                         );
                         ::ascent::internal::RelIndexMerge::merge_delta_to_total_new_to_delta(
-                            &mut path_indices_none_new
+                            &mut __path_ind_common_new,
+                            &mut __path_ind_common_delta,
+                            &mut __path_ind_common_total,
+                        );
+                        ::ascent::internal::RelIndexMerge::merge_delta_to_total_new_to_delta(
+                            &mut path_indices_0_new
                                 .to_rel_index_write(&mut __path_ind_common_new),
-                            &mut path_indices_none_delta
+                            &mut path_indices_0_delta
                                 .to_rel_index_write(&mut __path_ind_common_delta),
-                            &mut path_indices_none_total
+                            &mut path_indices_0_total
                                 .to_rel_index_write(&mut __path_ind_common_total),
                         );
-                        _self.scc_iters[3usize] += 1;
-                        if !__changed {
-                            break;
-                        }
+                        ::ascent::internal::RelIndexMerge::merge_delta_to_total_new_to_delta(
+                            &mut path_indices_0_1_new
+                                .to_rel_index_write(&mut __path_ind_common_new),
+                            &mut path_indices_0_1_delta
+                                .to_rel_index_write(&mut __path_ind_common_delta),
+                            &mut path_indices_0_1_total
+                                .to_rel_index_write(&mut __path_ind_common_total),
+                        );
+                        _self.scc_iters[4usize] += 1;
                     }
                     _self.__path_ind_common = __path_ind_common_total;
                     _self.path_indices_0 = path_indices_0_total;
                     _self.path_indices_0_1 = path_indices_0_1_total;
-                    _self.path_indices_none = path_indices_none_total;
-                    _self.__rw_ind_common = __rw_ind_common_total;
-                    _self.rw_indices_1 = rw_indices_1_total;
-                    _self.scc_times[3usize] += _scc_start_time.elapsed();
-                }
-                ascent::internal::comment("scc 4");
-                {
-                    let _scc_start_time = ::ascent::internal::Instant::now();
-                    let mut __path_terminal_ind_common_delta: () = ::std::mem::take(
-                        &mut _self.__path_terminal_ind_common,
-                    );
-                    let mut __path_terminal_ind_common_total: () = Default::default();
-                    let mut __path_terminal_ind_common_new: () = Default::default();
-                    ::ascent::internal::RelIndexMerge::init(
-                        &mut __path_terminal_ind_common_new,
-                        &mut __path_terminal_ind_common_delta,
-                        &mut __path_terminal_ind_common_total,
-                    );
-                    let mut path_terminal_indices_0_1_delta: ascent::internal::RelFullIndexType<
-                        (Proc, Vec<Proc>),
-                        (),
-                    > = ::std::mem::take(&mut _self.path_terminal_indices_0_1);
-                    let mut path_terminal_indices_0_1_total: ascent::internal::RelFullIndexType<
-                        (Proc, Vec<Proc>),
-                        (),
-                    > = Default::default();
-                    let mut path_terminal_indices_0_1_new: ascent::internal::RelFullIndexType<
-                        (Proc, Vec<Proc>),
-                        (),
-                    > = Default::default();
-                    ::ascent::internal::RelIndexMerge::init(
-                        &mut path_terminal_indices_0_1_new
-                            .to_rel_index_write(&mut __path_terminal_ind_common_new),
-                        &mut path_terminal_indices_0_1_delta
-                            .to_rel_index_write(&mut __path_terminal_ind_common_delta),
-                        &mut path_terminal_indices_0_1_total
-                            .to_rel_index_write(&mut __path_terminal_ind_common_total),
-                    );
-                    let mut path_terminal_indices_none_delta: ascent::rel::ToRelIndexType<
-                        (),
-                        (Proc, Vec<Proc>),
-                    > = ::std::mem::take(&mut _self.path_terminal_indices_none);
-                    let mut path_terminal_indices_none_total: ascent::rel::ToRelIndexType<
-                        (),
-                        (Proc, Vec<Proc>),
-                    > = Default::default();
-                    let mut path_terminal_indices_none_new: ascent::rel::ToRelIndexType<
-                        (),
-                        (Proc, Vec<Proc>),
-                    > = Default::default();
-                    ::ascent::internal::RelIndexMerge::init(
-                        &mut path_terminal_indices_none_new
-                            .to_rel_index_write(&mut __path_terminal_ind_common_new),
-                        &mut path_terminal_indices_none_delta
-                            .to_rel_index_write(&mut __path_terminal_ind_common_delta),
-                        &mut path_terminal_indices_none_total
-                            .to_rel_index_write(&mut __path_terminal_ind_common_total),
-                    );
-                    let __path_ind_common_total: () = std::mem::take(
-                        &mut _self.__path_ind_common,
-                    );
-                    let path_indices_none_total: ascent::rel::ToRelIndexType<
-                        (),
-                        (Proc, Vec<Proc>),
-                    > = std::mem::take(&mut _self.path_indices_none);
-                    let __rw_ind_common_total: () = std::mem::take(
-                        &mut _self.__rw_ind_common,
-                    );
-                    let rw_indices_0_total: ascent::rel::ToRelIndexType<
-                        (Proc,),
-                        (Proc,),
-                    > = std::mem::take(&mut _self.rw_indices_0);
-                    #[allow(unused_assignments, unused_variables)]
-                    {
-                        let mut __changed = false;
-                        ascent::internal::comment(
-                            "path_terminal <-- path_indices_none_total, let ⋯, agg rw_indices_0",
-                        );
-                        {
-                            if let Some(__matching) = path_indices_none_total
-                                .to_rel_index(&__path_ind_common_total)
-                                .index_get(&())
-                            {
-                                __matching
-                                    .for_each(|__val| {
-                                        let __val = __val.tuple_of_borrowed();
-                                        let p: &Proc = __val.0;
-                                        let ps: &Vec<Proc> = __val.1;
-                                        let z = ps.last().unwrap();
-                                        let __aggregated_rel = rw_indices_0_total
-                                            .to_rel_index(&__rw_ind_common_total);
-                                        let __matching = __aggregated_rel.index_get(&(z.clone(),));
-                                        let __agg_args = __matching
-                                            .into_iter()
-                                            .flatten()
-                                            .map(|__val| { () });
-                                        for () in ::ascent::aggregators::not(__agg_args) {
-                                            let __new_row: (Proc, Vec<Proc>) = (
-                                                ascent::internal::Convert::convert(p),
-                                                ascent::internal::Convert::convert(ps),
-                                            );
-                                            if !::ascent::internal::RelFullIndexRead::contains_key(
-                                                &path_terminal_indices_0_1_total
-                                                    .to_rel_index(&__path_terminal_ind_common_total),
-                                                &__new_row,
-                                            )
-                                                && !::ascent::internal::RelFullIndexRead::contains_key(
-                                                    &path_terminal_indices_0_1_delta
-                                                        .to_rel_index(&__path_terminal_ind_common_delta),
-                                                    &__new_row,
-                                                )
-                                            {
-                                                if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
-                                                    &mut path_terminal_indices_0_1_new
-                                                        .to_rel_index_write(&mut __path_terminal_ind_common_new),
-                                                    &__new_row,
-                                                    (),
-                                                ) {
-                                                    let __new_row_ind = _self.path_terminal.len();
-                                                    _self
-                                                        .path_terminal
-                                                        .push((__new_row.0.clone(), __new_row.1.clone()));
-                                                    ::ascent::internal::RelIndexWrite::index_insert(
-                                                        &mut path_terminal_indices_none_new
-                                                            .to_rel_index_write(&mut __path_terminal_ind_common_new),
-                                                        (),
-                                                        (__new_row.0.clone(), __new_row.1.clone()),
-                                                    );
-                                                    __changed = true;
-                                                }
-                                            }
-                                        }
-                                    });
-                            }
-                        }
-                        ::ascent::internal::RelIndexMerge::merge_delta_to_total_new_to_delta(
-                            &mut __path_terminal_ind_common_new,
-                            &mut __path_terminal_ind_common_delta,
-                            &mut __path_terminal_ind_common_total,
-                        );
-                        ::ascent::internal::RelIndexMerge::merge_delta_to_total_new_to_delta(
-                            &mut path_terminal_indices_0_1_new
-                                .to_rel_index_write(&mut __path_terminal_ind_common_new),
-                            &mut path_terminal_indices_0_1_delta
-                                .to_rel_index_write(&mut __path_terminal_ind_common_delta),
-                            &mut path_terminal_indices_0_1_total
-                                .to_rel_index_write(&mut __path_terminal_ind_common_total),
-                        );
-                        ::ascent::internal::RelIndexMerge::merge_delta_to_total_new_to_delta(
-                            &mut path_terminal_indices_none_new
-                                .to_rel_index_write(&mut __path_terminal_ind_common_new),
-                            &mut path_terminal_indices_none_delta
-                                .to_rel_index_write(&mut __path_terminal_ind_common_delta),
-                            &mut path_terminal_indices_none_total
-                                .to_rel_index_write(&mut __path_terminal_ind_common_total),
-                        );
-                        ::ascent::internal::RelIndexMerge::merge_delta_to_total_new_to_delta(
-                            &mut __path_terminal_ind_common_new,
-                            &mut __path_terminal_ind_common_delta,
-                            &mut __path_terminal_ind_common_total,
-                        );
-                        ::ascent::internal::RelIndexMerge::merge_delta_to_total_new_to_delta(
-                            &mut path_terminal_indices_0_1_new
-                                .to_rel_index_write(&mut __path_terminal_ind_common_new),
-                            &mut path_terminal_indices_0_1_delta
-                                .to_rel_index_write(&mut __path_terminal_ind_common_delta),
-                            &mut path_terminal_indices_0_1_total
-                                .to_rel_index_write(&mut __path_terminal_ind_common_total),
-                        );
-                        ::ascent::internal::RelIndexMerge::merge_delta_to_total_new_to_delta(
-                            &mut path_terminal_indices_none_new
-                                .to_rel_index_write(&mut __path_terminal_ind_common_new),
-                            &mut path_terminal_indices_none_delta
-                                .to_rel_index_write(&mut __path_terminal_ind_common_delta),
-                            &mut path_terminal_indices_none_total
-                                .to_rel_index_write(&mut __path_terminal_ind_common_total),
-                        );
-                        _self.scc_iters[4usize] += 1;
-                    }
-                    _self.__path_terminal_ind_common = __path_terminal_ind_common_total;
-                    _self.path_terminal_indices_0_1 = path_terminal_indices_0_1_total;
-                    _self.path_terminal_indices_none = path_terminal_indices_none_total;
-                    _self.__path_ind_common = __path_ind_common_total;
-                    _self.path_indices_none = path_indices_none_total;
-                    _self.__rw_ind_common = __rw_ind_common_total;
-                    _self.rw_indices_0 = rw_indices_0_total;
                     _self.scc_times[4usize] += _scc_start_time.elapsed();
                 }
                 ascent::internal::comment("scc 5");
                 {
                     let _scc_start_time = ::ascent::internal::Instant::now();
-                    let mut __full_path_ind_common_delta: () = ::std::mem::take(
-                        &mut _self.__full_path_ind_common,
+                    let mut __path_ind_common_delta: () = ::std::mem::take(
+                        &mut _self.__path_ind_common,
                     );
-                    let mut __full_path_ind_common_total: () = Default::default();
-                    let mut __full_path_ind_common_new: () = Default::default();
+                    let mut __path_ind_common_total: () = Default::default();
+                    let mut __path_ind_common_new: () = Default::default();
                     ::ascent::internal::RelIndexMerge::init(
-                        &mut __full_path_ind_common_new,
-                        &mut __full_path_ind_common_delta,
-                        &mut __full_path_ind_common_total,
+                        &mut __path_ind_common_new,
+                        &mut __path_ind_common_delta,
+                        &mut __path_ind_common_total,
                     );
-                    let mut full_path_indices_0_1_delta: ascent::internal::RelFullIndexType<
-                        (Proc, Vec<Proc>),
-                        (),
-                    > = ::std::mem::take(&mut _self.full_path_indices_0_1);
-                    let mut full_path_indices_0_1_total: ascent::internal::RelFullIndexType<
-                        (Proc, Vec<Proc>),
-                        (),
+                    let mut path_indices_0_delta: ascent::rel::ToRelIndexType<
+                        (Proc,),
+                        (Proc,),
+                    > = ::std::mem::take(&mut _self.path_indices_0);
+                    let mut path_indices_0_total: ascent::rel::ToRelIndexType<
+                        (Proc,),
+                        (Proc,),
                     > = Default::default();
-                    let mut full_path_indices_0_1_new: ascent::internal::RelFullIndexType<
-                        (Proc, Vec<Proc>),
-                        (),
+                    let mut path_indices_0_new: ascent::rel::ToRelIndexType<
+                        (Proc,),
+                        (Proc,),
                     > = Default::default();
                     ::ascent::internal::RelIndexMerge::init(
-                        &mut full_path_indices_0_1_new
-                            .to_rel_index_write(&mut __full_path_ind_common_new),
-                        &mut full_path_indices_0_1_delta
-                            .to_rel_index_write(&mut __full_path_ind_common_delta),
-                        &mut full_path_indices_0_1_total
-                            .to_rel_index_write(&mut __full_path_ind_common_total),
+                        &mut path_indices_0_new
+                            .to_rel_index_write(&mut __path_ind_common_new),
+                        &mut path_indices_0_delta
+                            .to_rel_index_write(&mut __path_ind_common_delta),
+                        &mut path_indices_0_total
+                            .to_rel_index_write(&mut __path_ind_common_total),
                     );
-                    let __eq_ind_common_total: () = std::mem::take(
-                        &mut _self.__eq_ind_common,
-                    );
-                    let eq_indices_0_1_total: ascent::internal::RelFullIndexType<
+                    let mut path_indices_0_1_delta: ascent::internal::RelFullIndexType<
                         (Proc, Proc),
                         (),
-                    > = std::mem::take(&mut _self.eq_indices_0_1);
-                    let __path_terminal_ind_common_total: () = std::mem::take(
-                        &mut _self.__path_terminal_ind_common,
-                    );
-                    let path_terminal_indices_none_total: ascent::rel::ToRelIndexType<
+                    > = ::std::mem::take(&mut _self.path_indices_0_1);
+                    let mut path_indices_0_1_total: ascent::internal::RelFullIndexType<
+                        (Proc, Proc),
                         (),
-                        (Proc, Vec<Proc>),
-                    > = std::mem::take(&mut _self.path_terminal_indices_none);
+                    > = Default::default();
+                    let mut path_indices_0_1_new: ascent::internal::RelFullIndexType<
+                        (Proc, Proc),
+                        (),
+                    > = Default::default();
+                    ::ascent::internal::RelIndexMerge::init(
+                        &mut path_indices_0_1_new
+                            .to_rel_index_write(&mut __path_ind_common_new),
+                        &mut path_indices_0_1_delta
+                            .to_rel_index_write(&mut __path_ind_common_delta),
+                        &mut path_indices_0_1_total
+                            .to_rel_index_write(&mut __path_ind_common_total),
+                    );
+                    let __rw_proc_ind_common_total: () = std::mem::take(
+                        &mut _self.__rw_proc_ind_common,
+                    );
+                    let rw_proc_indices_none_total: ascent::rel::ToRelIndexType<
+                        (),
+                        (Proc, Proc),
+                    > = std::mem::take(&mut _self.rw_proc_indices_none);
                     #[allow(unused_assignments, unused_variables)]
-                    {
+                    loop {
                         let mut __changed = false;
                         ascent::internal::comment(
-                            "full_path <-- path_terminal_indices_none_total, eq_indices_0_1_total",
+                            "path <-- rw_proc_indices_none_total, path_indices_0_delta",
                         );
                         {
-                            let any_rel_empty = path_terminal_indices_none_total
-                                .to_rel_index(&__path_terminal_ind_common_total)
+                            let any_rel_empty = rw_proc_indices_none_total
+                                .to_rel_index(&__rw_proc_ind_common_total)
                                 .is_empty()
-                                || eq_indices_0_1_total
-                                    .to_rel_index(&__eq_ind_common_total)
+                                || path_indices_0_delta
+                                    .to_rel_index(&__path_ind_common_delta)
                                     .is_empty();
                             if !any_rel_empty {
-                                if let Some(__matching) = path_terminal_indices_none_total
-                                    .to_rel_index(&__path_terminal_ind_common_total)
+                                if let Some(__matching) = rw_proc_indices_none_total
+                                    .to_rel_index(&__rw_proc_ind_common_total)
                                     .index_get(&())
                                 {
                                     __matching
                                         .for_each(|__val| {
                                             let __val = __val.tuple_of_borrowed();
-                                            let s: &Proc = __val.0;
-                                            let ps: &Vec<Proc> = __val.1;
-                                            if let Some(__matching) = eq_indices_0_1_total
-                                                .to_rel_index(&__eq_ind_common_total)
-                                                .index_get(&(s.clone(), (redex.clone()).clone()))
+                                            let p: &Proc = __val.0;
+                                            let q: &Proc = __val.1;
+                                            if let Some(__matching) = path_indices_0_delta
+                                                .to_rel_index(&__path_ind_common_delta)
+                                                .index_get(&((q.clone()).clone(),))
                                             {
                                                 __matching
                                                     .for_each(|__val| {
-                                                        let __new_row: (Proc, Vec<Proc>) = (
-                                                            ascent::internal::Convert::convert(s),
-                                                            ascent::internal::Convert::convert(ps),
-                                                        );
+                                                        let __val = __val.tuple_of_borrowed();
+                                                        let r: &Proc = __val.0;
+                                                        let __new_row: (Proc, Proc) = (p.clone(), r.clone());
                                                         if !::ascent::internal::RelFullIndexRead::contains_key(
-                                                            &full_path_indices_0_1_total
-                                                                .to_rel_index(&__full_path_ind_common_total),
+                                                            &path_indices_0_1_total
+                                                                .to_rel_index(&__path_ind_common_total),
                                                             &__new_row,
                                                         )
                                                             && !::ascent::internal::RelFullIndexRead::contains_key(
-                                                                &full_path_indices_0_1_delta
-                                                                    .to_rel_index(&__full_path_ind_common_delta),
+                                                                &path_indices_0_1_delta
+                                                                    .to_rel_index(&__path_ind_common_delta),
                                                                 &__new_row,
                                                             )
                                                         {
                                                             if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
-                                                                &mut full_path_indices_0_1_new
-                                                                    .to_rel_index_write(&mut __full_path_ind_common_new),
+                                                                &mut path_indices_0_1_new
+                                                                    .to_rel_index_write(&mut __path_ind_common_new),
                                                                 &__new_row,
                                                                 (),
                                                             ) {
-                                                                let __new_row_ind = _self.full_path.len();
-                                                                _self.full_path.push((__new_row.0, __new_row.1));
+                                                                let __new_row_ind = _self.path.len();
+                                                                _self.path.push((__new_row.0.clone(), __new_row.1.clone()));
+                                                                ::ascent::internal::RelIndexWrite::index_insert(
+                                                                    &mut path_indices_0_new
+                                                                        .to_rel_index_write(&mut __path_ind_common_new),
+                                                                    (__new_row.0.clone(),),
+                                                                    (__new_row.1.clone(),),
+                                                                );
                                                                 __changed = true;
                                                             }
                                                         }
@@ -7124,66 +12718,441 @@ logical indices: rw_indices_0; rw_indices_0_1; rw_indices_1; rw_indices_none*/
                             }
                         }
                         ::ascent::internal::RelIndexMerge::merge_delta_to_total_new_to_delta(
-                            &mut __full_path_ind_common_new,
-                            &mut __full_path_ind_common_delta,
-                            &mut __full_path_ind_common_total,
+                            &mut __path_ind_common_new,
+                            &mut __path_ind_common_delta,
+                            &mut __path_ind_common_total,
                         );
                         ::ascent::internal::RelIndexMerge::merge_delta_to_total_new_to_delta(
-                            &mut full_path_indices_0_1_new
-                                .to_rel_index_write(&mut __full_path_ind_common_new),
-                            &mut full_path_indices_0_1_delta
-                                .to_rel_index_write(&mut __full_path_ind_common_delta),
-                            &mut full_path_indices_0_1_total
-                                .to_rel_index_write(&mut __full_path_ind_common_total),
+                            &mut path_indices_0_new
+                                .to_rel_index_write(&mut __path_ind_common_new),
+                            &mut path_indices_0_delta
+                                .to_rel_index_write(&mut __path_ind_common_delta),
+                            &mut path_indices_0_total
+                                .to_rel_index_write(&mut __path_ind_common_total),
                         );
                         ::ascent::internal::RelIndexMerge::merge_delta_to_total_new_to_delta(
-                            &mut __full_path_ind_common_new,
-                            &mut __full_path_ind_common_delta,
-                            &mut __full_path_ind_common_total,
-                        );
-                        ::ascent::internal::RelIndexMerge::merge_delta_to_total_new_to_delta(
-                            &mut full_path_indices_0_1_new
-                                .to_rel_index_write(&mut __full_path_ind_common_new),
-                            &mut full_path_indices_0_1_delta
-                                .to_rel_index_write(&mut __full_path_ind_common_delta),
-                            &mut full_path_indices_0_1_total
-                                .to_rel_index_write(&mut __full_path_ind_common_total),
+                            &mut path_indices_0_1_new
+                                .to_rel_index_write(&mut __path_ind_common_new),
+                            &mut path_indices_0_1_delta
+                                .to_rel_index_write(&mut __path_ind_common_delta),
+                            &mut path_indices_0_1_total
+                                .to_rel_index_write(&mut __path_ind_common_total),
                         );
                         _self.scc_iters[5usize] += 1;
+                        if !__changed {
+                            break;
+                        }
                     }
-                    _self.__full_path_ind_common = __full_path_ind_common_total;
-                    _self.full_path_indices_0_1 = full_path_indices_0_1_total;
-                    _self.__eq_ind_common = __eq_ind_common_total;
-                    _self.eq_indices_0_1 = eq_indices_0_1_total;
-                    _self.__path_terminal_ind_common = __path_terminal_ind_common_total;
-                    _self.path_terminal_indices_none = path_terminal_indices_none_total;
+                    _self.__path_ind_common = __path_ind_common_total;
+                    _self.path_indices_0 = path_indices_0_total;
+                    _self.path_indices_0_1 = path_indices_0_1_total;
+                    _self.__rw_proc_ind_common = __rw_proc_ind_common_total;
+                    _self.rw_proc_indices_none = rw_proc_indices_none_total;
                     _self.scc_times[5usize] += _scc_start_time.elapsed();
+                }
+                ascent::internal::comment("scc 6");
+                {
+                    let _scc_start_time = ::ascent::internal::Instant::now();
+                    let mut __is_normal_form_ind_common_delta: () = ::std::mem::take(
+                        &mut _self.__is_normal_form_ind_common,
+                    );
+                    let mut __is_normal_form_ind_common_total: () = Default::default();
+                    let mut __is_normal_form_ind_common_new: () = Default::default();
+                    ::ascent::internal::RelIndexMerge::init(
+                        &mut __is_normal_form_ind_common_new,
+                        &mut __is_normal_form_ind_common_delta,
+                        &mut __is_normal_form_ind_common_total,
+                    );
+                    let mut is_normal_form_indices_0_delta: ascent::internal::RelFullIndexType<
+                        (Proc,),
+                        (),
+                    > = ::std::mem::take(&mut _self.is_normal_form_indices_0);
+                    let mut is_normal_form_indices_0_total: ascent::internal::RelFullIndexType<
+                        (Proc,),
+                        (),
+                    > = Default::default();
+                    let mut is_normal_form_indices_0_new: ascent::internal::RelFullIndexType<
+                        (Proc,),
+                        (),
+                    > = Default::default();
+                    ::ascent::internal::RelIndexMerge::init(
+                        &mut is_normal_form_indices_0_new
+                            .to_rel_index_write(&mut __is_normal_form_ind_common_new),
+                        &mut is_normal_form_indices_0_delta
+                            .to_rel_index_write(&mut __is_normal_form_ind_common_delta),
+                        &mut is_normal_form_indices_0_total
+                            .to_rel_index_write(&mut __is_normal_form_ind_common_total),
+                    );
+                    let mut is_normal_form_indices_none_delta: ascent::rel::ToRelIndexType<
+                        (),
+                        (Proc,),
+                    > = ::std::mem::take(&mut _self.is_normal_form_indices_none);
+                    let mut is_normal_form_indices_none_total: ascent::rel::ToRelIndexType<
+                        (),
+                        (Proc,),
+                    > = Default::default();
+                    let mut is_normal_form_indices_none_new: ascent::rel::ToRelIndexType<
+                        (),
+                        (Proc,),
+                    > = Default::default();
+                    ::ascent::internal::RelIndexMerge::init(
+                        &mut is_normal_form_indices_none_new
+                            .to_rel_index_write(&mut __is_normal_form_ind_common_new),
+                        &mut is_normal_form_indices_none_delta
+                            .to_rel_index_write(&mut __is_normal_form_ind_common_delta),
+                        &mut is_normal_form_indices_none_total
+                            .to_rel_index_write(&mut __is_normal_form_ind_common_total),
+                    );
+                    let __proc_ind_common_total: () = std::mem::take(
+                        &mut _self.__proc_ind_common,
+                    );
+                    let proc_indices_none_total: ascent::rel::ToRelIndexType<
+                        (),
+                        (Proc,),
+                    > = std::mem::take(&mut _self.proc_indices_none);
+                    let __rw_proc_ind_common_total: () = std::mem::take(
+                        &mut _self.__rw_proc_ind_common,
+                    );
+                    let rw_proc_indices_0_total: ascent::rel::ToRelIndexType<
+                        (Proc,),
+                        (Proc,),
+                    > = std::mem::take(&mut _self.rw_proc_indices_0);
+                    #[allow(unused_assignments, unused_variables)]
+                    {
+                        let mut __changed = false;
+                        ascent::internal::comment(
+                            "is_normal_form <-- proc_indices_none_total, agg rw_proc_indices_0",
+                        );
+                        {
+                            if let Some(__matching) = proc_indices_none_total
+                                .to_rel_index(&__proc_ind_common_total)
+                                .index_get(&())
+                            {
+                                __matching
+                                    .for_each(|__val| {
+                                        let __val = __val.tuple_of_borrowed();
+                                        let t: &Proc = __val.0;
+                                        let __aggregated_rel = rw_proc_indices_0_total
+                                            .to_rel_index(&__rw_proc_ind_common_total);
+                                        let __matching = __aggregated_rel
+                                            .index_get(&((t.clone()).clone(),));
+                                        let __agg_args = __matching
+                                            .into_iter()
+                                            .flatten()
+                                            .map(|__val| { () });
+                                        for () in ::ascent::aggregators::not(__agg_args) {
+                                            let __new_row: (Proc,) = (t.clone(),);
+                                            if !::ascent::internal::RelFullIndexRead::contains_key(
+                                                &is_normal_form_indices_0_total
+                                                    .to_rel_index(&__is_normal_form_ind_common_total),
+                                                &__new_row,
+                                            )
+                                                && !::ascent::internal::RelFullIndexRead::contains_key(
+                                                    &is_normal_form_indices_0_delta
+                                                        .to_rel_index(&__is_normal_form_ind_common_delta),
+                                                    &__new_row,
+                                                )
+                                            {
+                                                if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
+                                                    &mut is_normal_form_indices_0_new
+                                                        .to_rel_index_write(&mut __is_normal_form_ind_common_new),
+                                                    &__new_row,
+                                                    (),
+                                                ) {
+                                                    let __new_row_ind = _self.is_normal_form.len();
+                                                    _self.is_normal_form.push((__new_row.0.clone(),));
+                                                    ::ascent::internal::RelIndexWrite::index_insert(
+                                                        &mut is_normal_form_indices_none_new
+                                                            .to_rel_index_write(&mut __is_normal_form_ind_common_new),
+                                                        (),
+                                                        (__new_row.0.clone(),),
+                                                    );
+                                                    __changed = true;
+                                                }
+                                            }
+                                        }
+                                    });
+                            }
+                        }
+                        ::ascent::internal::RelIndexMerge::merge_delta_to_total_new_to_delta(
+                            &mut __is_normal_form_ind_common_new,
+                            &mut __is_normal_form_ind_common_delta,
+                            &mut __is_normal_form_ind_common_total,
+                        );
+                        ::ascent::internal::RelIndexMerge::merge_delta_to_total_new_to_delta(
+                            &mut is_normal_form_indices_0_new
+                                .to_rel_index_write(&mut __is_normal_form_ind_common_new),
+                            &mut is_normal_form_indices_0_delta
+                                .to_rel_index_write(&mut __is_normal_form_ind_common_delta),
+                            &mut is_normal_form_indices_0_total
+                                .to_rel_index_write(&mut __is_normal_form_ind_common_total),
+                        );
+                        ::ascent::internal::RelIndexMerge::merge_delta_to_total_new_to_delta(
+                            &mut is_normal_form_indices_none_new
+                                .to_rel_index_write(&mut __is_normal_form_ind_common_new),
+                            &mut is_normal_form_indices_none_delta
+                                .to_rel_index_write(&mut __is_normal_form_ind_common_delta),
+                            &mut is_normal_form_indices_none_total
+                                .to_rel_index_write(&mut __is_normal_form_ind_common_total),
+                        );
+                        ::ascent::internal::RelIndexMerge::merge_delta_to_total_new_to_delta(
+                            &mut __is_normal_form_ind_common_new,
+                            &mut __is_normal_form_ind_common_delta,
+                            &mut __is_normal_form_ind_common_total,
+                        );
+                        ::ascent::internal::RelIndexMerge::merge_delta_to_total_new_to_delta(
+                            &mut is_normal_form_indices_0_new
+                                .to_rel_index_write(&mut __is_normal_form_ind_common_new),
+                            &mut is_normal_form_indices_0_delta
+                                .to_rel_index_write(&mut __is_normal_form_ind_common_delta),
+                            &mut is_normal_form_indices_0_total
+                                .to_rel_index_write(&mut __is_normal_form_ind_common_total),
+                        );
+                        ::ascent::internal::RelIndexMerge::merge_delta_to_total_new_to_delta(
+                            &mut is_normal_form_indices_none_new
+                                .to_rel_index_write(&mut __is_normal_form_ind_common_new),
+                            &mut is_normal_form_indices_none_delta
+                                .to_rel_index_write(&mut __is_normal_form_ind_common_delta),
+                            &mut is_normal_form_indices_none_total
+                                .to_rel_index_write(&mut __is_normal_form_ind_common_total),
+                        );
+                        _self.scc_iters[6usize] += 1;
+                    }
+                    _self.__is_normal_form_ind_common = __is_normal_form_ind_common_total;
+                    _self.is_normal_form_indices_0 = is_normal_form_indices_0_total;
+                    _self.is_normal_form_indices_none = is_normal_form_indices_none_total;
+                    _self.__proc_ind_common = __proc_ind_common_total;
+                    _self.proc_indices_none = proc_indices_none_total;
+                    _self.__rw_proc_ind_common = __rw_proc_ind_common_total;
+                    _self.rw_proc_indices_0 = rw_proc_indices_0_total;
+                    _self.scc_times[6usize] += _scc_start_time.elapsed();
+                }
+                ascent::internal::comment("scc 7");
+                {
+                    let _scc_start_time = ::ascent::internal::Instant::now();
+                    let mut __path_full_ind_common_delta: () = ::std::mem::take(
+                        &mut _self.__path_full_ind_common,
+                    );
+                    let mut __path_full_ind_common_total: () = Default::default();
+                    let mut __path_full_ind_common_new: () = Default::default();
+                    ::ascent::internal::RelIndexMerge::init(
+                        &mut __path_full_ind_common_new,
+                        &mut __path_full_ind_common_delta,
+                        &mut __path_full_ind_common_total,
+                    );
+                    let mut path_full_indices_0_1_delta: ascent::internal::RelFullIndexType<
+                        (Proc, Proc),
+                        (),
+                    > = ::std::mem::take(&mut _self.path_full_indices_0_1);
+                    let mut path_full_indices_0_1_total: ascent::internal::RelFullIndexType<
+                        (Proc, Proc),
+                        (),
+                    > = Default::default();
+                    let mut path_full_indices_0_1_new: ascent::internal::RelFullIndexType<
+                        (Proc, Proc),
+                        (),
+                    > = Default::default();
+                    ::ascent::internal::RelIndexMerge::init(
+                        &mut path_full_indices_0_1_new
+                            .to_rel_index_write(&mut __path_full_ind_common_new),
+                        &mut path_full_indices_0_1_delta
+                            .to_rel_index_write(&mut __path_full_ind_common_delta),
+                        &mut path_full_indices_0_1_total
+                            .to_rel_index_write(&mut __path_full_ind_common_total),
+                    );
+                    let __is_normal_form_ind_common_total: () = std::mem::take(
+                        &mut _self.__is_normal_form_ind_common,
+                    );
+                    let is_normal_form_indices_none_total: ascent::rel::ToRelIndexType<
+                        (),
+                        (Proc,),
+                    > = std::mem::take(&mut _self.is_normal_form_indices_none);
+                    let __path_ind_common_total: () = std::mem::take(
+                        &mut _self.__path_ind_common,
+                    );
+                    let path_indices_0_1_total: ascent::internal::RelFullIndexType<
+                        (Proc, Proc),
+                        (),
+                    > = std::mem::take(&mut _self.path_indices_0_1);
+                    #[allow(unused_assignments, unused_variables)]
+                    {
+                        let mut __changed = false;
+                        ascent::internal::comment(
+                            "path_full <-- is_normal_form_indices_none_total, path_indices_0_1_total",
+                        );
+                        {
+                            let any_rel_empty = is_normal_form_indices_none_total
+                                .to_rel_index(&__is_normal_form_ind_common_total)
+                                .is_empty()
+                                || path_indices_0_1_total
+                                    .to_rel_index(&__path_ind_common_total)
+                                    .is_empty();
+                            if !any_rel_empty {
+                                if let Some(__matching) = is_normal_form_indices_none_total
+                                    .to_rel_index(&__is_normal_form_ind_common_total)
+                                    .index_get(&())
+                                {
+                                    __matching
+                                        .for_each(|__val| {
+                                            let __val = __val.tuple_of_borrowed();
+                                            let z: &Proc = __val.0;
+                                            if let Some(__matching) = path_indices_0_1_total
+                                                .to_rel_index(&__path_ind_common_total)
+                                                .index_get(&((redex.clone()).clone(), z.clone()))
+                                            {
+                                                __matching
+                                                    .for_each(|__val| {
+                                                        let __new_row: (Proc, Proc) = (redex.clone(), z.clone());
+                                                        if !::ascent::internal::RelFullIndexRead::contains_key(
+                                                            &path_full_indices_0_1_total
+                                                                .to_rel_index(&__path_full_ind_common_total),
+                                                            &__new_row,
+                                                        )
+                                                            && !::ascent::internal::RelFullIndexRead::contains_key(
+                                                                &path_full_indices_0_1_delta
+                                                                    .to_rel_index(&__path_full_ind_common_delta),
+                                                                &__new_row,
+                                                            )
+                                                        {
+                                                            if ::ascent::internal::RelFullIndexWrite::insert_if_not_present(
+                                                                &mut path_full_indices_0_1_new
+                                                                    .to_rel_index_write(&mut __path_full_ind_common_new),
+                                                                &__new_row,
+                                                                (),
+                                                            ) {
+                                                                let __new_row_ind = _self.path_full.len();
+                                                                _self.path_full.push((__new_row.0, __new_row.1));
+                                                                __changed = true;
+                                                            }
+                                                        }
+                                                    });
+                                            }
+                                        });
+                                }
+                            }
+                        }
+                        ::ascent::internal::RelIndexMerge::merge_delta_to_total_new_to_delta(
+                            &mut __path_full_ind_common_new,
+                            &mut __path_full_ind_common_delta,
+                            &mut __path_full_ind_common_total,
+                        );
+                        ::ascent::internal::RelIndexMerge::merge_delta_to_total_new_to_delta(
+                            &mut path_full_indices_0_1_new
+                                .to_rel_index_write(&mut __path_full_ind_common_new),
+                            &mut path_full_indices_0_1_delta
+                                .to_rel_index_write(&mut __path_full_ind_common_delta),
+                            &mut path_full_indices_0_1_total
+                                .to_rel_index_write(&mut __path_full_ind_common_total),
+                        );
+                        ::ascent::internal::RelIndexMerge::merge_delta_to_total_new_to_delta(
+                            &mut __path_full_ind_common_new,
+                            &mut __path_full_ind_common_delta,
+                            &mut __path_full_ind_common_total,
+                        );
+                        ::ascent::internal::RelIndexMerge::merge_delta_to_total_new_to_delta(
+                            &mut path_full_indices_0_1_new
+                                .to_rel_index_write(&mut __path_full_ind_common_new),
+                            &mut path_full_indices_0_1_delta
+                                .to_rel_index_write(&mut __path_full_ind_common_delta),
+                            &mut path_full_indices_0_1_total
+                                .to_rel_index_write(&mut __path_full_ind_common_total),
+                        );
+                        _self.scc_iters[7usize] += 1;
+                    }
+                    _self.__path_full_ind_common = __path_full_ind_common_total;
+                    _self.path_full_indices_0_1 = path_full_indices_0_1_total;
+                    _self.__is_normal_form_ind_common = __is_normal_form_ind_common_total;
+                    _self.is_normal_form_indices_none = is_normal_form_indices_none_total;
+                    _self.__path_ind_common = __path_ind_common_total;
+                    _self.path_indices_0_1 = path_indices_0_1_total;
+                    _self.scc_times[7usize] += _scc_start_time.elapsed();
                 }
             }
             __run_res
         }
     };
-    let mut paths = prog.full_path.clone();
-    paths.sort_by(|a, b| a.0.cmp(&b.0));
+    let mut procs = prog.proc;
+    procs.sort_by(|a, b| a.0.cmp(&b.0));
     {
-        ::std::io::_print(format_args!("Paths found: {0}\n", paths.len()));
+        ::std::io::_print(format_args!("Terms: {0}\n", procs.len()));
     };
-    for (s, ps) in paths.iter().take(3) {
+    {
+        ::std::io::_print(format_args!("Rewrites: {0}\n", prog.rw_proc.len()));
+    };
+    {
+        ::std::io::_print(
+            format_args!("Normal forms: {0}\n", prog.is_normal_form.len()),
+        );
+    };
+    {
+        ::std::io::_print(format_args!("\n=== proc facts ===\n"));
+    };
+    {
+        ::std::io::_print(format_args!("Count: {0}\n", procs.len()));
+    };
+    for p in procs.iter().take(10) {
         {
-            ::std::io::_print(
-                format_args!(
-                    "{0} ~> {1}\n",
-                    s,
-                    ps
-                        .iter()
-                        .map(|p| p.to_string())
-                        .collect::<Vec<String>>()
-                        .join(" ~> "),
-                ),
-            );
-        };
-        {
-            ::std::io::_print(format_args!("\n"));
+            ::std::io::_print(format_args!("  {0}\n", p.0));
         };
     }
+    {
+        ::std::io::_print(format_args!("\n=== name facts ===\n"));
+    };
+    let mut names: Vec<_> = prog.name.iter().collect();
+    names
+        .sort_by(|a, b| {
+            ::alloc::__export::must_use({
+                    ::alloc::fmt::format(format_args!("{0:?}", a))
+                })
+                .cmp(
+                    &::alloc::__export::must_use({
+                        ::alloc::fmt::format(format_args!("{0:?}", b))
+                    }),
+                )
+        });
+    {
+        ::std::io::_print(format_args!("Count: {0}\n", names.len()));
+    };
+    for n in names.iter() {
+        {
+            ::std::io::_print(format_args!("  {0}\n", n.0));
+        };
+    }
+    {
+        ::std::io::_print(format_args!("\n=== eq_name facts ===\n"));
+    };
+    let mut eq_names: Vec<_> = prog.eq_name.iter().collect();
+    eq_names
+        .sort_by(|a, b| {
+            ::alloc::__export::must_use({
+                    ::alloc::fmt::format(format_args!("{0:?}", a))
+                })
+                .cmp(
+                    &::alloc::__export::must_use({
+                        ::alloc::fmt::format(format_args!("{0:?}", b))
+                    }),
+                )
+        });
+    for (n1, n2) in eq_names.iter().take(20) {
+        {
+            ::std::io::_print(format_args!("  {0} == {1}\n", n1, n2));
+        };
+    }
+    let mut path_full = prog.path_full.clone();
+    path_full.sort_by(|a, b| a.0.cmp(&b.0));
+    {
+        ::std::io::_print(format_args!("\n=== Paths to normal forms ===\n"));
+    };
+    {
+        ::std::io::_print(format_args!("Count: {0}\n", path_full.len()));
+    };
+    for (s, t) in path_full {
+        {
+            ::std::io::_print(format_args!("  {0} ~> {1}\n", s, t));
+        };
+    }
+    let elapsed = Instant::now().duration_since(start_time);
+    {
+        ::std::io::_print(format_args!("Time: {0:?}\n", elapsed));
+    };
 }
