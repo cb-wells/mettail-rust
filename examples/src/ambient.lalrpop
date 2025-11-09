@@ -11,16 +11,6 @@ Ident: String = {
 };
 
 pub Proc: Proc = {
-    <ProcInfix>
-};
-
-ProcInfix: Proc = {
-    <left:ProcInfix> "|" <right:ProcAtom> => Proc::PPar(Box::new(left), Box::new(right)),
-    <ProcAtom>
-};
-
-ProcAtom: Proc = {
-    "(" <Proc> ")",
     "0" => Proc::PZero,
     "in(" <f0:Name> "," <f1:Proc> ")" => Proc::PIn(Box::new(f0), Box::new(f1)),
     "out(" <f0:Name> "," <f1:Proc> ")" => Proc::POut(Box::new(f0), Box::new(f1)),
@@ -36,6 +26,16 @@ ProcAtom: Proc = {
         };
         let scope = Scope::new(binder, Box::new(body_1));
         Proc::PNew(scope)
+    },
+    "{" <elems:(<Proc> ",")*> <last:Proc?> "}" => {
+        let mut coll = mettail_runtime::HashBag::new();
+        for e in elems {
+            coll.insert(e);
+        }
+        if let Some(e) = last {
+            coll.insert(e);
+        }
+        Proc::PPar(coll)
     },
     <v:Ident> => Proc::PVar(mettail_runtime::OrdVar(Var::Free(mettail_runtime::get_or_create_var(v))))
 };

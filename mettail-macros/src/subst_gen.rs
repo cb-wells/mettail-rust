@@ -45,13 +45,19 @@ fn find_all_substitutable_categories(rules: &[GrammarRule]) -> std::collections:
             }
         }
         
-        // Add all non-terminal categories (except Var)
+        // Add all non-terminal categories (except Var) and collection element types
         for item in &rule.items {
-            if let GrammarItem::NonTerminal(cat) = item {
-                let cat_str = cat.to_string();
-                if cat_str != "Var" {
-                    cats.insert(cat_str);
+            match item {
+                GrammarItem::NonTerminal(cat) => {
+                    let cat_str = cat.to_string();
+                    if cat_str != "Var" {
+                        cats.insert(cat_str);
+                    }
                 }
+                GrammarItem::Collection { element_type, .. } => {
+                    cats.insert(element_type.to_string());
+                }
+                _ => {}
             }
         }
         
@@ -240,6 +246,11 @@ fn generate_scope_substitution_arm(category: &Ident, rule: &GrammarRule, replace
                 };
                 field_bindings.push(field_name);
             }
+            GrammarItem::Collection { .. } => {
+                // Collection gets a field binding
+                let field_name = quote::format_ident!("field_{}", field_bindings.len());
+                field_bindings.push(field_name);
+            }
             GrammarItem::Terminal(_) => {}
         }
     }
@@ -272,28 +283,73 @@ fn generate_scope_substitution_arm(category: &Ident, rule: &GrammarRule, replace
                 quote! { new_scope.clone() }
             } else {
                 // For non-scope fields, we should also substitute!
-                // Determine which method to call
-                let field_cat = &rule.items.iter()
+                // Find the corresponding field in rule.items (skipping binder)
+                let field_item = rule.items.iter()
                     .enumerate()
                     .filter(|(idx, item)| {
-                        *idx != *binder_idx && matches!(item, GrammarItem::NonTerminal(_))
+                        *idx != *binder_idx && 
+                        (matches!(item, GrammarItem::NonTerminal(_)) || matches!(item, GrammarItem::Collection { .. }))
                     })
                     .nth(i)
-                    .map(|(_, item)| match item {
-                        GrammarItem::NonTerminal(cat) => cat.to_string(),
-                        _ => unreachable!(),
-                    })
-                    .unwrap_or_default();
+                    .map(|(_, item)| item);
                 
-                let subst_method = if *field_cat == replacement_cat_str {
-                    quote! { substitute }
-                } else {
-                    let method_name = quote::format_ident!("substitute_{}", replacement_cat_str.to_lowercase());
-                    quote! { #method_name }
-                };
-                
-                // Recurse into non-scope fields too
-                quote! { Box::new((**#field_name).#subst_method(var, replacement)) }
+                match field_item {
+                    Some(GrammarItem::NonTerminal(field_cat)) => {
+                        let field_cat_str = field_cat.to_string();
+                        let subst_method = if field_cat_str == replacement_cat_str {
+                            quote! { substitute }
+                        } else {
+                            let method_name = quote::format_ident!("substitute_{}", replacement_cat_str.to_lowercase());
+                            quote! { #method_name }
+                        };
+                        quote! { Box::new((**#field_name).#subst_method(var, replacement)) }
+                    }
+                    Some(GrammarItem::Collection { element_type, coll_type, .. }) => {
+                        let elem_cat_str = element_type.to_string();
+                        let subst_method = if elem_cat_str == replacement_cat_str {
+                            quote! { substitute }
+                        } else {
+                            let method_name = quote::format_ident!("substitute_{}", replacement_cat_str.to_lowercase());
+                            quote! { #method_name }
+                        };
+                        
+                        // Map over collection elements
+                        match coll_type {
+                            crate::ast::CollectionType::HashBag => {
+                                quote! {
+                                    {
+                                        let mut bag = mettail_runtime::HashBag::new();
+                                        for (elem, count) in #field_name.iter() {
+                                            let subst_elem = elem.#subst_method(var, replacement);
+                                            for _ in 0..count {
+                                                bag.insert(subst_elem.clone());
+                                            }
+                                        }
+                                        bag
+                                    }
+                                }
+                            }
+                            crate::ast::CollectionType::HashSet => {
+                                quote! {
+                                    #field_name.iter().map(|elem| {
+                                        elem.#subst_method(var, replacement)
+                                    }).collect()
+                                }
+                            }
+                            crate::ast::CollectionType::Vec => {
+                                quote! {
+                                    #field_name.iter().map(|elem| {
+                                        elem.#subst_method(var, replacement)
+                                    }).collect()
+                                }
+                            }
+                        }
+                    }
+                    _ => {
+                        // Shouldn't happen, but clone as fallback
+                        quote! { #field_name.clone() }
+                    }
+                }
             }
         }).collect();
         
@@ -370,11 +426,20 @@ fn generate_regular_substitution_arm(category: &Ident, rule: &GrammarRule, repla
         }
     }
     
-    // Count total non-terminal fields for pattern matching (excluding Var)
-    let total_fields: Vec<_> = rule.items
+    // Count total fields (non-terminals excluding Var, and collections)
+    #[derive(Clone)]
+    enum FieldInfo {
+        NonTerminal(Ident),
+        Collection { element_type: Ident, coll_type: crate::ast::CollectionType },
+    }
+    
+    let total_fields: Vec<FieldInfo> = rule.items
         .iter()
         .filter_map(|item| match item {
-            GrammarItem::NonTerminal(ident) if ident.to_string() != "Var" => Some(ident),
+            GrammarItem::NonTerminal(ident) if ident.to_string() != "Var" => 
+                Some(FieldInfo::NonTerminal(ident.clone())),
+            GrammarItem::Collection { element_type, coll_type, .. } => 
+                Some(FieldInfo::Collection { element_type: element_type.clone(), coll_type: coll_type.clone() }),
             _ => None,
         })
         .collect();
@@ -386,17 +451,6 @@ fn generate_regular_substitution_arm(category: &Ident, rule: &GrammarRule, repla
         };
     }
     
-    // Check if ANY field is a category type (needs recursion)
-    // We need to recurse into ALL category fields, not just matching ones!
-    let has_category_fields = !total_fields.is_empty();
-    
-    if !has_category_fields {
-        // No category fields at all - just clone
-        return quote! {
-            #category::#label(..) => self.clone()
-        };
-    }
-    
     // Generate pattern bindings for all fields
     let field_bindings: Vec<TokenStream> = (0..total_fields.len())
         .map(|i| {
@@ -405,33 +459,72 @@ fn generate_regular_substitution_arm(category: &Ident, rule: &GrammarRule, repla
         })
         .collect();
     
-    // Determine substitution method to call for each field
-    // KEY INSIGHT: We need to recurse into ALL category fields!
-    // The method name is determined by the replacement category.
-    let category_str = category.to_string();
     let replacement_cat_str = replacement_cat.to_string();
     
     // Generate substitution calls - recurse into ALL category fields
     let field_substitutions: Vec<TokenStream> = (0..total_fields.len())
         .map(|i| {
             let field = quote::format_ident!("field_{}", i);
-            let field_cat = &total_fields[i];
-            let field_cat_str = field_cat.to_string();
             
-            // Determine which method to call on this field
-            // We're substituting replacement_cat, so call substitute_<replacement_cat>
-            let subst_method = if field_cat_str == replacement_cat_str {
-                // Field category matches replacement - use plain substitute
-                quote! { substitute }
-            } else {
-                // Cross-category - use substitute_<replacement_cat>
-                let method_name = quote::format_ident!("substitute_{}", replacement_cat_str.to_lowercase());
-                quote! { #method_name }
-            };
-            
-            // Always recurse into category fields
-            quote! {
-                Box::new((**#field).#subst_method(var, replacement))
+            match &total_fields[i] {
+                FieldInfo::NonTerminal(field_cat) => {
+                    let field_cat_str = field_cat.to_string();
+                    
+                    // Determine which method to call on this field
+                    let subst_method = if field_cat_str == replacement_cat_str {
+                        quote! { substitute }
+                    } else {
+                        let method_name = quote::format_ident!("substitute_{}", replacement_cat_str.to_lowercase());
+                        quote! { #method_name }
+                    };
+                    
+                    quote! {
+                        Box::new((**#field).#subst_method(var, replacement))
+                    }
+                }
+                FieldInfo::Collection { element_type, coll_type } => {
+                    let elem_cat_str = element_type.to_string();
+                    
+                    // Determine which method to call on collection elements
+                    let subst_method = if elem_cat_str == replacement_cat_str {
+                        quote! { substitute }
+                    } else {
+                        let method_name = quote::format_ident!("substitute_{}", replacement_cat_str.to_lowercase());
+                        quote! { #method_name }
+                    };
+                    
+                    // Map over collection, substituting in each element
+                    match coll_type {
+                        crate::ast::CollectionType::HashBag => {
+                            quote! {
+                                {
+                                    let mut bag = mettail_runtime::HashBag::new();
+                                    for (elem, count) in #field.iter() {
+                                        let subst_elem = elem.#subst_method(var, replacement);
+                                        for _ in 0..count {
+                                            bag.insert(subst_elem.clone());
+                                        }
+                                    }
+                                    bag
+                                }
+                            }
+                        }
+                        crate::ast::CollectionType::HashSet => {
+                            quote! {
+                                #field.iter().map(|elem| {
+                                    elem.#subst_method(var, replacement)
+                                }).collect()
+                            }
+                        }
+                        crate::ast::CollectionType::Vec => {
+                            quote! {
+                                #field.iter().map(|elem| {
+                                    elem.#subst_method(var, replacement)
+                                }).collect()
+                            }
+                        }
+                    }
+                }
             }
         })
         .collect();

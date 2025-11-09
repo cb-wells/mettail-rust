@@ -23,15 +23,12 @@ theory! {
         PAmb . Proc ::= Name "[" Proc "]";
         PNew . Proc ::= "new(" <Name> "," Proc ")";
 
-        PPar . Proc ::= Proc "|" Proc ;
+        PPar . Proc ::= HashBag(Proc) sep "," delim "{" "}" ;
 
         PVar . Proc ::= Var;
         NVar . Name ::= Var ;
     },
     equations {
-        (PPar P Q) == (PPar Q P) ;
-        (PPar P (PPar Q R)) == (PPar (PPar P Q) R) ;
-
         // if x # C then (PPar P (PNew x C)) == (PNew x (PPar P C));
         // if x # N then (PNew x (PIn N P)) == (PIn N (PNew x P));
         // if x # N then (PNew x (POut N P)) == (POut N (PNew x P));
@@ -39,30 +36,29 @@ theory! {
         // if x # N then (PNew x (PAmb N P)) == (PAmb N (PNew x P));
         // (PNew x (PNew y P)) == (PNew y (PNew x P));
     },
-    rewrites {
-        (PPar (PAmb N (PPar (PIn M P) Q)) (PAmb M R)) 
-            => (PAmb M (PPar (PAmb N (PPar P Q)) R));
-        (PAmb M (PPar (PAmb N (PPar (POut M P) Q)) R))
-            => (PPar (PAmb N (PPar P Q)) (PAmb M R));
-        (PPar (POpen N P) (PAmb N Q))
-            => (PPar P Q);
+    rewrites {  
+        (PPar {(PAmb N (PPar {(PIn M P) , Q})) , (PAmb M R), ...rest}) 
+            => (PPar {(PAmb M (PPar {(PAmb N (PPar {P , Q})) , R})), ...rest});
+            
+        // (PAmb M (PPar (PAmb N (PPar (POut M P) Q)) R))
+        //     => (PPar (PAmb N (PPar P Q)) (PAmb M R));
+        // (PPar (POpen N P) (PAmb N Q))
+        //     => (PPar P Q);
 
-        // congruences
-        if S => T then (PPar P S) => (PPar P T);
-        // if S => T then (PNew x S) => (PNew x T);
-        if S => T then (PAmb N S) => (PAmb N T);
+        // // if S => T then (PNew x S) => (PNew x T);
+        // if S => T then (PAmb N S) => (PAmb N T);
     }
 }
 
 fn main() {
     let start_time = Instant::now();
 
-    // x = n[out(m,p)|q]|r
-    let rdx_str = "open(m,0)|m[n[out(m,p)|q]|r]";
+    let rdx_str = "{m[r], n[{in(m,p),q}]}";
     mettail_runtime::clear_var_cache();
     let parser = ambient::ProcParser::new();
     let redex = parser.parse(rdx_str).unwrap();
-    println!("redex: {}", redex);
+    println!("redex: {}", redex.clone());
+    println!("ast: {:?}", redex.clone());
 
     // let vars = vec!["n".to_string()];
     // let term = Proc::generate_random_at_depth(&vars, 12);
@@ -83,7 +79,7 @@ fn main() {
         path_full(redex.clone(), z.clone()) <-- is_normal_form(z), path(redex.clone(), z.clone());
     };
 
-    let mut paths = prog.path_full.clone();
+    let mut paths = prog.rw_proc.clone();
     paths.sort_by(|a,b| a.0.cmp(&b.0));
 
     println!("Paths: {}", paths.len());

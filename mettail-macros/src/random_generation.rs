@@ -82,6 +82,15 @@ fn generate_random_depth_0(cat_name: &Ident, rules: &[&GrammarRule]) -> TokenStr
     for rule in rules {
         let label = &rule.label;
         
+        // Skip collection constructors
+        let has_collections = rule.items.iter().any(|item| {
+            matches!(item, GrammarItem::Collection { .. })
+        });
+        
+        if has_collections {
+            continue;
+        }
+        
         let non_terminals: Vec<_> = rule.items.iter()
             .filter(|item| matches!(item, GrammarItem::NonTerminal(_) | GrammarItem::Binder { .. }))
             .collect();
@@ -155,6 +164,15 @@ fn generate_random_depth_d(cat_name: &Ident, rules: &[&GrammarRule], theory: &Th
     let mut constructor_cases = Vec::new();
     
     for rule in rules {
+        // Skip collection constructors
+        let has_collections = rule.items.iter().any(|item| {
+            matches!(item, GrammarItem::Collection { .. })
+        });
+        
+        if has_collections {
+            continue;
+        }
+        
         let non_terminals: Vec<_> = rule.items.iter()
             .filter_map(|item| match item {
                 GrammarItem::NonTerminal(nt) => Some(nt.clone()),

@@ -12,8 +12,24 @@ name = "ambient"
 path = "ambient.rs"
 
 [[bin]]
-name = "test_ascent_gen"
-path = "test_ascent_gen.rs"
+name = "test_collections"
+path = "test_collections.rs"
+
+[[bin]]
+name = "test_coll_simple"
+path = "test_coll_simple.rs"
+
+[[bin]]
+name = "test_minimal"
+path = "test_minimal.rs"
+
+[[bin]]
+name = "test_just_enum"
+path = "test_just_enum.rs"
+
+[[bin]]
+name = "test_rest_patterns"
+path = "test_rest_patterns.rs"
 
 [dependencies]
 mettail-macros = { path = "../mettail-macros" }

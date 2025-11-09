@@ -1,6 +1,7 @@
 //! Runtime support for MeTTaIL-generated code
 //! 
 //! Re-exports moniker for binder support in generated theories.
+//! Provides collection types (HashBag, HashSet) for efficient AC operations.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -16,6 +17,10 @@ pub use scope_wrapper::Scope;
 
 // Wrapper for Var with Ord implementation
 pub use ord_var::OrdVar;
+
+// Collection types for AC operations
+mod hashbag;
+pub use hashbag::HashBag;
 
 // Re-export LALRPOP utilities for generated parsers
 pub use lalrpop_util::ParseError as LalrpopParseError;

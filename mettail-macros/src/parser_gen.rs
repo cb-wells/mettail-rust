@@ -161,6 +161,11 @@ fn build_rule_pattern(rule: &GrammarRule) -> (Vec<TokenStream>, Vec<TokenStream>
                 }
                 field_idx += 1;
             }
+            GrammarItem::Collection { .. } => {
+                // Collections will be handled in Phase 4 (Parser Integration)
+                // For now, skip parser generation for collection constructors
+                return (vec![], vec![], vec![]);
+            }
             GrammarItem::Binder { .. } => {
                 // Binders should be handled by generate_binder_rule_parser
                 // If we get here, something went wrong

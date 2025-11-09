@@ -80,11 +80,25 @@ fn generate_variant(rule: &GrammarRule) -> TokenStream {
         return generate_binder_variant(rule);
     }
     
-    // Count non-terminal items (these become fields)
-    let fields: Vec<_> = rule.items
+    // Count non-terminal and collection items (these become fields)
+    #[derive(Clone)]
+    enum FieldType {
+        NonTerminal(syn::Ident),
+        Collection {
+            coll_type: crate::ast::CollectionType,
+            element_type: syn::Ident,
+        },
+    }
+    
+    let fields: Vec<FieldType> = rule.items
         .iter()
         .filter_map(|item| match item {
-            GrammarItem::NonTerminal(ident) => Some(ident),
+            GrammarItem::NonTerminal(ident) => Some(FieldType::NonTerminal(ident.clone())),
+            GrammarItem::Collection { coll_type, element_type, .. } => 
+                Some(FieldType::Collection { 
+                    coll_type: coll_type.clone(), 
+                    element_type: element_type.clone() 
+                }),
             GrammarItem::Binder { .. } => None, // Handled above
             _ => None,
         })
@@ -93,22 +107,48 @@ fn generate_variant(rule: &GrammarRule) -> TokenStream {
     if fields.is_empty() {
         // Unit variant
         quote! { #label }
-    } else if fields.len() == 1 && fields[0].to_string() == "Var" {
-        // Special case: Var field -> generate OrdVar directly (not boxed)
-        quote! { #label(mettail_runtime::OrdVar) }
+    } else if fields.len() == 1 {
+        match &fields[0] {
+            FieldType::NonTerminal(ident) if ident.to_string() == "Var" => {
+                // Special case: Var field -> generate OrdVar directly (not boxed)
+                quote! { #label(mettail_runtime::OrdVar) }
+            }
+            FieldType::NonTerminal(ident) => {
+                // Single non-terminal field
+                quote! { #label(Box<#ident>) }
+            }
+            FieldType::Collection { coll_type, element_type } => {
+                // Single collection field
+                let coll_type_ident = match coll_type {
+                    crate::ast::CollectionType::HashBag => quote! { mettail_runtime::HashBag },
+                    crate::ast::CollectionType::HashSet => quote! { std::collections::HashSet },
+                    crate::ast::CollectionType::Vec => quote! { Vec },
+                };
+                quote! { #label(#coll_type_ident<#element_type>) }
+            }
+        }
     } else {
-        // Tuple variant - wrap in Box to avoid recursive type
-        // Check each field to see if it's Var
-        let boxed_fields: Vec<TokenStream> = fields.iter().map(|f| {
-            if f.to_string() == "Var" {
-                // Var is not boxed, use OrdVar wrapper
-                quote! { mettail_runtime::OrdVar }
-            } else {
-                quote! { Box<#f> }
+        // Multiple fields - tuple variant
+        let field_types: Vec<TokenStream> = fields.iter().map(|f| {
+            match f {
+                FieldType::NonTerminal(ident) if ident.to_string() == "Var" => {
+                    quote! { mettail_runtime::OrdVar }
+                }
+                FieldType::NonTerminal(ident) => {
+                    quote! { Box<#ident> }
+                }
+                FieldType::Collection { coll_type, element_type } => {
+                    let coll_type_ident = match coll_type {
+                        crate::ast::CollectionType::HashBag => quote! { mettail_runtime::HashBag },
+                        crate::ast::CollectionType::HashSet => quote! { std::collections::HashSet },
+                        crate::ast::CollectionType::Vec => quote! { Vec },
+                    };
+                    quote! { #coll_type_ident<#element_type> }
+                }
             }
         }).collect();
         
-        quote! { #label(#(#boxed_fields),*) }
+        quote! { #label(#(#field_types),*) }
     }
 }
 
@@ -153,6 +193,15 @@ fn generate_binder_variant(rule: &GrammarRule) -> TokenStream {
                     } else {
                         fields.push(quote! { Box<#cat> });
                     }
+                }
+                GrammarItem::Collection { coll_type, element_type, .. } => {
+                    // Collection becomes a field with the appropriate collection type
+                    let coll_type_ident = match coll_type {
+                        crate::ast::CollectionType::HashBag => quote! { mettail_runtime::HashBag },
+                        crate::ast::CollectionType::HashSet => quote! { std::collections::HashSet },
+                        crate::ast::CollectionType::Vec => quote! { Vec },
+                    };
+                    fields.push(quote! { #coll_type_ident<#element_type> });
                 }
                 GrammarItem::Binder { .. } => {
                     // Should have been skipped above

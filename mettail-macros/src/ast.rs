@@ -59,6 +59,17 @@ pub enum Expr {
         var: Ident,
         replacement: Box<Expr>,
     },
+    /// Collection pattern with rest: {P, Q, ...rest}
+    /// Used in rewrite rules to match collections partially
+    CollectionPattern {
+        /// Constructor label (e.g., PPar)
+        /// Will be inferred during validation if not provided
+        constructor: Option<Ident>,
+        /// Specific elements to match (can be patterns)
+        elements: Vec<Expr>,
+        /// Optional rest variable to bind remaining elements
+        rest: Option<Ident>,
+    },
 }
 
 /// Export: just a category name
@@ -86,6 +97,21 @@ pub enum GrammarItem {
     /// Binder: <Category> indicates this position binds a variable
     /// The bound variable is used in subsequent items
     Binder { category: Ident },  // <Name>
+    /// Collection: HashBag(Proc) sep "|" [delim "[" "]"]
+    Collection {
+        coll_type: CollectionType,
+        element_type: Ident,
+        separator: String,
+        delimiters: Option<(String, String)>,  // (open, close)
+    },
+}
+
+/// Collection type specifier
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CollectionType {
+    HashBag,
+    HashSet,
+    Vec,
 }
 
 // Implement Parse for TheoryDef
@@ -276,9 +302,18 @@ fn parse_grammar_rule(input: ParseStream) -> SynResult<GrammarRule> {
             let _ = input.parse::<Token![>]>()?;
             items.push(GrammarItem::Binder { category: cat });
         } else {
-            // NonTerminal: identifier
+            // Check if this is a collection type (HashBag, HashSet, Vec)
             let ident = input.parse::<Ident>()?;
-            items.push(GrammarItem::NonTerminal(ident));
+            let ident_str = ident.to_string();
+            
+            if (ident_str == "HashBag" || ident_str == "HashSet" || ident_str == "Vec") 
+                && input.peek(syn::token::Paren) {
+                // Collection: HashBag(Proc) sep "|" [delim "[" "]"]
+                items.push(parse_collection(ident, input)?);
+            } else {
+                // NonTerminal: identifier
+                items.push(GrammarItem::NonTerminal(ident));
+            }
         }
     }
     
@@ -311,7 +346,7 @@ fn infer_bindings(items: &[GrammarItem]) -> Vec<(usize, Vec<usize>)> {
                         bound_indices.push(j);
                         break; // For now, bind only in the immediately following item
                     }
-                    GrammarItem::Terminal(_) => continue,
+                    GrammarItem::Terminal(_) | GrammarItem::Collection { .. } => continue,
                 }
             }
             
@@ -322,6 +357,75 @@ fn infer_bindings(items: &[GrammarItem]) -> Vec<(usize, Vec<usize>)> {
     }
     
     bindings
+}
+
+/// Parse a collection specification: HashBag(Proc) sep "|" [delim "[" "]"]
+fn parse_collection(coll_type_ident: Ident, input: ParseStream) -> SynResult<GrammarItem> {
+    // Determine collection type
+    let coll_type = match coll_type_ident.to_string().as_str() {
+        "HashBag" => CollectionType::HashBag,
+        "HashSet" => CollectionType::HashSet,
+        "Vec" => CollectionType::Vec,
+        _ => return Err(syn::Error::new(
+            coll_type_ident.span(),
+            "expected HashBag, HashSet, or Vec"
+        )),
+    };
+    
+    // Parse (ElementType)
+    let content;
+    syn::parenthesized!(content in input);
+    let element_type = content.parse::<Ident>()?;
+    
+    // Parse sep "separator"
+    let sep_kw = input.parse::<Ident>()?;
+    if sep_kw != "sep" {
+        return Err(syn::Error::new(sep_kw.span(), "expected 'sep' after collection element type"));
+    }
+    let separator: syn::LitStr = input.parse()?;
+    let separator_value = separator.value();
+    
+    // Validate separator is non-empty
+    if separator_value.is_empty() {
+        return Err(syn::Error::new(separator.span(), "separator cannot be empty"));
+    }
+    
+    // Optional: delim "open" "close"
+    let delimiters = if input.peek(Ident) {
+        let lookahead = input.fork().parse::<Ident>()?;
+        if lookahead == "delim" {
+            let delim_kw = input.parse::<Ident>()?;
+            if delim_kw != "delim" {
+                return Err(syn::Error::new(delim_kw.span(), "expected 'delim'"));
+            }
+            let open: syn::LitStr = input.parse()?;
+            let close: syn::LitStr = input.parse()?;
+            
+            let open_value = open.value();
+            let close_value = close.value();
+            
+            // Validate delimiters are non-empty
+            if open_value.is_empty() {
+                return Err(syn::Error::new(open.span(), "open delimiter cannot be empty"));
+            }
+            if close_value.is_empty() {
+                return Err(syn::Error::new(close.span(), "close delimiter cannot be empty"));
+            }
+            
+            Some((open_value, close_value))
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    
+    Ok(GrammarItem::Collection {
+        coll_type,
+        element_type,
+        separator: separator_value,
+        delimiters,
+    })
 }
 
 fn parse_equations(input: ParseStream) -> SynResult<Vec<Equation>> {
@@ -402,6 +506,46 @@ fn parse_equation(input: ParseStream) -> SynResult<Equation> {
 }
 
 fn parse_expr(input: ParseStream) -> SynResult<Expr> {
+    // Parse collection pattern: {P, Q, ...rest}
+    if input.peek(syn::token::Brace) {
+        let content;
+        syn::braced!(content in input);
+        
+        let mut elements = Vec::new();
+        let mut rest = None;
+        
+        // Parse elements and optional rest
+        while !content.is_empty() {
+            // Check for rest pattern: ...rest
+            if content.peek(Token![...]) {
+                let _ = content.parse::<Token![...]>()?;
+                rest = Some(content.parse::<Ident>()?);
+                
+                // Optional trailing comma
+                if content.peek(Token![,]) {
+                    let _ = content.parse::<Token![,]>()?;
+                }
+                break;
+            }
+            
+            // Parse regular element expression
+            elements.push(parse_expr(&content)?);
+            
+            // Parse comma separator
+            if content.peek(Token![,]) {
+                let _ = content.parse::<Token![,]>()?;
+            } else {
+                break;
+            }
+        }
+        
+        return Ok(Expr::CollectionPattern {
+            constructor: None,  // Will be inferred during validation
+            elements,
+            rest,
+        });
+    }
+    
     // Parse parenthesized expression or variable
     if input.peek(syn::token::Paren) {
         let content;
@@ -531,4 +675,129 @@ fn parse_rewrite_rule(input: ParseStream) -> SynResult<RewriteRule> {
         left,
         right,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use quote::quote;
+    use syn::parse2;
+
+    #[test]
+    fn parse_hashbag_simple() {
+        let input = quote! {
+            name: TestBag,
+            exports { Elem }
+            terms {
+                EBag . Elem ::= HashBag(Elem) sep "|" ;
+                EZero . Elem ::= "0" ;
+            }
+        };
+        
+        let result = parse2::<TheoryDef>(input);
+        assert!(result.is_ok(), "Failed to parse HashBag: {:?}", result.err());
+        
+        let theory = result.unwrap();
+        assert_eq!(theory.name.to_string(), "TestBag");
+        assert_eq!(theory.terms.len(), 2);
+        
+        // Check EBag has a Collection item
+        let ebag = &theory.terms[0];
+        assert_eq!(ebag.label.to_string(), "EBag");
+        assert_eq!(ebag.items.len(), 1);
+        
+        match &ebag.items[0] {
+            GrammarItem::Collection { coll_type, element_type, separator, delimiters } => {
+                assert_eq!(*coll_type, CollectionType::HashBag);
+                assert_eq!(element_type.to_string(), "Elem");
+                assert_eq!(separator, "|");
+                assert!(delimiters.is_none());
+            }
+            _ => panic!("Expected Collection item"),
+        }
+    }
+
+    #[test]
+    fn parse_collection_with_delimiters() {
+        let input = quote! {
+            name: TestList,
+            exports { Elem }
+            terms {
+                EList . Elem ::= Vec(Elem) sep "," delim "[" "]" ;
+            }
+        };
+        
+        let result = parse2::<TheoryDef>(input);
+        assert!(result.is_ok(), "Failed to parse Vec with delimiters: {:?}", result.err());
+        
+        let theory = result.unwrap();
+        let elist = &theory.terms[0];
+        
+        match &elist.items[0] {
+            GrammarItem::Collection { coll_type, separator, delimiters, .. } => {
+                assert_eq!(*coll_type, CollectionType::Vec);
+                assert_eq!(separator, ",");
+                assert_eq!(delimiters.as_ref().unwrap(), &("[".to_string(), "]".to_string()));
+            }
+            _ => panic!("Expected Collection item with delimiters"),
+        }
+    }
+
+    #[test]
+    fn parse_hashset_collection() {
+        let input = quote! {
+            name: TestSet,
+            exports { Elem }
+            terms {
+                ESet . Elem ::= HashSet(Elem) sep "," delim "{" "}" ;
+            }
+        };
+        
+        let result = parse2::<TheoryDef>(input);
+        assert!(result.is_ok(), "Failed to parse HashSet: {:?}", result.err());
+        
+        let theory = result.unwrap();
+        let eset = &theory.terms[0];
+        
+        match &eset.items[0] {
+            GrammarItem::Collection { coll_type, separator, delimiters, .. } => {
+                assert_eq!(*coll_type, CollectionType::HashSet);
+                assert_eq!(separator, ",");
+                assert_eq!(delimiters.as_ref().unwrap(), &("{".to_string(), "}".to_string()));
+            }
+            _ => panic!("Expected HashSet collection"),
+        }
+    }
+
+    #[test]
+    fn parse_collection_error_empty_separator() {
+        let input = quote! {
+            name: TestBad,
+            exports { Elem }
+            terms {
+                EBag . Elem ::= HashBag(Elem) sep "" ;
+            }
+        };
+        
+        let result = parse2::<TheoryDef>(input);
+        assert!(result.is_err(), "Should reject empty separator");
+        let err = result.err().unwrap();
+        assert!(err.to_string().contains("separator cannot be empty"));
+    }
+
+    #[test]
+    fn parse_collection_error_missing_sep() {
+        let input = quote! {
+            name: TestBad,
+            exports { Elem }
+            terms {
+                EBag . Elem ::= HashBag(Elem) "|" ;
+            }
+        };
+        
+        let result = parse2::<TheoryDef>(input);
+        assert!(result.is_err(), "Should require 'sep' keyword");
+        // The error will be about unexpected token, not specifically about 'sep'
+        // Just verify it fails to parse
+    }
 }

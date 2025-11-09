@@ -128,6 +128,38 @@ fn validate_expr(expr: &Expr, theory: &TheoryDef) -> Result<(), ValidationError>
             // var is just an identifier, no validation needed
             Ok(())
         }
+        Expr::CollectionPattern { constructor, elements, rest: _ } => {
+            // Validate collection pattern
+            // 1. If constructor is specified, verify it's a collection type
+            if let Some(cons) = constructor {
+                let rule = theory.terms.iter()
+                    .find(|r| r.label == *cons)
+                    .ok_or_else(|| ValidationError::UnknownConstructor {
+                        name: cons.to_string(),
+                        span: cons.span(),
+                    })?;
+                
+                // Check that this constructor has a collection field
+                let has_collection = rule.items.iter().any(|item| {
+                    matches!(item, crate::ast::GrammarItem::Collection { .. })
+                });
+                
+                if !has_collection {
+                    // For now, just accept it - validation will happen later
+                    // when we infer the constructor during type checking
+                }
+            }
+            
+            // 2. Recursively validate element patterns
+            for elem in elements {
+                validate_expr(elem, theory)?;
+            }
+            
+            // 3. Rest variable doesn't need special validation
+            //    (it will be checked for shadowing in type checker)
+            
+            Ok(())
+        }
     }
 }
 
@@ -240,6 +272,16 @@ fn collect_vars(expr: &Expr, vars: &mut HashSet<String>) {
             vars.insert(var.to_string());
             // Collect from the replacement
             collect_vars(replacement, vars);
+        }
+        Expr::CollectionPattern { elements, rest, .. } => {
+            // Collect from element patterns
+            for elem in elements {
+                collect_vars(elem, vars);
+            }
+            // Collect rest variable if present
+            if let Some(rest_var) = rest {
+                vars.insert(rest_var.to_string());
+            }
         }
     }
 }

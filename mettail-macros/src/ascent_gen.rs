@@ -164,8 +164,18 @@ fn generate_deconstruction_for_constructor(
     constructor: &GrammarRule,
     _theory: &TheoryDef
 ) -> Option<TokenStream> {
-    let _cat_lower = format_ident!("{}", category.to_string().to_lowercase());
-    let _label = &constructor.label;
+    let cat_lower = format_ident!("{}", category.to_string().to_lowercase());
+    let label = &constructor.label;
+    
+    // Check if this constructor has collection fields
+    let has_collections = constructor.items.iter().any(|item| {
+        matches!(item, crate::ast::GrammarItem::Collection { .. })
+    });
+    
+    if has_collections {
+        // Generate deconstruction for collection fields
+        return generate_collection_deconstruction(category, constructor);
+    }
     
     // Count non-terminal fields
     let non_terminals: Vec<_> = constructor.items
@@ -195,6 +205,37 @@ fn generate_deconstruction_for_constructor(
     }
 }
 
+/// Generate deconstruction for constructors with collection fields
+/// Extracts each element from the collection as a separate fact
+fn generate_collection_deconstruction(
+    category: &Ident,
+    constructor: &GrammarRule,
+) -> Option<TokenStream> {
+    let cat_lower = format_ident!("{}", category.to_string().to_lowercase());
+    let label = &constructor.label;
+    
+    // Find the collection field
+    let collection_info = constructor.items.iter()
+        .find_map(|item| {
+            if let crate::ast::GrammarItem::Collection { element_type, .. } = item {
+                Some(element_type.clone())
+            } else {
+                None
+            }
+        })?;
+    
+    let element_type_lower = format_ident!("{}", collection_info.to_string().to_lowercase());
+    
+    // Generate rule: element_type(elem) <-- category(t), if let Category::Label(bag) = t, for elem in bag.iter()
+    // This extracts each element from the collection
+    Some(quote! {
+        #element_type_lower(elem.clone()) <--
+            #cat_lower(t),
+            if let #category::#label(bag) = t,
+            for elem in bag.iter().map(|(e, _count)| e);
+    })
+}
+
 /// Generate deconstruction for regular (non-binding) constructor
 fn generate_regular_deconstruction(
     category: &Ident,
@@ -221,9 +262,9 @@ fn generate_regular_deconstruction(
             }
             let field_type_lower = format_ident!("{}", field_type.to_string().to_lowercase());
             // In Ascent pattern matching, fields are &Box<T>
-            // Use *field.clone() which becomes (*field).clone() and auto-derefs to T
+            // Clone the Box to get Box<T>, then use as_ref() to get &T, then clone to get T
             Some(quote! { 
-                #field_type_lower(*#field_name.clone())
+                #field_type_lower(#field_name.as_ref().clone())
             })
         })
         .collect();
@@ -268,7 +309,7 @@ fn generate_binding_deconstruction(
     if field_count == 1 {
         // Only the scope field (body)
         Some(quote! {
-            #body_cat_lower(*body.clone()) <--
+            #body_cat_lower(body.as_ref().clone()) <--
                 #cat_lower(t),
                 if let #category::#label(scope) = t,
                 let (binder, body) = scope.clone().unbind();
@@ -299,9 +340,9 @@ fn generate_binding_deconstruction(
         for (idx, cat) in &field_cats {
             let cat_lower = format_ident!("{}", cat.to_string().to_lowercase());
             let field_name = format_ident!("field_{}", idx);
-            subterm_facts.push(quote! { #cat_lower(*#field_name.clone()) });
+            subterm_facts.push(quote! { #cat_lower(#field_name.as_ref().clone()) });
         }
-        subterm_facts.push(quote! { #body_cat_lower(*body.clone()) });
+        subterm_facts.push(quote! { #body_cat_lower(body.as_ref().clone()) });
         
         Some(quote! {
             #(#subterm_facts),* <--
@@ -328,6 +369,17 @@ fn generate_congruence_rules(theory: &TheoryDef) -> Vec<TokenStream> {
         if has_binders {
             // Skip binders for now - congruence for binders is more complex
             // (requires alpha-equivalence reasoning)
+            continue;
+        }
+        
+        // Check if this constructor has collections - skip if so
+        let has_collections = grammar_rule.items.iter().any(|item| {
+            matches!(item, crate::ast::GrammarItem::Collection { .. })
+        });
+        
+        if has_collections {
+            // Skip collections - they have built-in equality
+            // (HashBag/HashSet equality is order-independent)
             continue;
         }
         
@@ -648,18 +700,29 @@ fn generate_binding_congruence(
 /// Example: (PPar P Q) == (PPar Q P) generates:
 /// eq_proc(p0, p1) <-- proc(p0), if let Proc::PPar(p, q) = p0, let p1 = Proc::PPar(q.clone(), p.clone());
 fn generate_equation_clause(equation: &Equation, theory: &TheoryDef) -> Option<TokenStream> {
+    // NORMALIZE: If LHS is Apply(Constructor, [CollectionPattern{constructor: None}]),
+    // transform to CollectionPattern{constructor: Some(Constructor)}
+    let normalized_left = normalize_collection_apply(&equation.left);
+    
     // Determine the category from the LHS
-    let category = extract_category_from_expr(&equation.left, theory)?;
+    let category = extract_category_from_expr(&normalized_left, theory)?;
     let cat_lower = format_ident!("{}", category.to_string().to_lowercase());
     let eq_rel = format_ident!("eq_{}", category.to_string().to_lowercase());
     
     // Generate pattern matching for LHS
     let mut bindings: HashMap<String, Ident> = HashMap::new();
     let mut nested_patterns = Vec::new();
-    let lhs_pattern = generate_equation_pattern(&equation.left, "p0", &mut bindings, theory, &mut nested_patterns)?;
+    let lhs_pattern = generate_equation_pattern(&normalized_left, "p0", &mut bindings, theory, &mut nested_patterns)?;
     
-    // Generate RHS construction
-    let rhs_construction = generate_equation_rhs(&equation.right, &bindings, theory, false);
+    // Generate RHS construction  
+    // For collection patterns, variables are bound as T, not &Box<T>
+    // So we need to use a modified RHS generator
+    let is_collection_lhs = matches!(normalized_left, Expr::CollectionPattern { .. });
+    let rhs_construction = if is_collection_lhs {
+        generate_collection_equation_rhs(&equation.right, &bindings, theory)
+    } else {
+        generate_equation_rhs(&equation.right, &bindings, theory, false)
+    };
     
     // Generate freshness checks if any
     let freshness_checks = generate_equation_freshness(&equation.conditions, &bindings);
@@ -672,6 +735,27 @@ fn generate_equation_clause(equation: &Equation, theory: &TheoryDef) -> Option<T
             #freshness_checks
             let p1 = #rhs_construction;
     })
+}
+
+/// Normalize Apply(Constructor, [CollectionPattern]) to CollectionPattern{constructor}
+/// This handles cases like (PPar {P}) where the collection is wrapped in Apply
+fn normalize_collection_apply(expr: &Expr) -> Expr {
+    match expr {
+        Expr::Apply { constructor, args } if args.len() == 1 => {
+            // Check if the single argument is a CollectionPattern with no constructor
+            if let Expr::CollectionPattern { constructor: None, elements, rest } = &args[0] {
+                // Transform to CollectionPattern with the Apply's constructor
+                return Expr::CollectionPattern {
+                    constructor: Some(constructor.clone()),
+                    elements: elements.clone(),
+                    rest: rest.clone(),
+                };
+            }
+            // Not a collection, return as-is
+            expr.clone()
+        }
+        _ => expr.clone()
+    }
 }
 
 /// Extract the category from an expression by looking up the constructor in the theory
@@ -688,6 +772,17 @@ fn extract_category_from_expr(expr: &Expr, theory: &TheoryDef) -> Option<Ident> 
         }
         Expr::Var(_) => None,
         Expr::Subst { term, .. } => extract_category_from_expr(term, theory),
+        Expr::CollectionPattern { constructor, .. } => {
+            // If constructor is specified, look it up
+            if let Some(cons) = constructor {
+                for rule in &theory.terms {
+                    if rule.label == *cons {
+                        return Some(rule.category.clone());
+                    }
+                }
+            }
+            None
+        }
     }
 }
 
@@ -791,10 +886,10 @@ fn generate_equation_pattern(
                                     .find(|r| r.label == *var)
                                     .map(|r| &r.category)?;
                                 
-                                // Generate nested pattern: if let Cat::Constructor = **field_i
-                                // Note: **field_i because field_i is &Box<T>, and we need T
+                                // Generate nested pattern: if let Cat::Constructor = *field_i.as_ref()
+                                // Note: field_i is &Box<T>, as_ref() gives &T, then * dereferences to T
                                 nested_patterns.push(quote! {
-                                    if let #constructor_category::#var = **#field_ident,
+                                    if let #constructor_category::#var = *#field_ident.as_ref(),
                                 });
                             } else {
                                 // Non-nullary constructor - bind to temp and match (shouldn't happen for Var)
@@ -806,9 +901,9 @@ fn generate_equation_pattern(
                                     .find(|r| r.label == *var)
                                     .map(|r| &r.category)?;
                                 
-                                // Generate nested pattern: if let Cat::Constructor(...) = &**field_i
+                                // Generate nested pattern: if let Cat::Constructor(...) = field_i.as_ref()
                                 nested_patterns.push(quote! {
-                                    if let #constructor_category::#var = &**#field_ident,
+                                    if let #constructor_category::#var = #field_ident.as_ref(),
                                 });
                             }
                         } else {
@@ -855,11 +950,15 @@ fn generate_equation_pattern(
                         }
                         
                         nested_patterns.push(quote! {
-                            if let #nested_category::#nested_constructor(#(#nested_field_patterns),*) = &**#field_ident,
+                            if let #nested_category::#nested_constructor(#(#nested_field_patterns),*) = #field_ident.as_ref(),
                         });
                     }
                     Expr::Subst { .. } => {
                         // Substitution in LHS pattern - shouldn't happen
+                        return None;
+                    }
+                    Expr::CollectionPattern { .. } => {
+                        // Collection pattern in nested position - not yet supported
                         return None;
                     }
                 }
@@ -872,6 +971,109 @@ fn generate_equation_pattern(
         Expr::Subst { .. } => {
             // Substitution shouldn't appear in equation LHS
             None
+        }
+        Expr::CollectionPattern { constructor, elements, rest } => {
+            // Collection pattern: PPar {P, Q, ...rest}
+            // Generate pattern matching for collection
+            
+            if rest.is_some() {
+                // Rest patterns in equations are complex - skip for now
+                // TODO: Implement rest pattern support for equations
+                return None;
+            }
+            
+            let constructor = constructor.as_ref()?;
+            let category = extract_category_from_expr(expr, theory)?;
+            let term_ident = format_ident!("{}", term_name);
+            
+            // Generate pattern: if let Cat::Constructor(ref bag) = term
+            // Then check bag size and extract elements
+            let bag_var = format_ident!("bag");
+            let size_check = elements.len();
+            
+            // For collections, we can't rely on order, so we just extract elements by iteration
+            // This works for simple variable bindings
+            let mut extract_clauses = Vec::new();
+            
+            if elements.len() == 1 {
+                // Special case: single element
+                // Just take the first (and only) element
+                match &elements[0] {
+                    Expr::Var(var) if !is_constructor(var, theory) => {
+                        let var_name = var.to_string();
+                        let var_snake = to_snake_case(&var_name);
+                        let var_ident = format_ident!("{}", var_snake);
+                        bindings.insert(var_name, var_ident.clone());
+                        
+                        extract_clauses.push(quote! {
+                            let #var_ident = #bag_var.iter().next().unwrap().0.clone(),
+                        });
+                    }
+                    _ => {
+                        // Complex pattern - not supported yet
+                        return None;
+                    }
+                }
+            } else {
+                // Multiple elements - need to extract in some order
+                // For now, just extract by iteration order
+                for (i, elem) in elements.iter().enumerate() {
+                    match elem {
+                        Expr::Var(var) if !is_constructor(var, theory) => {
+                            let var_name = var.to_string();
+                            let var_snake = to_snake_case(&var_name);
+                            let var_ident = format_ident!("{}", var_snake);
+                            bindings.insert(var_name, var_ident.clone());
+                            
+                            extract_clauses.push(quote! {
+                                let #var_ident = #bag_var.iter().nth(#i).unwrap().0.clone(),
+                            });
+                        }
+                        _ => {
+                            // Complex pattern - not supported yet
+                            return None;
+                        }
+                    }
+                }
+            }
+            
+            Some(quote! {
+                if let #category::#constructor(ref #bag_var) = #term_ident,
+                if #bag_var.len() == #size_check,
+                #(#extract_clauses)*
+            })
+        }
+    }
+}
+
+/// Generate RHS construction code for collection pattern equations
+/// Collection variables are bound as T (cloned from iterator), not &Box<T>
+fn generate_collection_equation_rhs(expr: &Expr, bindings: &HashMap<String, Ident>, theory: &TheoryDef) -> TokenStream {
+    match expr {
+        Expr::Var(var) => {
+            // Check if this is a constructor or a variable
+            if is_constructor(var, theory) {
+                // It's a nullary constructor
+                let constructor_category = theory.terms.iter()
+                    .find(|r| r.label == *var)
+                    .map(|r| &r.category)
+                    .expect("Constructor not found in theory");
+                quote! { #constructor_category::#var }
+            } else {
+                // It's a variable - just clone it (it's already a T value)
+                let var_name = var.to_string();
+                if let Some(var_ident) = bindings.get(&var_name) {
+                    quote! { #var_ident.clone() }
+                } else {
+                    // Unbound variable
+                    quote! { #var }
+                }
+            }
+        }
+        _ => {
+            // For other expressions, use the regular generator
+            // (shouldn't happen for simple collection equations like (PPar {P}) == P)
+            generate_equation_rhs(expr, bindings, theory, false)
         }
     }
 }
@@ -898,14 +1100,14 @@ fn generate_equation_rhs(expr: &Expr, bindings: &HashMap<String, Ident>, theory:
                 // It's a variable
                 let var_name = var.to_string();
                 if let Some(var_ident) = bindings.get(&var_name) {
-                    // Variables are bound as &Box<T> from pattern matching
+                    // Variables are bound as &Box<T> from Apply pattern matching
                     if in_constructor {
                         // Inside constructor: just clone (keeps it as Box<T>)
                         quote! { #var_ident.clone() }
                     } else {
                         // Top-level: need to dereference to get the inner value
-                        // Use **var to get from &Box<T> to T
-                        quote! { (**#var_ident).clone() }
+                        // Use .as_ref().clone() to go from &Box<T> to T
+                        quote! { #var_ident.as_ref().clone() }
                     }
                 } else {
                     // Unbound variable - shouldn't happen
@@ -949,6 +1151,55 @@ fn generate_equation_rhs(expr: &Expr, bindings: &HashMap<String, Ident>, theory:
                     &mettail_runtime::Var::new(#var_name.to_string()),
                     &#replacement_code
                 )
+            }
+        }
+        Expr::CollectionPattern { elements, rest, .. } => {
+            // Build a collection in RHS
+            let elem_constructions: Vec<TokenStream> = elements.iter()
+                .map(|e| generate_equation_rhs(e, bindings, theory, false))
+                .collect();
+            
+            let coll_type = quote! { mettail_runtime::HashBag };
+            
+            if let Some(rest_var) = rest {
+                // Merge rest with new elements
+                if let Some(rest_binding) = bindings.get(&rest_var.to_string()) {
+                    quote! {
+                        {
+                            let mut bag = (#rest_binding).clone();
+                            #(bag.insert(#elem_constructions);)*
+                            bag
+                        }
+                    }
+                } else {
+                    // Rest variable not bound - shouldn't happen
+                    quote! {
+                        {
+                            let mut bag = #coll_type::new();
+                            #(bag.insert(#elem_constructions);)*
+                            bag
+                        }
+                    }
+                }
+            } else {
+                // Just build from elements
+                if in_constructor {
+                    quote! {
+                        Box::new({
+                            let mut bag = #coll_type::new();
+                            #(bag.insert(#elem_constructions);)*
+                            bag
+                        })
+                    }
+                } else {
+                    quote! {
+                        {
+                            let mut bag = #coll_type::new();
+                            #(bag.insert(#elem_constructions);)*
+                            bag
+                        }
+                    }
+                }
             }
         }
     }

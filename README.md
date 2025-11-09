@@ -1,18 +1,17 @@
 # MeTTaIL: Metalanguage for language implementation
 
-**Status:** Rewrite Engine ✅ | **Performance & Type System** 🎯 | Theory Composition (Next)
+**Status:** Collection Types ✅ | Indexed Projection ✅ | Deep Projection (Next)
 
 ---
 
 ## 📖 Quick Links
 
-- **[Poly-Lingual Roadmap](docs/POLY-LINGUAL-ROADMAP.md)** - **3-year strategic vision** 🎯
-- **[Technical Roadmap](docs/ROADMAP.md)** - Detailed implementation phases
-- **[Phase 1 Complete](docs/phase-1/PHASE-1-PLAN.md)** - Foundation (AST, types, binders) ✅
-- **[Phase 2 Complete](docs/phase-2/PHASE-2-COMPLETE.md)** - Execution ✅
-- **[Collection Types Design](docs/design/COLLECTION-TYPES-DESIGN.md)** - Performance improvements (IN PROGRESS)
-- **[Session Summary](docs/SESSION-SUMMARY.md)** - Recent progress and achievements
-- **[Progress](docs/phase-1/PROGRESS.md)** - Detailed progress and metrics
+- **[Current Status](docs/CURRENT-STATUS.md)** - What works now and recent progress 📊
+- **[Poly-Lingual Roadmap](docs/POLY-LINGUAL-ROADMAP.md)** - 3-year strategic vision 🎯
+- **[Quick Start Guide](QUICKSTART.md)** - Get started in 5 minutes
+- **[Phase 6 Complete](docs/design/PHASE-6-COMPLETE.md)** - Indexed Projection ✅
+- **[Collection Types Design](docs/design/COLLECTION-TYPES-DESIGN.md)** - Implementation details
+- **[Deep Projection Roadmap](docs/design/DEEP-PROJECTION-ROADMAP.md)** - Next steps
 
 ---
 
@@ -52,51 +51,51 @@ theory! {
     
     terms {
         PZero . Proc ::= "0" ;
-        PInput . Proc ::= "for" "(" Name <Name> ")" "{" Proc "}" ;
+        PInput . Proc ::= "for" "(" Name "->" <Name> ")" "{" Proc "}" ;
         POutput . Proc ::= Name "!" "(" Proc ")" ;
-        PPar . Proc ::= Proc "|" Proc ;
+        PPar . Proc ::= HashBag(Proc) sep "," delim "{" "}" ;  // AC operation
         PDrop . Proc ::= "*" Name ;
         NQuote . Name ::= "@" "(" Proc ")" ;
         NVar . Name ::= Var ;
     }
     
     equations {
-        (PPar P Q) == (PPar Q P) ;              // Commutativity
-        (PPar P (PPar Q R)) == (PPar (PPar P Q) R) ;  // Associativity
-        (PPar P PZero) == P ;                   // Identity
-        (PDrop (NQuote P)) == P ;               // Reflection
+        (NQuote (PDrop N)) == N ;      // Reflection
+        (PPar {P}) == P ;              // Identity normalization
     }
     
     rewrites {
-        // Communication: for(chan x){P} | chan!(Q) => P[@Q/x]
-        if x # Q then (PPar (PInput chan x P) (POutput chan Q))
-            => (subst P x (NQuote Q))
+        // Communication: for(chan->x){P} , chan!(Q) => P[@Q/x]
+        (PPar {(PInput chan x P), (POutput chan Q), ...rest})
+            => (PPar {(subst P x (NQuote Q)), ...rest});
     }
 }
 ```
 
-**Generated:** Type-safe AST, parser, substitution, **rewrite engine**, and more!
+**Generated:** Type-safe AST, parser, substitution, **order-independent rewrite engine**, and more!
 
 ---
 
 ## ✅ What Works Now
 
-### Core Features
+### Core Features (Phases 1-6 Complete)
 - ✅ **Theory Definition** - Declarative syntax with macros
 - ✅ **Type-Checking** - Sound category inference
 - ✅ **Binders & Variables** - Correct scoping via `moniker`
 - ✅ **Cross-Category Substitution** - Full support for heterogeneous substitution
-- ✅ **Rewrite Rule Syntax** - Parsing and validation
-- ✅ **Rewrite Engine** - Pattern matching, freshness checking, and execution
-- ✅ **Test Case** - Rho Calculus with full communication reduction
+- ✅ **Collection Types** - HashBag for associative-commutative operations
+- ✅ **Order-Independent Matching** - Indexed projection for optimal performance
+- ✅ **Rest Patterns** - Extract and reconstruct collection remainders
+- ✅ **Collection Equations** - Automatic normalization (e.g., `{P} == P`)
 
 ### Code Generation
 From a theory definition, MeTTaIL generates:
 - **AST enums** - Clean, type-safe data structures with term sorting (`Ord`)
 - **LALRPOP grammars** - Full parser generation with precedence handling
 - **Substitution methods** - Capture-avoiding, cross-category
-- **Ascent-based rewrite engine** - Equational pattern matching with Datalog semantics
-- **Term generation** - Exhaustive and random term generation up to arbitrary depth
+- **Ascent-based rewrite engine** - Order-independent pattern matching with indexed joins
+- **Collection support** - `HashBag<T>` fields with efficient equality and hashing
+- **Display implementations** - Pretty-printing with correct precedence
 - **Type derivations** - `Debug`, `Clone`, `PartialEq`, `Eq`, `Ord`, `BoundTerm`, `Display`
 
 ---

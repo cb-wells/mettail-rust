@@ -65,7 +65,7 @@ pub fn generate_lalrpop_grammar(theory: &TheoryDef) -> String {
 /// 
 /// This handles precedence by creating tiered rules for infix operators
 fn generate_category_production(category: &syn::Ident, rules: &[&GrammarRule]) -> String {
-    let cat_str = category.to_string();
+    let _cat_str = category.to_string();
     
     // Classify rules by type
     let (infix_rules, other_rules): (Vec<&GrammarRule>, Vec<&GrammarRule>) = 
@@ -121,7 +121,7 @@ fn generate_tiered_production(
     production.push_str(&format!("{}Infix: {} = {{\n", cat_str, cat_str));
     
     // Generate left-recursive rules for infix operators
-    for (i, rule) in infix_rules.iter().enumerate() {
+    for rule in infix_rules.iter() {
         production.push_str("    ");
         production.push_str(&generate_infix_alternative(rule, &cat_str));
         production.push_str(",\n");
@@ -161,7 +161,6 @@ fn generate_infix_alternative(rule: &GrammarRule, cat_str: &str) -> String {
     // Pattern: <left:Cat> "op" <right:CatAtom>
     // This ensures left-associativity
     let mut pattern = format!("<left:{}Infix>", cat_str);
-    let mut right_var = String::new();
     
     // Process items to find operator and right operand
     for (i, item) in rule.items.iter().enumerate() {
@@ -175,15 +174,18 @@ fn generate_infix_alternative(rule: &GrammarRule, cat_str: &str) -> String {
             }
             GrammarItem::NonTerminal(nt) if nt == category && i == rule.items.len() - 1 => {
                 // Last item - use Atom tier to avoid ambiguity
-                right_var = "right".to_string();
-                pattern.push_str(&format!(" <{}:{}Atom>", right_var, cat_str));
+                pattern.push_str(&format!(" <right:{}Atom>", cat_str));
             }
             GrammarItem::NonTerminal(nt) if nt == category => {
                 // Middle recursive reference - shouldn't happen in binary infix
                 pattern.push_str(&format!(" <mid{}>", i));
             }
-            GrammarItem::NonTerminal(nt) => {
+            GrammarItem::NonTerminal(_) => {
                 pattern.push_str(&format!(" <f{}>", i));
+            }
+            GrammarItem::Collection { .. } => {
+                // Collections in infix operators not yet supported (Phase 4)
+                panic!("Collection types in infix operators not yet implemented (Phase 4)");
             }
             GrammarItem::Binder { .. } => {
                 // Binders in infix operators - unusual but handle it
@@ -250,6 +252,16 @@ fn generate_rule_alternative(rule: &GrammarRule) -> String {
                 alt.push_str(&format!("<val:{}> => {}::{}(Box::new(val))", 
                     nt, rule.category, label));
             }
+            GrammarItem::Collection { coll_type, element_type, separator, delimiters } => {
+                // Single-item collection - generate the collection alternative
+                return generate_collection_alternative(
+                    rule,
+                    coll_type,
+                    element_type,
+                    separator,
+                    delimiters.as_ref()
+                );
+            }
             GrammarItem::Binder { .. } => {
                 // Binder alone shouldn't happen
                 alt.push_str(&format!("// TODO: handle binder => {}::{}", rule.category, label));
@@ -293,6 +305,16 @@ fn generate_sequence_alternative(rule: &GrammarRule) -> String {
                     args.push(format!("Box::new({})", var_name));
                 }
                 field_idx += 1;
+            }
+            GrammarItem::Collection { coll_type, element_type, separator, delimiters } => {
+                // Generate LALRPOP rule for separated list
+                return generate_collection_alternative(
+                    rule,
+                    coll_type,
+                    element_type,
+                    separator,
+                    delimiters.as_ref()
+                );
             }
             GrammarItem::Binder { category: _binder_cat } => {
                 // Binder: parse as identifier
@@ -347,6 +369,10 @@ fn generate_binder_alternative(rule: &GrammarRule) -> String {
                 }
                 field_idx += 1;
             }
+            GrammarItem::Collection { .. } => {
+                // Collections in binder rules not yet supported (Phase 4)
+                panic!("Collection types in binder rules not yet implemented (Phase 4)");
+            }
             GrammarItem::Binder { .. } => {
                 if i == *binder_idx {
                     // This is the binder - parse as identifier
@@ -376,6 +402,117 @@ fn generate_binder_alternative(rule: &GrammarRule) -> String {
     all_args.push("scope".to_string());
     
     action.push_str(&format!("        {}::{}({})\n", category, label, all_args.join(", ")));
+    action.push_str("    }");
+    
+    format!("{}{}", pattern.trim(), action)
+}
+
+/// Generate alternative for a collection constructor
+/// 
+/// Generates LALRPOP rules for separated lists with optional delimiters.
+/// Examples:
+/// - `a | b | c` (no delimiters)
+/// - `[a, b, c]` (with delimiters)
+/// - `[]` (empty collection)
+fn generate_collection_alternative(
+    rule: &GrammarRule,
+    coll_type: &crate::ast::CollectionType,
+    element_type: &syn::Ident,
+    separator: &str,
+    delimiters: Option<&(String, String)>,
+) -> String {
+    let label = &rule.label;
+    let category = &rule.category;
+    
+    // Escape separator for LALRPOP
+    let sep_escaped = separator.replace("\"", "\\\"");
+    
+    // Determine the collection type constructor
+    let coll_constructor = match coll_type {
+        crate::ast::CollectionType::HashBag => "mettail_runtime::HashBag",
+        crate::ast::CollectionType::HashSet => "std::collections::HashSet",
+        crate::ast::CollectionType::Vec => "Vec",
+    };
+    
+    // Build the pattern
+    // For separated lists, we use: <elems:(<Elem> "sep")*> <last:Elem?>
+    // This allows optional trailing separator
+    let mut pattern = String::new();
+    
+    if let Some((open, close)) = delimiters {
+        // With delimiters: `{` <elems> `}`
+        // LALRPOP syntax: (X Y)* creates Vec<(X,Y)>, but (<X> Y)* creates Vec<X>
+        let open_escaped = open.replace("\"", "\\\"");
+        let close_escaped = close.replace("\"", "\\\"");
+        pattern.push_str(&format!("\"{}\" ", open_escaped));
+        // Capture just the element, discard the separator
+        pattern.push_str(&format!("<elems:(<{}> \"{}\")*> ", element_type, sep_escaped));
+        pattern.push_str(&format!("<last:{}?> ", element_type));
+        pattern.push_str(&format!("\"{}\"", close_escaped));
+    } else {
+        // Without delimiters: just the separated list  
+        // Use <> to only capture the element, not the separator
+        pattern.push_str(&format!("<first:{}> ", element_type));
+        pattern.push_str(&format!("<rest:(\"{}\" <{}>)*>", sep_escaped, element_type));
+    }
+    
+    // Build the action
+    let mut action = String::from(" => {\n");
+    action.push_str(&format!("        let mut coll = {}::new();\n", coll_constructor));
+    
+    if delimiters.is_some() {
+        // With delimiters: use elems and last pattern
+        action.push_str("        for e in elems {\n");
+        match coll_type {
+            crate::ast::CollectionType::HashBag => {
+                action.push_str("            coll.insert(e);\n");
+            }
+            crate::ast::CollectionType::HashSet => {
+                action.push_str("            coll.insert(e);\n");
+            }
+            crate::ast::CollectionType::Vec => {
+                action.push_str("            coll.push(e);\n");
+            }
+        }
+        action.push_str("        }\n");
+        action.push_str("        if let Some(e) = last {\n");
+        match coll_type {
+            crate::ast::CollectionType::HashBag => {
+                action.push_str("            coll.insert(e);\n");
+            }
+            crate::ast::CollectionType::HashSet => {
+                action.push_str("            coll.insert(e);\n");
+            }
+            crate::ast::CollectionType::Vec => {
+                action.push_str("            coll.push(e);\n");
+            }
+        }
+        action.push_str("        }\n");
+    } else {
+        // Without delimiters: use first and rest pattern
+        match coll_type {
+            crate::ast::CollectionType::HashBag => {
+                action.push_str("        coll.insert(first);\n");
+                action.push_str("        for e in rest {\n");
+                action.push_str("            coll.insert(e);\n");
+                action.push_str("        }\n");
+            }
+            crate::ast::CollectionType::HashSet => {
+                action.push_str("        coll.insert(first);\n");
+                action.push_str("        for e in rest {\n");
+                action.push_str("            coll.insert(e);\n");
+                action.push_str("        }\n");
+            }
+            crate::ast::CollectionType::Vec => {
+                action.push_str("        coll.push(first);\n");
+                action.push_str("        for e in rest {\n");
+                action.push_str("            coll.push(e);\n");
+                action.push_str("        }\n");
+            }
+        }
+    }
+    
+    action.push_str(&format!("        {}::{}(coll)\n", category, label));
     action.push_str("    }");
     
     format!("{}{}", pattern.trim(), action)

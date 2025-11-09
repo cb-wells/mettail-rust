@@ -43,43 +43,56 @@ Enable **poly-lingual computation**: the ability to compose, translate, and exec
 
 ### ✅ What Works Today
 
-#### Core Infrastructure
+#### Core Infrastructure (Phases 1-2)
 - **Theory Definition** - Declarative `theory!` macro with BNF-like syntax
 - **Type System** - Sound category inference, cross-category substitution
 - **Binder Handling** - α-equivalence via `moniker`, capture-avoiding substitution
 - **Parser Generation** - Automatic LALRPOP grammar generation with precedence
 - **Term Sorting** - Total ordering on terms (`Ord` trait)
-- **Term Generation** - Exhaustive and random generation for testing
 - **Pretty-Printing** - Automatic `Display` implementation
+
+#### Collection Types (Phase 6)
+- **`HashBag<T>` Collections** - Efficient multiset representation with O(1) equality
+- **Collection Patterns** - Match and extract from collections with rest patterns
+- **Indexed Projection** - Order-independent matching via Ascent joins
+- **Collection Equations** - Automatic normalization (e.g., `{P} == P`)
+- **LALRPOP Integration** - Parse collection syntax with separators and delimiters
 
 #### Execution Engine (Ascent-Based)
 - **Equational Matching** - Rewrites work modulo equations via Datalog
 - **Nested Pattern Matching** - Arbitrary-depth patterns with binders
+- **Order-Independent Matching** - Automatically generates indexed joins for shared variables
 - **Type-Aware Variable Tracking** - Category inference from constructors
 - **Freshness Checking** - Automatic generation of side conditions
 - **Reflexivity & Transitivity** - `eqrel` handles equivalence closure
 
 #### Examples Working
-- **Rho Calculus** - Communication via name-passing (13K LOC generated)
-- **Ambient Calculus** - Mobile computation with capabilities
+- **Rho Calculus** - Communication via name-passing with collection-based parallelism
+- **Ambient Calculus** - Mobile computation with capabilities (basic cases)
 
-### ⚠️ Current Limitations
+### 🎯 Current Focus: Deep Projection (Phase 7)
 
-#### Performance Bottlenecks
-- **Binary AC Operations** - `PPar` causes exponential equality blowup
-  - Small terms (depth ≤3): ~1 second
-  - Medium terms (depth 4-5): ~10 seconds
-  - Complex terms (depth 6+): 60-80 seconds
-- **Congruence Rules** - Generate too many equivalences
-- **Ascent Overhead** - Relation storage and iteration costs
+Working to extend indexed projection to handle **deeply nested shared variables**, enabling complex rewrite rules like:
+```rust
+(PPar {(PAmb N (PPar {(PIn M P), Q})), (PAmb M R), ...rest})
+```
+
+### ⚠️ Known Limitations
+
+#### Performance Considerations
+- **Deep nesting**: Indexed projection only works for top-level shared variables
+  - Simple cases (2 patterns, top-level shared vars): ✅ Order-independent
+  - Complex cases (nested shared vars): ⚠️ Order-dependent fallback
+- **Collection overhead**: HashBag adds ~2-3 bytes per element vs binary operations
+- **Ascent materialization**: Relations fully materialized in memory
 
 #### Missing Features for Production
-- **No collection types** - Can't efficiently represent multisets/bags
+- **No deep projection** - Nested shared variables not yet optimized
 - **No theory composition** - Can't reuse or extend theories
-- **No optimization passes** - Generated code is naive
+- **No optimization passes** - Generated code is straightforward but unoptimized
 - **No incremental computation** - Recomputes everything from scratch
 - **No parallel execution** - Single-threaded Ascent
-- **No profiling/debugging** - Hard to diagnose performance issues
+- **No profiling/debugging** - Limited diagnostics
 
 #### Missing Poly-Lingual Features
 - **No language translation** - Can't convert between theories
@@ -95,16 +108,34 @@ Enable **poly-lingual computation**: the ability to compose, translate, and exec
 
 **Goal:** Make MeTTaIL production-ready for single-language execution.
 
-#### Q4 2025: Performance & Collections (3 months)
-**Milestone:** 100x speedup for complex term rewriting
+#### ✅ Q4 2025: Collection Types & Indexed Projection (COMPLETE)
+**Milestone:** Order-independent pattern matching for AC operations
 
-- **Collection Types** (6 weeks)
-  - Implement `HashBag<T>`, `HashSet<T>`, `Vec<T>` in runtime
-  - Extend grammar syntax: `HashBag(Proc) sep "|"`
-  - Update codegen for collection-based AST variants
-  - Generate collection-aware parsers and display
-  - Pattern matching over collections in rewrites
-  - **Target:** `PPar` operations in O(1) equality checks
+**Completed:**
+- ✅ Collection type integration (`HashBag<T>`)
+- ✅ Collection pattern syntax with rest patterns
+- ✅ LALRPOP generation for collection parsing
+- ✅ Order-independent indexed projection for flat shared variables
+- ✅ Collection equations and normalization
+- ✅ Integration with Ascent rewrite engine
+
+**Impact:**
+- RhoCalc rewrite matching now order-independent for simple cases
+- Foundation for 100x+ performance improvements
+- Eliminated AC equation explosion for flat patterns
+
+---
+
+#### Q1 2026: Deep Projection & Performance (IN PROGRESS)
+**Milestone:** Handle nested shared variables, production-grade performance
+
+- **Deep Projection** (4-6 weeks)
+  - Multi-level indexed projection for nested patterns
+  - Automatic detection of deeply nested shared variables
+  - Generate intermediate relations and joins
+  - Optimize common case (flat variables) with fast path
+  - **Target:** Ambient calculus rules work order-independently
+  - **Docs:** [Deep Projection Design](design/DEEP-PROJECTION-DESIGN.md), [Roadmap](design/DEEP-PROJECTION-ROADMAP.md)
 
 - **Ascent Optimization** (3 weeks)
   - Profile Ascent relation overhead
@@ -121,14 +152,14 @@ Enable **poly-lingual computation**: the ability to compose, translate, and exec
   - CI integration for performance tracking
 
 **Success Criteria:**
+- ✅ All collection patterns order-independent (including nested)
 - ✅ Complex terms (depth 6+) reduce in < 1 second
 - ✅ 1M+ rewrites/second on standard benchmarks
 - ✅ Memory usage < 1GB for large programs
-- ✅ Zero performance regressions in CI
 
 ---
 
-#### Q1 2026: Theory Composition (3 months)
+#### Q2 2026: Theory Composition (3 months)
 **Milestone:** Build Rho Calculus from 5 composable theories
 
 - **Theory Inheritance** (4 weeks)

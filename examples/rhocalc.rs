@@ -19,26 +19,24 @@ theory! {
         PDrop . Proc ::= "*" Name ;
         POutput . Proc ::= Name "!" "(" Proc ")" ;
         PInput . Proc ::= "for" "(" Name "->" <Name> ")" "{" Proc "}" ;
-        PPar . Proc ::= Proc "|" Proc ;
+
+        PPar . Proc ::= HashBag(Proc) sep "," delim "{" "}" ;
 
         NQuote . Name ::= "@" "(" Proc ")" ;
         NVar . Name ::= Var ;
     },
     
     equations {
-        (PPar P Q) == (PPar Q P) ;
-        (PPar P (PPar Q R)) == (PPar (PPar P Q) R) ;
-        
         (NQuote (PDrop N)) == N ;
+        (PPar {P}) == P;
     },
-    
-    rewrites {
-        if x # Q then (PPar (PInput chan x P) (POutput chan Q))
-            => (subst P x (NQuote Q));
         
-        (PDrop (NQuote P)) => P ;
-
-        if S => T then (PPar P S) => (PPar P T);
+    rewrites {
+        // Auto-generated with indexed projections!
+        (PPar {(PInput chan x P) , (POutput chan Q) , ...rest})
+            => (PPar {(subst P x (NQuote Q)), ...rest});
+        
+        (PPar {(PDrop (NQuote P)) , ...rest}) => (PPar {P, ...rest});
     }
 } 
 
@@ -51,11 +49,11 @@ fn main() {
     // let redex = Proc::generate_random_at_depth(&vars, 6);
     // println!("Term: {}", term);
     
-    let rdx_str = "a!(0)|for(@(*a)->x0){*x0}";
+    let rdx_str = "{a!(0),for(a->x0){x0!(0)},for(@(0)->y0){*y0}, b!(0), c!(0), for(b->x1){x1!(0)}, for(c->x2){x2!(0)}}";
     mettail_runtime::clear_var_cache();
     let parser = rhocalc::ProcParser::new();
     let redex = parser.parse(rdx_str).unwrap();
-    println!("Initial: {}", redex.clone());
+    println!("Initial: {:?}", redex.clone());
 
     let prog = ascent_run! {
         include_source!(rhocalc_source);
@@ -86,30 +84,6 @@ fn main() {
     println!("Terms: {}", procs.len());
     println!("Rewrites: {}", prog.rw_proc.len());
     println!("Normal forms: {}", prog.is_normal_form.len());
-    
-    // Debug: print proc facts
-    println!("\n=== proc facts ===");
-    println!("Count: {}", procs.len());
-    for p in procs.iter().take(10) {
-        println!("  {}", p.0);
-    }
-    
-    // Debug: print name facts
-    println!("\n=== name facts ===");
-    let mut names: Vec<_> = prog.name.iter().collect();
-    names.sort_by(|a, b| format!("{:?}", a).cmp(&format!("{:?}", b)));
-    println!("Count: {}", names.len());
-    for n in names.iter() {
-        println!("  {}", n.0);
-    }
-    
-    // Debug: print eq_name facts
-    println!("\n=== eq_name facts ===");
-    let mut eq_names: Vec<_> = prog.eq_name.iter().collect();
-    eq_names.sort_by(|a, b| format!("{:?}", a).cmp(&format!("{:?}", b)));
-    for (n1, n2) in eq_names.iter().take(20) {
-        println!("  {} == {}", n1, n2);
-    }
     
     let mut path_full = prog.path_full.clone();
     path_full.sort_by(|a,b| a.0.cmp(&b.0));

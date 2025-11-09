@@ -122,7 +122,7 @@ fn generate_depth_0_cases(cat_name: &Ident, rules: &[&GrammarRule]) -> TokenStre
         
         // Check if this is a nullary constructor
         let non_terminals: Vec<_> = rule.items.iter()
-            .filter(|item| matches!(item, GrammarItem::NonTerminal(_) | GrammarItem::Binder { .. }))
+            .filter(|item| matches!(item, GrammarItem::NonTerminal(_) | GrammarItem::Binder { .. } | GrammarItem::Collection { .. }))
             .collect();
         
         if non_terminals.is_empty() {
@@ -148,6 +148,7 @@ fn generate_depth_0_cases(cat_name: &Ident, rules: &[&GrammarRule]) -> TokenStre
                     });
                 }
             }
+            // Skip Collection constructors - they can't be exhaustively generated
         }
     }
     
@@ -166,16 +167,23 @@ fn generate_depth_d_cases(cat_name: &Ident, rules: &[&GrammarRule], theory: &The
             .filter_map(|item| match item {
                 GrammarItem::NonTerminal(nt) => Some(nt.clone()),
                 GrammarItem::Binder { category } => Some(category.clone()),
+                GrammarItem::Collection { .. } => None, // Skip collections - can't exhaustively generate
                 _ => None,
             })
             .collect();
         
         if non_terminals.is_empty() {
-            continue; // Nullary
+            continue; // Nullary or collection-only
         }
         
         if non_terminals.len() == 1 && non_terminals[0].to_string() == "Var" {
             continue; // Var constructor
+        }
+        
+        // Check if this rule has collections - skip if so
+        let has_collection = rule.items.iter().any(|item| matches!(item, GrammarItem::Collection { .. }));
+        if has_collection {
+            continue; // Can't exhaustively generate collections
         }
         
         // Generate recursive case
@@ -352,6 +360,10 @@ fn generate_binder_constructor_case(cat_name: &Ident, rule: &GrammarRule, theory
         match item {
             GrammarItem::NonTerminal(cat) => {
                 arg_positions.push((i, cat.clone()));
+            }
+            GrammarItem::Collection { .. } => {
+                // Collections will be handled in Phase 5
+                // For now, skip term generation for collection constructors
             }
             GrammarItem::Binder { .. } => {} // Skip
             GrammarItem::Terminal(_) => {} // Skip

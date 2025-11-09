@@ -105,6 +105,7 @@ impl TypeChecker {
             .filter_map(|item| match item {
                 GrammarItem::NonTerminal(ident) => Some(ident.to_string()),
                 GrammarItem::Binder { category } => Some(category.to_string()),
+                GrammarItem::Collection { element_type, .. } => Some(element_type.to_string()),
                 GrammarItem::Terminal(_) => None,
             })
             .collect();
@@ -219,6 +220,39 @@ impl TypeChecker {
                 // The result type is the same as the term's type
                 // subst(P:Proc, ...) => Proc
                 Ok(term_type)
+            }
+            
+            Expr::CollectionPattern { constructor, elements, rest } => {
+                // For collection patterns, we need to infer the constructor
+                // and type-check the elements against the collection's element type
+                
+                // For now, return a placeholder
+                // Full implementation will come when we generate Ascent code
+                // TODO: Implement proper type inference for collection patterns
+                
+                // Type-check element patterns
+                for elem in elements {
+                    let _ = self.infer_type_with_context(elem, context)?;
+                }
+                
+                // Rest variable gets bound to a collection type
+                if let Some(rest_var) = rest {
+                    // For now, don't add to context
+                    // Will be handled during Ascent generation
+                    let _ = rest_var;
+                }
+                
+                // Return placeholder - will be refined during validation
+                if let Some(cons) = constructor {
+                    // Look up the constructor's result category
+                    if let Some(ctor) = self.constructors.get(&cons.to_string()) {
+                        Ok(ctor.result_category.clone())
+                    } else {
+                        Ok("?".to_string())
+                    }
+                } else {
+                    Ok("?".to_string())
+                }
             }
         }
     }

@@ -63,11 +63,12 @@ fn generate_display_arm(rule: &GrammarRule) -> TokenStream {
     }
     
     // Collect field names and their types
-    let fields: Vec<(String, &syn::Ident)> = rule.items
+    let fields: Vec<(String, Option<&syn::Ident>)> = rule.items
         .iter()
         .enumerate()
         .filter_map(|(i, item)| match item {
-            GrammarItem::NonTerminal(ident) => Some((format!("f{}", i), ident)),
+            GrammarItem::NonTerminal(ident) => Some((format!("f{}", i), Some(ident))),
+            GrammarItem::Collection { .. } => Some((format!("f{}", i), None)), // Collection field
             _ => None,
         })
         .collect();
@@ -85,7 +86,13 @@ fn generate_display_arm(rule: &GrammarRule) -> TokenStream {
             .collect();
         
         // Check if any fields are Var - they need special handling
-        let has_var = fields.iter().any(|(_, nt)| nt.to_string() == "Var");
+        let has_var = fields.iter().any(|(_, nt_opt)| {
+            if let Some(nt) = nt_opt {
+                nt.to_string() == "Var"
+            } else {
+                false
+            }
+        });
         
         if has_var {
             // Generate code that extracts names from Vars
@@ -206,7 +213,7 @@ fn generate_binder_display_arm(rule: &GrammarRule) -> TokenStream {
 }
 
 /// Build format string and args for a rule (no Var fields)
-fn build_format_string(rule: &GrammarRule, fields: &[(String, &syn::Ident)]) -> (String, Vec<syn::Ident>) {
+fn build_format_string(rule: &GrammarRule, fields: &[(String, Option<&syn::Ident>)]) -> (String, Vec<syn::Ident>) {
     let mut format_str = String::new();
     let mut format_args = Vec::new();
     let mut field_iter = fields.iter();
@@ -220,6 +227,13 @@ fn build_format_string(rule: &GrammarRule, fields: &[(String, &syn::Ident)]) -> 
             }
             GrammarItem::NonTerminal(_) => {
                 // Regular fields
+                if let Some((name, _)) = field_iter.next() {
+                    format_str.push_str("{}");
+                    format_args.push(syn::Ident::new(name, proc_macro2::Span::call_site()));
+                }
+            }
+            GrammarItem::Collection { .. } => {
+                // Collection field - will be handled like NonTerminal
                 if let Some((name, _)) = field_iter.next() {
                     format_str.push_str("{}");
                     format_args.push(syn::Ident::new(name, proc_macro2::Span::call_site()));
@@ -261,6 +275,14 @@ fn build_binder_format_string_simple(rule: &GrammarRule) -> String {
             }
             GrammarItem::NonTerminal(_) => {
                 // Regular field
+                if prev_was_nonterminal {
+                    format_str.push(' ');
+                }
+                format_str.push_str("{}");
+                prev_was_nonterminal = true;
+            }
+            GrammarItem::Collection { .. } => {
+                // Collection field
                 if prev_was_nonterminal {
                     format_str.push(' ');
                 }
