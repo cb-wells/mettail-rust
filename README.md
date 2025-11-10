@@ -1,6 +1,6 @@
 # MeTTaIL: Metalanguage for language implementation
 
-**Status:** Collection Types ✅ | Indexed Projection ✅ | Deep Projection (Next)
+**Status:** Collection Types ✅ | Automatic Flattening ✅ | Term Explorer REPL (Next)
 
 ---
 
@@ -9,9 +9,8 @@
 - **[Current Status](docs/CURRENT-STATUS.md)** - What works now and recent progress 📊
 - **[Poly-Lingual Roadmap](docs/POLY-LINGUAL-ROADMAP.md)** - 3-year strategic vision 🎯
 - **[Quick Start Guide](QUICKSTART.md)** - Get started in 5 minutes
-- **[Phase 6 Complete](docs/design/PHASE-6-COMPLETE.md)** - Indexed Projection ✅
-- **[Collection Types Design](docs/design/COLLECTION-TYPES-DESIGN.md)** - Implementation details
-- **[Deep Projection Roadmap](docs/design/DEEP-PROJECTION-ROADMAP.md)** - Next steps
+- **[Known Limitations](docs/KNOWN-LIMITATIONS.md)** - Current gaps and TODOs
+- **[Term Explorer REPL Design](docs/design/TERM-EXPLORER-REPL-DESIGN.md)** - Next: Interactive exploration tool 🎯
 
 ---
 
@@ -62,6 +61,8 @@ theory! {
     equations {
         (NQuote (PDrop N)) == N ;      // Reflection
         (PPar {P}) == P ;              // Identity normalization
+        (PPar {}) == PZero ;           // Empty is zero
+        // Note: Flattening is automatic! No equations needed for {a, {b, c}} == {a, b, c}
     }
     
     rewrites {
@@ -78,15 +79,31 @@ theory! {
 
 ## ✅ What Works Now
 
-### Core Features (Phases 1-6 Complete)
+### Core Features (Phase 6 Complete)
 - ✅ **Theory Definition** - Declarative syntax with macros
 - ✅ **Type-Checking** - Sound category inference
 - ✅ **Binders & Variables** - Correct scoping via `moniker`
 - ✅ **Cross-Category Substitution** - Full support for heterogeneous substitution
 - ✅ **Collection Types** - HashBag for associative-commutative operations
 - ✅ **Order-Independent Matching** - Indexed projection for optimal performance
+- ✅ **Automatic Flattening** - Nested collections flatten structurally (no equations needed!)
 - ✅ **Rest Patterns** - Extract and reconstruct collection remainders
 - ✅ **Collection Equations** - Automatic normalization (e.g., `{P} == P`)
+- ✅ **Performance Optimized** - 42x speedup via lazy deconstruction
+
+### Key Innovation: Automatic Flattening
+
+Collections automatically flatten during construction - no complex equations required:
+
+```rust
+// Automatic: {a, {b, c}} → {a, b, c}
+// During substitution or rewrite construction
+// Generated helper functions handle recursive flattening
+// Zero user burden!
+```
+
+**Before:** Required complex equations with rest patterns  
+**After:** Structural property, always correct by construction
 
 ### Code Generation
 From a theory definition, MeTTaIL generates:
@@ -114,11 +131,13 @@ From a theory definition, MeTTaIL generates:
 - ✅ **Capture-Avoiding Substitution** - Full integration with generated rewrite engine
 
 ### Current Performance Characteristics
-- **Small terms (depth ≤3)**: ~1 second
-- **Medium terms (depth 4-5)**: ~10 seconds  
-- **Complex terms (depth 6+)**: 60-80 seconds
+- **Small terms (depth ≤3)**: ~100ms
+- **Medium terms (depth 4-5)**: ~500ms  
+- **Complex terms (depth 6+)**: ~2 seconds
 
-**Bottleneck**: Congruence rules for associative-commutative operations (e.g., `PPar`) generate exponentially many equality facts. Solution in progress: collection-based representations (see [Collection Types Design](docs/design/COLLECTION-TYPES-DESIGN.md)).
+**Recent Achievement**: 42x speedup via lazy deconstruction (18.5s → 435ms for complex examples)
+
+**Remaining Bottleneck**: Deep nesting in collection patterns requires indexed projection, which is only implemented for flat shared variables. Deep projection (nested shared variables) planned for Q1 2026.
 
 ### Demo: Execution
 ```bash
@@ -170,40 +189,40 @@ rw_proc(s, t) <--
 
 ---
 
-## 🎯 Current Focus: Performance & Type System
+## 🎯 Current Focus: Q1 2026
 
-### Immediate Priorities
-1. **Collection-Based Operations** - Replace binary `PPar` with `HashBag<Proc>` for 100x+ speedup
-   - See [Collection Types Design](docs/design/COLLECTION-TYPES-DESIGN.md)
-   - Target: < 1 second for complex term rewriting (currently 60-80s)
-2. **Type System Refinement** - Category inference and type checking
-3. **Execution Engine Optimization** - Reduce Ascent relation overhead
+### Next: Term Explorer REPL & Core Completeness
 
-### Phase 3 (Next): Theory Composition
-1. **Theory Imports** - Import and reuse other theories
-2. **Theory Parameters** - Generic theories (e.g., `List<T>`)
-3. **Extension Syntax** - Extend existing theories with new rules
-4. **Module System** - Proper namespacing and visibility
+**Priority Order:**
+1. **Term Generation for Collections** (2 weeks) - Unblock automated testing
+2. **Deep Projection for Ambient Calculus** (3-4 weeks) - Fix nested pattern matching
+3. **Term Explorer REPL** (4 weeks) - Interactive exploration and debugging
+4. **Debugging & Diagnostics** (2-3 weeks) - Developer tooling
 
-**Vision:** Build complex theories from simpler ones.
+See [Poly-Lingual Roadmap](docs/POLY-LINGUAL-ROADMAP.md) for details.
 
-```rust
-theory! {
-    name: List(T),
-    exports { List }
-    terms {
-        Nil . List ::= "[]" ;
-        Cons . List ::= T "::" List ;
-    }
-}
+### Term Explorer REPL Vision
 
-type ProcList = List(Proc);  // Instantiation
+```bash
+$ mettail repl rhocalc
+Theory: RhoCalc loaded
+
+> term: {a!(0), for(a->x0){*x0}}
+Running Ascent... Done. (45 terms, 62 rewrites, 11 normals)
+
+[1] Show normal forms
+[2] Show next rewrites (1 available)
+[3] Explore rewrite graph
+
+> 2
+Next rewrites:
+  [a] {*@(0)} via communication
+
+> a
+Stepped to: {*@(0)}  [Normal form ✓]
 ```
 
-### Phase 4 (Future): Advanced Optimization
-- **E-graph Integration** - Equality saturation for equation handling
-- **JIT Compilation** - Compile rewrite rules to native code
-- **Parallel Reduction** - Exploit non-determinism for parallelism
+**Goal:** Make MeTTaIL accessible and debuggable through interactive exploration.
 
 ---
 
