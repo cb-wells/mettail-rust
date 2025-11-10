@@ -1,16 +1,16 @@
 # MeTTaIL: Metalanguage for language implementation
 
-**Status:** Collection Types ✅ | Automatic Flattening ✅ | Term Explorer REPL (Next)
+**Status:** Collection Types ✅ | Automatic Flattening ✅ | Term Explorer REPL ✅ (Foundation Complete)
 
 ---
 
 ## 📖 Quick Links
 
+- **[REPL Guide](docs/REPL-GUIDE.md)** - Interactive term exploration tool 🎯 **NEW!**
 - **[Current Status](docs/CURRENT-STATUS.md)** - What works now and recent progress 📊
 - **[Poly-Lingual Roadmap](docs/POLY-LINGUAL-ROADMAP.md)** - 3-year strategic vision 🎯
 - **[Quick Start Guide](QUICKSTART.md)** - Get started in 5 minutes
 - **[Known Limitations](docs/KNOWN-LIMITATIONS.md)** - Current gaps and TODOs
-- **[Term Explorer REPL Design](docs/design/TERM-EXPLORER-REPL-DESIGN.md)** - Next: Interactive exploration tool 🎯
 
 ---
 
@@ -90,6 +90,24 @@ theory! {
 - ✅ **Rest Patterns** - Extract and reconstruct collection remainders
 - ✅ **Collection Equations** - Automatic normalization (e.g., `{P} == P`)
 - ✅ **Performance Optimized** - 42x speedup via lazy deconstruction
+- ✅ **Term Explorer REPL** - Interactive rewrite graph navigation 🎯 **NEW!**
+
+### 🎯 NEW: Term Explorer REPL (Foundation Complete)
+
+Interactive tool for exploring rewrite systems:
+
+```bash
+cargo run --bin mettail
+```
+
+**Features:**
+- Load theories dynamically (`rhocalc`, more coming)
+- Parse and execute terms with full Ascent computation
+- Navigate rewrite graphs (`rewrites`, `apply N`)
+- Jump to normal forms (`normal-forms`, `goto N`)
+- Clean colored interface with command history
+
+See **[REPL Guide](docs/REPL-GUIDE.md)** for details!
 
 ### Key Innovation: Automatic Flattening
 

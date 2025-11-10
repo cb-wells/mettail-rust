@@ -324,7 +324,7 @@ pub fn analyze_collection_pattern(
         for (pattern_idx, elem) in elements.iter().enumerate() {
             if let Expr::Apply { constructor, args } = elem {
                 // Find the grammar rule for this constructor
-                let grammar_rule = theory.terms.iter()
+    let grammar_rule = theory.terms.iter()
                     .find(|r| r.label == *constructor)?;
                 
                 let category = grammar_rule.category.clone();
@@ -347,7 +347,7 @@ pub fn analyze_collection_pattern(
                     captures,
                     join_key_indices: vec![], // Filled in next step
                 });
-            } else {
+    } else {
                 // Not an Apply pattern - skip for now
                 // (Could be just Var, which doesn't need projection)
                 return None;
@@ -507,7 +507,7 @@ fn build_grammar_to_field_map(grammar_rule: &crate::ast::GrammarRule) -> Vec<usi
                     field_idx_map[grammar_idx] = field_idx_map[binder_idx];
                     // Increment for next field after processing the scope
                     current_field += 1;
-                } else {
+                        } else {
                     // Regular field
                     field_idx_map[grammar_idx] = current_field;
                     current_field += 1;
@@ -588,7 +588,7 @@ pub fn generate_projection_relations(
                 if capture.is_binder {
                     // Binders are captured as Binder<String>
                     field_types.push(quote! { mettail_runtime::Binder<String> });
-                } else {
+                            } else {
                     let cat = &capture.category;
                     field_types.push(quote! { #cat });
                 }
@@ -601,7 +601,7 @@ pub fn generate_projection_relations(
                 if capture.is_binder {
                     // Binders store Binder<String>
                     field_types.push(quote! { mettail_runtime::Binder<String> });
-                } else {
+                    } else {
                     let cat = &capture.category;
                     field_types.push(quote! { #cat });
                 }
@@ -730,8 +730,8 @@ pub fn generate_extraction_rules(
                         let #body_deref_var = (*#body_var).clone()
                     });
                     capture_vars.insert(body_cap.var_name.clone(), body_deref_var);
-                }
-            } else {
+        }
+    } else {
                 // Regular field(s) - just dereference Box
                 for capture in captures {
                     let capture_var = format_ident!("cap_{}", capture.var_name.to_lowercase());
@@ -953,7 +953,7 @@ fn generate_ascent_pattern(
                     duplicate_vars,
                     equational_checks,
                 );
-            } else {
+                                } else {
                 generate_ascent_regular_pattern(
                     &category,
                     constructor,
@@ -1016,7 +1016,7 @@ fn generate_ascent_collection_pattern(
     // Find the constructor that contains a collection field
     let constructor_ident = if let Some(cons) = constructor {
         cons.clone()
-    } else {
+                            } else {
         // No explicit constructor - need to infer from context
         // For now, require explicit constructor
         panic!("Collection patterns must specify explicit constructor (e.g., PPar {{P, ...rest}})");
@@ -1069,7 +1069,7 @@ fn generate_ascent_collection_pattern(
     for (i, elem_pattern) in elements.iter().enumerate() {
         match elem_pattern {
             Expr::Var(var) => {
-                let var_name = var.to_string();
+                                    let var_name = var.to_string();
                 let elem_var = quote::format_ident!("{}_elem_{}", term_name, i);
                 
                 // Generate code to extract the i-th element
@@ -1078,7 +1078,7 @@ fn generate_ascent_collection_pattern(
                     clauses.push(quote! {
                         let #elem_var = #bag_var.iter().next().unwrap().0.clone()
                     });
-                } else {
+                                    } else {
                     // Skip previously bound elements
                     clauses.push(quote! {
                         let #elem_var = #bag_var.iter().nth(#i).unwrap().0.clone()
@@ -1102,9 +1102,9 @@ fn generate_ascent_collection_pattern(
                     }
                 } else {
                     // Single occurrence - just bind
-                    bindings.insert(var_name, binding);
-                }
-            }
+                                        bindings.insert(var_name, binding);
+                                    }
+                                }
             Expr::Apply { .. } => {
                 // Nested constructor pattern in collection
                 // This requires more sophisticated matching
@@ -1129,8 +1129,8 @@ fn generate_ascent_collection_pattern(
             // Build rest by filtering out the specific elements
             let elem_vars: Vec<_> = (0..min_size)
                 .map(|i| quote::format_ident!("{}_elem_{}", term_name, i))
-                .collect();
-            
+                    .collect();
+                
             clauses.push(quote! {
                 let #rest_ident = {
                     let mut bag = #bag_var.clone();
@@ -1164,7 +1164,7 @@ fn extract_category(expr: &Expr) -> Ident {
                 syn::Ident::new("Name", constructor.span())
             } else if name.starts_with('T') {
                 syn::Ident::new("Term", constructor.span())
-            } else {
+                        } else {
                 constructor.clone()
             }
         }
@@ -1265,8 +1265,8 @@ fn generate_ascent_binder_pattern(
     
     // Find which field is the scope (combining binder and body)
     let (binder_idx, body_indices) = &grammar_rule.bindings[0];
-    let body_idx = body_indices[0];
-    
+                    let body_idx = body_indices[0];
+                    
     // Map grammar indices to field/arg indices
     // AST fields: non-terminals (except body which is part of Scope) + binder (as Scope)
     let mut grammar_idx_to_field: Vec<Option<usize>> = vec![None; grammar_rule.items.len()];
@@ -1387,7 +1387,7 @@ fn generate_ascent_binder_pattern(
                 duplicate_vars,
                 equational_checks,
             );
-        } else {
+                } else {
             // Regular field - find which field it corresponds to
             // Find the grammar index for this arg
             if let Some((grammar_idx, item)) = grammar_rule.items.iter().enumerate()
@@ -1442,14 +1442,14 @@ fn generate_ascent_regular_pattern(
             item,
             crate::ast::GrammarItem::NonTerminal(_) | crate::ast::GrammarItem::Collection { .. }
         ))
-        .count();
-    
+                        .count();
+                    
     // Generate field names using term_name as prefix for uniqueness
     let term_name_str = term_name.to_string();
     let field_names: Vec<Ident> = (0..field_count)
         .map(|i| quote::format_ident!("{}_f{}", term_name_str, i))
-        .collect();
-    
+                        .collect();
+                    
     // Generate pattern: if let Category::Constructor(field_0, field_1, ...) = term_name
     clauses.push(quote! {
         if let #category::#constructor(#(#field_names),*) = #term_name
@@ -1537,7 +1537,7 @@ fn generate_ascent_regular_pattern(
                                 clauses.push(quote! {
                                     let #elem_var = #field_name.iter().next().unwrap().0.clone()
                                 });
-                            } else {
+            } else {
                                 clauses.push(quote! {
                                     let #elem_var = #field_name.iter().nth(#elem_idx).unwrap().0.clone()
                                 });
@@ -1688,8 +1688,8 @@ fn generate_ascent_collection_rhs(
                         rest_var_name,
                         bindings.keys().collect::<Vec<_>>()
                     ));
-                
-                quote! {
+        
+        quote! {
                     {
                         let mut bag = (#rest_binding).clone();
                         #(#category::#helper_name(&mut bag, #elem_constructions);)*
@@ -1716,8 +1716,8 @@ fn generate_ascent_collection_rhs(
                         rest_var_name,
                         bindings.keys().collect::<Vec<_>>()
                     ));
-                
-                quote! {
+    
+    quote! {
                     {
                         let mut bag = (#rest_binding).clone();
                         #(bag.insert(#elem_constructions);)*

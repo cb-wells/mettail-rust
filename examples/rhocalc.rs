@@ -20,7 +20,7 @@ theory! {
         POutput . Proc ::= Name "!" "(" Proc ")" ;
         PInput . Proc ::= "for" "(" Name "->" <Name> ")" "{" Proc "}" ;
 
-        PPar . Proc ::= HashBag(Proc) sep "|" delim "{" "}" ;
+        PPar . Proc ::= HashBag(Proc) sep "," delim "{" "}" ;
 
         NQuote . Name ::= "@" "(" Proc ")" ;
         NVar . Name ::= Var ;
@@ -53,18 +53,18 @@ fn main() {
     // println!("Term: {}", redex);
     
     let rdx_str = "{
-        a!(0) |
+        a!(0) ,
         for(a->x0){
-            { x0!(0) | for(b->y1){ y1!(*a) } }
-        } |
-        b!(0) |
+            { x0!(0) , for(b->y1){ y1!(*a) } }
+        } ,
+        b!(0) ,
         for(b->x1){
             a!(*b)
-        } |
-        c!(0) |
+        } ,
+        c!(0) ,
         for(c->x2){
             x2!(0)
-        } |
+        } ,
         for(@(0)->y0){
             *y0
         }

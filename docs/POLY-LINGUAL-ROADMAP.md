@@ -74,13 +74,27 @@ Enable **poly-lingual computation**: the ability to compose, translate, and exec
 
 ### 🎯 Current Focus: Term Explorer REPL (Q1 2026)
 
-Building an **interactive term exploration tool** to make MeTTaIL accessible and debuggable:
-- Theory selection and dynamic loading
-- Term input (parse, generate, or select)
-- Interactive rewrite exploration
-- Query available rewrites from any term
-- Navigate rewrite graph forward/backward
-- Visualize paths and equivalence classes
+Building an **interactive term exploration tool** to make MeTTaIL accessible and debuggable.
+
+**Status: Foundation Complete ✅ → Enhancing...**
+
+#### ✅ Implemented (Week 1)
+- ✅ Theory registry and dynamic loading
+- ✅ Term parsing with RhoCalc integration
+- ✅ Full Ascent execution (compute all rewrites once)
+- ✅ Rewrite listing from current term
+- ✅ Apply specific rewrites to navigate
+- ✅ View and jump to normal forms
+- ✅ Graph ID tracking (correct rewrite navigation)
+- ✅ Clean REPL interface with colored output
+
+#### 🚧 In Progress (Week 2)
+- ⏳ History navigation (back/forward through explored terms)
+- ⏳ Current term context display
+- ⏳ Equivalence class viewing
+- ⏳ Path visualization (initial → current)
+- ⏳ Add Ambient Calculus theory
+- ⏳ Statistics dashboard (term counts, depth)
 
 **Why this matters:**
 - Makes MeTTaIL usable by researchers and developers

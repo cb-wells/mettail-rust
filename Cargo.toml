@@ -1,5 +1,5 @@
 [workspace]
-members = ["mettail-macros", "mettail-runtime", "examples"]
+members = ["mettail-macros", "mettail-runtime", "examples", "mettail-repl"]
 resolver = "2"
 
 [workspace.package]
