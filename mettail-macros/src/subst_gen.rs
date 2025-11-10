@@ -316,13 +316,16 @@ fn generate_scope_substitution_arm(category: &Ident, rule: &GrammarRule, replace
                         // Map over collection elements
                         match coll_type {
                             crate::ast::CollectionType::HashBag => {
+                                // Use flatten helper to automatically flatten nested collections
+                                let helper_name = quote::format_ident!("insert_into_{}", rule.label.to_string().to_lowercase());
                                 quote! {
                                     {
                                         let mut bag = mettail_runtime::HashBag::new();
                                         for (elem, count) in #field_name.iter() {
                                             let subst_elem = elem.#subst_method(var, replacement);
                                             for _ in 0..count {
-                                                bag.insert(subst_elem.clone());
+                                                // Use flatten helper: auto-flattens if subst_elem is nested collection
+                                                #category::#helper_name(&mut bag, subst_elem.clone());
                                             }
                                         }
                                         bag
@@ -496,13 +499,16 @@ fn generate_regular_substitution_arm(category: &Ident, rule: &GrammarRule, repla
                     // Map over collection, substituting in each element
                     match coll_type {
                         crate::ast::CollectionType::HashBag => {
+                            // Use flatten helper to automatically flatten nested collections
+                            let helper_name = quote::format_ident!("insert_into_{}", label.to_string().to_lowercase());
                             quote! {
                                 {
                                     let mut bag = mettail_runtime::HashBag::new();
                                     for (elem, count) in #field.iter() {
                                         let subst_elem = elem.#subst_method(var, replacement);
                                         for _ in 0..count {
-                                            bag.insert(subst_elem.clone());
+                                            // Use flatten helper: auto-flattens if subst_elem is nested collection
+                                            #category::#helper_name(&mut bag, subst_elem.clone());
                                         }
                                     }
                                     bag

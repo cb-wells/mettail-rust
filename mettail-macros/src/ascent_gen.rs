@@ -206,11 +206,34 @@ fn generate_deconstruction_for_constructor(
 }
 
 /// Generate deconstruction for constructors with collection fields
-/// Extracts each element from the collection as a separate fact
+/// 
+/// PERFORMANCE NOTE: This eagerly extracts ALL elements from collections as separate facts,
+/// which causes exponential fact explosion (O(N*M) where N=terms, M=bag size).
+/// 
+/// This is now DISABLED by default because:
+/// 1. Indexed projection already iterates over collections when needed for pattern matching
+/// 2. Eager deconstruction creates 100s-1000s of redundant facts
+/// 3. These facts trigger cascading congruence checks (O(N²))
+/// 4. Results in 10x+ slowdown on moderately complex terms
+/// 
+/// The rule generation is kept here for future use if lazy evaluation is needed,
+/// but returns None to disable it.
 fn generate_collection_deconstruction(
     category: &Ident,
     constructor: &GrammarRule,
 ) -> Option<TokenStream> {
+    // DISABLED: Eager deconstruction causes performance issues
+    // Indexed projection handles collection iteration when needed
+    // 
+    // If re-enabled, this would generate:
+    //   element_type(elem) <-- category(t), 
+    //     if let Category::Label(bag) = t, 
+    //     for elem in bag.iter()
+    //
+    // See docs/RHOCALC-PERFORMANCE-ANALYSIS.md for detailed analysis
+    None
+    
+    /* ORIGINAL CODE (now disabled):
     let cat_lower = format_ident!("{}", category.to_string().to_lowercase());
     let label = &constructor.label;
     
@@ -226,14 +249,13 @@ fn generate_collection_deconstruction(
     
     let element_type_lower = format_ident!("{}", collection_info.to_string().to_lowercase());
     
-    // Generate rule: element_type(elem) <-- category(t), if let Category::Label(bag) = t, for elem in bag.iter()
-    // This extracts each element from the collection
     Some(quote! {
         #element_type_lower(elem.clone()) <--
             #cat_lower(t),
             if let #category::#label(bag) = t,
             for elem in bag.iter().map(|(e, _count)| e);
     })
+    */
 }
 
 /// Generate deconstruction for regular (non-binding) constructor

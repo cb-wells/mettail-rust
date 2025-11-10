@@ -6,6 +6,7 @@ use std::collections::HashMap;
 
 pub fn generate_ast(theory: &TheoryDef) -> TokenStream {
     let ast_enums = generate_ast_enums(theory);
+    let flatten_helpers = generate_flatten_helpers(theory);
     let subst_impl = subst_gen::generate_substitution(theory);
     let display_impl = display_gen::generate_display(theory);
     let generation_impl = termgen_gen::generate_term_generation(theory);
@@ -18,6 +19,8 @@ pub fn generate_ast(theory: &TheoryDef) -> TokenStream {
     
     quote! {
         #ast_enums
+        
+        #flatten_helpers
         
         #subst_impl
         
@@ -217,6 +220,103 @@ fn generate_binder_variant(rule: &GrammarRule) -> TokenStream {
     // Generate the variant
     quote! {
         #label(#(#fields),*)
+    }
+}
+
+/// Generate automatic flattening helpers for collection constructors
+/// 
+/// For each constructor with a collection field, generates a helper function
+/// that automatically flattens nested collections of the same type.
+/// 
+/// Example generated code:
+/// ```
+/// impl Proc {
+///     fn insert_into_ppar(bag: &mut mettail_runtime::HashBag<Proc>, elem: Proc) {
+///         match elem {
+///             Proc::PPar(inner) => {
+///                 // Recursively flatten nested PPar
+///                 for (e, count) in inner.iter() {
+///                     for _ in 0..*count {
+///                         Self::insert_into_ppar(bag, e.clone());
+///                     }
+///                 }
+///             }
+///             _ => bag.insert(elem),
+///         }
+///     }
+/// }
+/// ```
+fn generate_flatten_helpers(theory: &TheoryDef) -> TokenStream {
+    use quote::format_ident;
+    
+    // Group rules by category
+    let mut helpers_by_cat: HashMap<String, Vec<TokenStream>> = HashMap::new();
+    
+    for rule in &theory.terms {
+        // Check if this rule has a collection field
+        let has_collection = rule.items.iter().any(|item| {
+            matches!(item, GrammarItem::Collection { .. })
+        });
+        
+        if !has_collection {
+            continue;
+        }
+        
+        let category = &rule.category;
+        let label = &rule.label;
+        let helper_name = format_ident!("insert_into_{}", label.to_string().to_lowercase());
+        
+        let helper = quote! {
+            /// Auto-flattening insert for #label
+            ///
+            /// If elem is itself a #label, recursively merges its contents instead of nesting.
+            /// This ensures that collection constructors are always flat, never nested.
+            pub fn #helper_name(
+                bag: &mut mettail_runtime::HashBag<#category>,
+                elem: #category
+            ) {
+                match elem {
+                    #category::#label(inner) => {
+                        // Flatten: recursively merge inner bag contents
+                        for (e, count) in inner.iter() {
+                            for _ in 0..count {
+                                // Recursive call handles multi-level nesting
+                                Self::#helper_name(bag, e.clone());
+                            }
+                        }
+                    }
+                    _ => {
+                        // Normal insert - not a nested collection
+                        bag.insert(elem);
+                    }
+                }
+            }
+        };
+        
+        helpers_by_cat
+            .entry(category.to_string())
+            .or_default()
+            .push(helper);
+    }
+    
+    // Generate impl blocks for each category
+    let impls: Vec<TokenStream> = theory.exports.iter().filter_map(|export| {
+        let cat_name = &export.name;
+        let helpers = helpers_by_cat.get(&cat_name.to_string())?;
+        
+        if helpers.is_empty() {
+            return None;
+        }
+        
+        Some(quote! {
+            impl #cat_name {
+                #(#helpers)*
+            }
+        })
+    }).collect();
+    
+    quote! {
+        #(#impls)*
     }
 }
 

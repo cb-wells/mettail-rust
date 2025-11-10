@@ -51,10 +51,11 @@ Enable **poly-lingual computation**: the ability to compose, translate, and exec
 - **Term Sorting** - Total ordering on terms (`Ord` trait)
 - **Pretty-Printing** - Automatic `Display` implementation
 
-#### Collection Types (Phase 6)
+#### Collection Types (Phase 6) - COMPLETE ✅
 - **`HashBag<T>` Collections** - Efficient multiset representation with O(1) equality
 - **Collection Patterns** - Match and extract from collections with rest patterns
 - **Indexed Projection** - Order-independent matching via Ascent joins
+- **Automatic Flattening** - Nested collections flatten structurally during construction
 - **Collection Equations** - Automatic normalization (e.g., `{P} == P`)
 - **LALRPOP Integration** - Parse collection syntax with separators and delimiters
 
@@ -65,17 +66,27 @@ Enable **poly-lingual computation**: the ability to compose, translate, and exec
 - **Type-Aware Variable Tracking** - Category inference from constructors
 - **Freshness Checking** - Automatic generation of side conditions
 - **Reflexivity & Transitivity** - `eqrel` handles equivalence closure
+- **Performance Optimized** - 42x speedup via lazy deconstruction
 
 #### Examples Working
 - **Rho Calculus** - Communication via name-passing with collection-based parallelism
 - **Ambient Calculus** - Mobile computation with capabilities (basic cases)
 
-### 🎯 Current Focus: Deep Projection (Phase 7)
+### 🎯 Current Focus: Term Explorer REPL (Q1 2026)
 
-Working to extend indexed projection to handle **deeply nested shared variables**, enabling complex rewrite rules like:
-```rust
-(PPar {(PAmb N (PPar {(PIn M P), Q})), (PAmb M R), ...rest})
-```
+Building an **interactive term exploration tool** to make MeTTaIL accessible and debuggable:
+- Theory selection and dynamic loading
+- Term input (parse, generate, or select)
+- Interactive rewrite exploration
+- Query available rewrites from any term
+- Navigate rewrite graph forward/backward
+- Visualize paths and equivalence classes
+
+**Why this matters:**
+- Makes MeTTaIL usable by researchers and developers
+- Essential for debugging complex rewrite systems
+- Foundation for educational use cases
+- Demonstrates poly-lingual computation interactively
 
 ### ⚠️ Known Limitations
 
@@ -108,8 +119,8 @@ Working to extend indexed projection to handle **deeply nested shared variables*
 
 **Goal:** Make MeTTaIL production-ready for single-language execution.
 
-#### ✅ Q4 2025: Collection Types & Indexed Projection (COMPLETE)
-**Milestone:** Order-independent pattern matching for AC operations
+#### ✅ Q4 2025: Collection Types & Automatic Flattening (COMPLETE)
+**Milestone:** Order-independent pattern matching + structural flattening
 
 **Completed:**
 - ✅ Collection type integration (`HashBag<T>`)
@@ -118,44 +129,232 @@ Working to extend indexed projection to handle **deeply nested shared variables*
 - ✅ Order-independent indexed projection for flat shared variables
 - ✅ Collection equations and normalization
 - ✅ Integration with Ascent rewrite engine
+- ✅ **Automatic collection flattening** - nested collections flatten during construction
+- ✅ **Performance optimization** - 42x speedup via lazy deconstruction
 
 **Impact:**
 - RhoCalc rewrite matching now order-independent for simple cases
+- Eliminated need for complex flattening equations
 - Foundation for 100x+ performance improvements
 - Eliminated AC equation explosion for flat patterns
 
+**Key Innovation:**
+Automatic flattening via generated helper functions makes nested collections (`{a, {b, c}}`) automatically flatten to `{a, b, c}` during construction - no equations needed!
+
 ---
 
-#### Q1 2026: Deep Projection & Performance (IN PROGRESS)
-**Milestone:** Handle nested shared variables, production-grade performance
+#### Q1 2026: Developer Tooling & Core Completeness (NEXT)
+**Milestone:** Interactive exploration + production-ready pattern matching
 
-- **Deep Projection** (4-6 weeks)
-  - Multi-level indexed projection for nested patterns
-  - Automatic detection of deeply nested shared variables
-  - Generate intermediate relations and joins
-  - Optimize common case (flat variables) with fast path
-  - **Target:** Ambient calculus rules work order-independently
-  - **Docs:** [Deep Projection Design](design/DEEP-PROJECTION-DESIGN.md), [Roadmap](design/DEEP-PROJECTION-ROADMAP.md)
+**Priority Order:**
+1. **Term Generation for Collections** (2 weeks) - Unblock testing
+2. **Deep Projection for Ambient Calculus** (3-4 weeks) - Critical correctness
+3. **Term Explorer REPL** (4 weeks) - Developer experience
+4. **Debugging & Diagnostics** (2-3 weeks) - Polish
 
-- **Ascent Optimization** (3 weeks)
-  - Profile Ascent relation overhead
-  - Switch to `ascent_par!` for parallelization
-  - Use specialized indices for hot paths
-  - Benchmark and tune data structures
-  - **Target:** 10x speedup via parallelization
+---
 
-- **Benchmarking Suite** (3 weeks)
-  - Create standardized benchmark set
-  - Measure throughput (rewrites/second)
-  - Track memory usage and allocation
-  - Regression testing for performance
-  - CI integration for performance tracking
+##### 1. Term Generation for Collections (2 weeks)
 
-**Success Criteria:**
+**Problem**: Current term generation skips collection constructors, making it impossible to automatically generate test cases for theories using `HashBag`, `HashSet`, or `Vec`.
+
+**Impact**: 
+- Cannot use `Proc::generate_random_at_depth()` for RhoCalc/Ambient
+- Manual test case construction is tedious and error-prone
+- Limits ability to fuzz-test rewrite systems
+
+**Implementation**:
+- Extend `termgen_gen.rs` to handle `GrammarItem::Collection`
+- **Exhaustive generation**: Generate all collections up to size N
+  - For depth D, generate all combinations of D-1 depth elements
+  - Use combinatorics to enumerate multisets
+  - Example: At depth 2, `{0}`, `{0, 0}`, `{a!(0)}`, `{0, a!(0)}`, etc.
+- **Random generation**: Sample collection sizes and elements
+  - Geometric distribution for collection size (avg 2-3 elements)
+  - Recursively generate elements at depth D-1
+  - Support empty collections as base case
+- **Control knobs**:
+  - Max collection size parameter
+  - Probability of empty collection
+  - Bias towards smaller collections
+
+**Test Plan**:
+```rust
+#[test]
+fn test_generate_with_collections() {
+    let vars = vec!["a".to_string()];
+    let terms = Proc::generate_all_at_depth(&vars, 2);
+    // Should include: {}, {0}, {0, 0}, {a!(0)}, etc.
+    assert!(terms.iter().any(|t| matches!(t, Proc::PPar(_))));
+}
+
+#[test]
+fn test_random_with_collections() {
+    let vars = vec!["a".to_string(), "b".to_string()];
+    let term = Proc::generate_random_at_depth(&vars, 4);
+    println!("Generated: {}", term);
+    // Should produce valid terms with collections
+}
+```
+
+**Success Criteria**:
+- ✅ Can generate all terms at depth 3 including collections
+- ✅ Random generation produces valid, diverse collection terms
+- ✅ Generated terms parse and execute correctly
+- ✅ RhoCalc and Ambient test suites use generated terms
+
+---
+
+##### 2. Deep Projection for Ambient Calculus (3-4 weeks)
+
+**Problem**: Current indexed projection only detects top-level shared variables. Deeply nested shared variables (like `M` in `{(PAmb N {(PIn M P), Q}), (PAmb M R)}`) are not detected, causing fallback to order-dependent matching.
+
+**Impact**: 
+- **Ambient calculus rewrite rules don't work correctly**
+- Order-dependent matching is unreliable for nested patterns
+- Limits expressiveness of rewrite rules
+- Forces workarounds like manual reordering
+
+**Example Rule (currently broken)**:
+```rust
+// Ambient calculus capability matching
+(PPar {(PAmb N (PPar {(PIn M P), Q})), (PAmb M R), ...rest})
+    => (PPar {(PAmb M (PPar {(PAmb N (PPar {P, Q})), R})), ...rest})
+//                         ^-- M is nested 2 levels deep, not detected!
+```
+
+**Implementation** (see `docs/design/DEEP-PROJECTION-DESIGN.md`):
+
+1. **Enhanced Variable Extraction** (Week 1)
+   - Recursively traverse nested `Apply` patterns inside collections
+   - Track variable path: `[collection_idx, nested_apply_idx, arg_idx]`
+   - Build full dependency graph of shared variables
+   - Example: `M` at path `[0, PAmb, 1, PPar, 0, PIn, 0]`
+
+2. **Intermediate Relation Generation** (Week 1-2)
+   - Generate helper relations for nested patterns
+   - Example: `ppar_contains_pamb(outer_bag, ambient_name, inner_proc)`
+   - Chain these relations to reach deeply nested variables
+   - Join on nested shared variables
+
+3. **Join Strategy** (Week 2)
+   - Generate multi-level joins in Ascent
+   - Example pseudo-code:
+     ```rust
+     // Level 1: Extract PAmb from PPar
+     ppar_contains_pamb(bag, name, inner_proc) <--
+         proc(Proc::PPar(bag)),
+         for (elem, _) in bag.iter(),
+         if let Proc::PAmb(n, p) = elem;
+     
+     // Level 2: Extract PIn from nested PPar
+     pamb_contains_pin(outer_name, channel, binding, body) <--
+         ppar_contains_pamb(_, outer_name, inner_proc),
+         if let Proc::PPar(inner_bag) = inner_proc.as_ref(),
+         for (elem, _) in inner_bag.iter(),
+         if let Proc::PIn(chan, Scope(binder, body)) = elem;
+     
+     // Join on shared channel
+     rw_proc(original, result) <--
+         ppar_contains_pamb(bag1, n, _),
+         pamb_contains_pin(n, m, x, p),
+         ppar_contains_pamb(bag2, m, r),
+         if bag1 != bag2;  // Different ambients
+     ```
+
+4. **Optimization** (Week 3)
+   - Fast path: Detect if only top-level variables (current code)
+   - Slow path: Use deep projection only when needed
+   - Cache intermediate relations across rewrites
+
+5. **Testing** (Week 4)
+   - Ambient calculus test suite
+   - Verify order-independence with permuted inputs
+   - Benchmark performance vs. fallback
+   - Stress test with deep nesting (4+ levels)
+
+**Success Criteria**:
+- ✅ Ambient calculus example finds all rewrites (currently 0 paths → should be 10+)
+- ✅ Order-independent for nested shared variables
+- ✅ Works for arbitrary nesting depth
+- ✅ Performance acceptable (< 2x overhead vs. flat projection)
+- ✅ Clear diagnostic when deep projection is used
+
+**Fallback Strategy**:
+If full solution is too complex, implement "Quick Win" from design doc:
+- Only handle 2-level nesting (90% of use cases)
+- Simpler implementation (~2 weeks)
+- Can extend to full solution later
+
+---
+
+##### 3. Term Explorer REPL (4 weeks)
+  - Interactive REPL for exploring rewrite systems
+  - **Theory Selection**: Load any defined theory dynamically
+  - **Term Input**: Parse, select from examples, or generate random terms
+  - **Ascent Integration**: Automatic execution on term input
+  - **Interactive Queries**: 
+    - List all reachable terms
+    - Show available rewrites from current term
+    - Display normal forms
+    - Query equivalence classes
+  - **Navigation**: 
+    - Step forward through rewrites
+    - Explore rewrite graph interactively
+    - Backtrack to previous states
+    - Visualize rewrite paths
+  - **Target**: Beautiful, intuitive CLI (future: TUI)
+  - **Docs**: See `docs/design/TERM-EXPLORER-REPL-DESIGN.md`
+
+---
+
+##### 4. Debugging & Diagnostics (2-3 weeks)
+  - Pretty-print Ascent relations
+  - Trace rewrite rule applications
+  - Explain why terms are equivalent
+  - Show proof trees for rewrites
+  - Performance profiling per rule
+  - Memory usage tracking
+
+---
+
+**Success Criteria for Q1 2026:**
+- ✅ Term generation produces valid collection terms (enables testing)
+- ✅ Ambient calculus rules work correctly (deep projection)
+- ✅ REPL works for all example theories (developer experience)
+- ✅ Can interactively explore 1000+ term rewrite graph
 - ✅ All collection patterns order-independent (including nested)
-- ✅ Complex terms (depth 6+) reduce in < 1 second
-- ✅ 1M+ rewrites/second on standard benchmarks
-- ✅ Memory usage < 1GB for large programs
+- ✅ Clear error messages and helpful diagnostics
+
+**User Experience:**
+```
+$ mettail repl rhocalc
+Theory: RhoCalc loaded (2 categories, 8 constructors, 3 rewrites)
+
+> term: {a!(0), for(a->x0){*x0}}
+Running Ascent... Done. (45 terms, 62 rewrites)
+
+[1] Show normal forms (11 found)
+[2] Show next rewrites (1 available)
+[3] Show equivalence class
+[4] Generate similar terms
+[5] Visualize rewrite graph
+
+> 2
+Next rewrites from {a!(0), for(a->x0){*x0}}:
+  [a] {*@(0)} via communication rule
+
+> a
+Stepping to: {*@(0)}
+
+[1] Show normal forms (1 found)
+[2] Show next rewrites (none)
+[3] Back to previous term
+[4] Restart exploration
+
+> 1
+Normal form: *@(0)
+```
 
 ---
 

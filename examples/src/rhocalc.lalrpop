@@ -25,7 +25,7 @@ pub Proc: Proc = {
         let scope = Scope::new(binder, Box::new(body_2));
         Proc::PInput(Box::new(f0), scope)
     },
-    "{" <elems:(<Proc> ",")*> <last:Proc?> "}" => {
+    "{" <elems:(<Proc> "|")*> <last:Proc?> "}" => {
         let mut coll = mettail_runtime::HashBag::new();
         for e in elems {
             coll.insert(e);

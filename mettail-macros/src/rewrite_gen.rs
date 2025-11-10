@@ -1649,6 +1649,99 @@ fn generate_ascent_regular_pattern(
 /// Generate RHS construction for Ascent clause
 fn generate_ascent_rhs(expr: &Expr, bindings: &HashMap<String, TokenStream>, theory: &TheoryDef) -> TokenStream {
     match expr {
+        Expr::CollectionPattern { .. } => {
+            // If we reach here, it's a bare collection pattern (not inside Apply)
+            // Fall back to no-flatten version
+            generate_ascent_collection_rhs(expr, bindings, theory, None)
+        }
+        _ => generate_ascent_rhs_inner(expr, bindings, theory)
+    }
+}
+
+/// Generate RHS for collection patterns, optionally using flatten helper
+/// 
+/// If `constructor_context` is Some((category, label)), uses the flatten helper.
+/// Otherwise, uses plain `bag.insert`.
+fn generate_ascent_collection_rhs(
+    expr: &Expr,
+    bindings: &HashMap<String, TokenStream>,
+    theory: &TheoryDef,
+    constructor_context: Option<(syn::Ident, syn::Ident)>
+) -> TokenStream {
+    if let Expr::CollectionPattern { constructor: _, elements, rest } = expr {
+        let elem_constructions: Vec<TokenStream> = elements.iter()
+            .map(|e| generate_ascent_rhs_inner(e, bindings, theory))
+            .collect();
+        
+        let coll_type = quote! { mettail_runtime::HashBag };
+        
+        if let Some((category, label)) = constructor_context {
+            // Use flatten helper
+            let helper_name = quote::format_ident!("insert_into_{}", label.to_string().to_lowercase());
+            
+            if let Some(rest_var) = rest {
+                // Merge rest with new elements using flatten helper
+                let rest_var_name = rest_var.to_string();
+                let rest_binding = bindings.get(&rest_var_name)
+                    .unwrap_or_else(|| panic!(
+                        "Rest variable '{}' not bound. Available bindings: {:?}",
+                        rest_var_name,
+                        bindings.keys().collect::<Vec<_>>()
+                    ));
+                
+                quote! {
+                    {
+                        let mut bag = (#rest_binding).clone();
+                        #(#category::#helper_name(&mut bag, #elem_constructions);)*
+                        bag
+                    }
+                }
+            } else {
+                // Build from elements using flatten helper
+                quote! {
+                    {
+                        let mut bag = #coll_type::new();
+                        #(#category::#helper_name(&mut bag, #elem_constructions);)*
+                        bag
+                    }
+                }
+            }
+        } else {
+            // No constructor context - use plain insert (shouldn't flatten)
+            if let Some(rest_var) = rest {
+                let rest_var_name = rest_var.to_string();
+                let rest_binding = bindings.get(&rest_var_name)
+                    .unwrap_or_else(|| panic!(
+                        "Rest variable '{}' not bound. Available bindings: {:?}",
+                        rest_var_name,
+                        bindings.keys().collect::<Vec<_>>()
+                    ));
+                
+                quote! {
+                    {
+                        let mut bag = (#rest_binding).clone();
+                        #(bag.insert(#elem_constructions);)*
+                        bag
+                    }
+                }
+            } else {
+                quote! {
+                    {
+                        let mut bag = #coll_type::new();
+                        #(bag.insert(#elem_constructions);)*
+                        bag
+                    }
+                }
+            }
+        }
+    } else {
+        panic!("generate_ascent_collection_rhs called on non-CollectionPattern");
+    }
+}
+
+/// Internal RHS generation - does not handle top-level CollectionPattern
+fn generate_ascent_rhs_inner(expr: &Expr, bindings: &HashMap<String, TokenStream>, theory: &TheoryDef) -> TokenStream {
+    match expr {
         Expr::Var(var) => {
             let var_name = var.to_string();
             if let Some(binding) = bindings.get(&var_name) {
@@ -1692,7 +1785,12 @@ fn generate_ascent_rhs(expr: &Expr, bindings: &HashMap<String, TokenStream>, the
                         .map(|item| matches!(item, crate::ast::GrammarItem::Collection { .. }))
                         .unwrap_or(false);
                     
-                    let inner = generate_ascent_rhs(arg, bindings, theory);
+                    // For collection fields, pass the constructor label so flatten helper can be used
+                    let inner = if is_collection_field && matches!(arg, Expr::CollectionPattern { .. }) {
+                        generate_ascent_collection_rhs(arg, bindings, theory, Some((category.clone(), constructor.clone())))
+                    } else {
+                        generate_ascent_rhs(arg, bindings, theory)
+                    };
                     
                     // Don't wrap collection fields in Box::new
                     if is_collection_field {
@@ -1728,41 +1826,9 @@ fn generate_ascent_rhs(expr: &Expr, bindings: &HashMap<String, TokenStream>, the
             }
         }
         
-        Expr::CollectionPattern { constructor: _, elements, rest } => {
-            // Build a collection from elements and rest
-            let elem_constructions: Vec<TokenStream> = elements.iter()
-                .map(|e| generate_ascent_rhs(e, bindings, theory))
-                .collect();
-            
-            let coll_type = quote! { mettail_runtime::HashBag };  // Default to HashBag
-            
-            if let Some(rest_var) = rest {
-                // Merge rest with new elements
-                let rest_var_name = rest_var.to_string();
-                let rest_binding = bindings.get(&rest_var_name)
-                    .unwrap_or_else(|| panic!(
-                        "Rest variable '{}' not bound. Available bindings: {:?}",
-                        rest_var_name,
-                        bindings.keys().collect::<Vec<_>>()
-                    ));
-                
-                quote! {
-                    {
-                        let mut bag = (#rest_binding).clone();
-                        #(bag.insert(#elem_constructions);)*
-                        bag
-                    }
-                }
-            } else {
-                // Just build from elements
-                quote! {
-                    {
-                        let mut bag = #coll_type::new();
-                        #(bag.insert(#elem_constructions);)*
-                        bag
-                    }
-                }
-            }
+        Expr::CollectionPattern { .. } => {
+            // This should have been handled at the top level by generate_ascent_rhs
+            panic!("CollectionPattern should be handled by generate_ascent_rhs/generate_ascent_collection_rhs");
         }
     }
 }
