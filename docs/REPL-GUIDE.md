@@ -36,6 +36,12 @@ rhocalc> apply 0
   - Parses using the loaded theory's grammar
   - Runs Ascent to compute full rewrite graph
   - Reports: term count, rewrite count, normal forms
+- **`example <name>`** - Load a pre-defined example process
+  - See [RhoCalc Examples](RHOCALC-EXAMPLES.md) for full list
+  - Categories: Simple, Branching, Complex, Parallel, Advanced, Performance, Edge Cases
+- **`list-examples`** - Show all available examples
+  - Organized by category
+  - Includes descriptions
 
 #### Rewrite Navigation
 - **`rewrites`** - List all available rewrites from current term

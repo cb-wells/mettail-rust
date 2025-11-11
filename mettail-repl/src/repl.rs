@@ -1,5 +1,7 @@
 use crate::registry::TheoryRegistry;
 use crate::state::ReplState;
+use crate::examples::{Example, ExampleCategory};
+use crate::pretty::format_term_pretty;
 use anyhow::Result;
 use colored::Colorize;
 use rustyline::error::ReadlineError;
@@ -93,6 +95,8 @@ impl Repl {
             "normal-forms" | "nf" => self.cmd_normal_forms(),
             "apply" => self.cmd_apply(&parts[1..]),
             "goto" => self.cmd_goto(&parts[1..]),
+            "example" => self.cmd_example(&parts[1..]),
+            "list-examples" => self.cmd_list_examples(),
             "quit" | "exit" => {
                 println!("Goodbye!");
                 std::process::exit(0);
@@ -120,6 +124,8 @@ impl Repl {
         println!();
         println!("{}", "  Term Input:".yellow());
         println!("    {}    Parse and load a term", "term: <expr>".green());
+        println!("    {}    Load example process", "example <name>".green());
+        println!("    {}    List available examples", "list-examples".green());
         println!();
         println!("{}", "  Navigation:".yellow());
         println!("    {}           List rewrites from current term", "rewrites".green());
@@ -230,7 +236,9 @@ impl Repl {
         println!("  - {} normal forms", results.normal_forms().len());
         println!();
 
-        println!("Current term: {}", format!("{}", term).cyan());
+        println!("{}", "Current term:".bold());
+        let formatted = format_term_pretty(&format!("{}", term));
+        println!("{}", formatted.cyan());
         println!();
 
         // Store in state
@@ -264,11 +272,15 @@ impl Repl {
                     .map(|t| t.display.as_str())
                     .unwrap_or("<unknown>");
                 
-                println!("  {}) {} {}", 
-                    idx.to_string().cyan(),
-                    "→".yellow(),
-                    target_display.green()
-                );
+                // Pretty print the target
+                let formatted = format_term_pretty(target_display);
+                
+                println!("  {}) {}", idx.to_string().cyan(), "→".yellow());
+                // Indent each line of the formatted output
+                for line in formatted.lines() {
+                    println!("     {}", line.green());
+                }
+                println!();
             }
         }
         println!();
@@ -288,7 +300,12 @@ impl Repl {
             println!("{} ({} total):", "Normal forms".bold(), normal_forms.len());
             println!();
             for (idx, nf) in normal_forms.iter().enumerate() {
-                println!("  {}) {}", idx.to_string().cyan(), nf.display.green());
+                let formatted = format_term_pretty(&nf.display);
+                println!("  {})", idx.to_string().cyan());
+                for line in formatted.lines() {
+                    println!("    {}", line.green());
+                }
+                println!();
             }
         }
         println!();
@@ -334,7 +351,11 @@ impl Repl {
         let target_term = theory.parse_term(&target_info.display)?;
         
         println!();
-        println!("Applied rewrite {} {}", "→".yellow(), target_info.display.green());
+        println!("{}", "Applied rewrite →".yellow());
+        let formatted = format_term_pretty(&target_info.display);
+        for line in formatted.lines() {
+            println!("  {}", line.green());
+        }
         println!();
         
         // Update state - pass the target_id so we can track position in the graph
@@ -371,11 +392,67 @@ impl Repl {
         let target_term = theory.parse_term(&target_info.display)?;
         
         println!();
-        println!("Navigated to normal form: {}", target_info.display.green());
+        println!("{}", "Navigated to normal form:".bold());
+        let formatted = format_term_pretty(&target_info.display);
+        for line in formatted.lines() {
+            println!("  {}", line.green());
+        }
         println!();
         
         // Update state with the correct graph ID
         self.state.set_term_with_id(target_term, results.clone(), target_info.term_id)?;
+        
+        Ok(())
+    }
+    
+    fn cmd_example(&mut self, args: &[&str]) -> Result<()> {
+        if args.is_empty() {
+            anyhow::bail!("Usage: example <name>\nUse 'list-examples' to see available examples.");
+        }
+        
+        let example_name = args[0];
+        
+        let example = Example::by_name(example_name)
+            .ok_or_else(|| anyhow::anyhow!("Example '{}' not found. Use 'list-examples' to see available examples.", example_name))?;
+        
+        println!();
+        println!("{} {}", "Example:".bold(), example.name.cyan());
+        println!("{} {}", "Description:".bold(), example.description);
+        println!();
+        
+        // Parse and load the example
+        self.cmd_parse_term(example.source)?;
+        
+        Ok(())
+    }
+    
+    fn cmd_list_examples(&self) -> Result<()> {
+        println!();
+        println!("{}", "Available Examples:".bold());
+        println!();
+        
+        // Group by category
+        for &category in &[
+            ExampleCategory::Simple,
+            ExampleCategory::Branching,
+            ExampleCategory::Complex,
+            ExampleCategory::Parallel,
+            ExampleCategory::Advanced,
+            ExampleCategory::Performance,
+            ExampleCategory::EdgeCase,
+        ] {
+            let examples = Example::by_category(category);
+            if !examples.is_empty() {
+                println!("{}", format!("  {:?}:", category).yellow());
+                for ex in examples {
+                    println!("    {} - {}", ex.name.cyan(), ex.description.dimmed());
+                }
+                println!();
+            }
+        }
+        
+        println!("Use {} to load an example.", "example <name>".green());
+        println!();
         
         Ok(())
     }

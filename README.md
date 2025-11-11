@@ -103,11 +103,21 @@ cargo run --bin mettail
 **Features:**
 - Load theories dynamically (`rhocalc`, more coming)
 - Parse and execute terms with full Ascent computation
+- **20+ example processes** - Simple to complex communication patterns
 - Navigate rewrite graphs (`rewrites`, `apply N`)
 - Jump to normal forms (`normal-forms`, `goto N`)
 - Clean colored interface with command history
 
-See **[REPL Guide](docs/REPL-GUIDE.md)** for details!
+**Quick Start:**
+```
+mettail> load rhocalc
+mettail> example multi_path      # Load complex example
+mettail> rewrites                # See available rewrites
+mettail> apply 0                 # Navigate to next term
+mettail> normal-forms            # View all normal forms
+```
+
+See **[REPL Guide](docs/REPL-GUIDE.md)** and **[RhoCalc Examples](docs/RHOCALC-EXAMPLES.md)** for details!
 
 ### Key Innovation: Automatic Flattening
 
