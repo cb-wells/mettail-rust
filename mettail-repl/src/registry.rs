@@ -17,8 +17,8 @@ impl TheoryRegistry {
     
     /// Register a theory
     pub fn register(&mut self, theory: Box<dyn Theory>) {
-        let name = theory.name().to_string();
-        self.theories.insert(name, theory);
+        let name = theory.name().as_str();
+        self.theories.insert(name.to_string(), theory);
     }
     
     /// Get a theory by name
@@ -52,6 +52,7 @@ pub fn build_registry() -> Result<TheoryRegistry> {
     
     // Register RhoCalc
     registry.register(Box::new(crate::rhocalc_theory::RhoCalculusTheory));
+    registry.register(Box::new(crate::ambcalc_theory::AmbCalculusTheory));
     
     if registry.theories.is_empty() {
         bail!("No theories available. Build mettail-examples first.");

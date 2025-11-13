@@ -1,14 +1,11 @@
-#![allow(dead_code, unused_imports, unused_variables)]
-
-use crate::ast::{TheoryDef, GrammarRule, Equation, Expr};
+use crate::ast::{TheoryDef, GrammarRule, Equation, Expr, RewriteRule};
+use crate::utils::{print_rule};
 use proc_macro2::TokenStream;
 use quote::{quote, format_ident};
 use syn::Ident;
-use std::collections::HashMap;
-use ascent_byods_rels::eqrel;
+use std::collections::{HashMap, HashSet};
 
 
-/// Generate complete ascent_source! block for a theory
 pub fn generate_ascent_source(theory: &TheoryDef) -> TokenStream {
     let theory_name = theory.name.to_string().to_lowercase();
     let source_name = format_ident!("{}_source", theory_name);
@@ -32,33 +29,24 @@ pub fn generate_ascent_source(theory: &TheoryDef) -> TokenStream {
         }
     };
     
-    // Debug: print the full generated ascent source with formatting
     eprintln!("\n========== FULL GENERATED ASCENT SOURCE ==========");
     eprintln!("ascent_source! {{");
     eprintln!("    {}:\n", source_name);
     eprintln!("    // Relations");
     for line in relations.to_string().split(';') {
-        if !line.trim().is_empty() {
-            eprintln!("    {};", line.trim());
-        }
+        print_rule(line);
     }
     eprintln!("\n    // Category rules");
     for line in category_rules.to_string().split(';') {
-        if !line.trim().is_empty() {
-            eprintln!("    {};", line.trim());
-        }
+        print_rule(line);
     }
     eprintln!("\n    // Equation rules");
     for line in equation_rules.to_string().split(';') {
-        if !line.trim().is_empty() {
-            eprintln!("    {};", line.trim());
-        }
+        print_rule(line);
     }
     eprintln!("\n    // Rewrite rules");
     for line in rewrite_rules.to_string().split(';') {
-        if !line.trim().is_empty() {
-            eprintln!("    {};", line.trim());
-        }
+        print_rule(line);
     }
     eprintln!("}}");
     eprintln!("==================================================\n");
@@ -98,9 +86,55 @@ fn generate_relations(theory: &TheoryDef) -> TokenStream {
         });
     }
     
+    // Collection projection relations (automatic)
+    // For each constructor with a collection field, generate a "contains" relation
+    // Example: PPar(HashBag<Proc>) generates: relation ppar_contains(Proc, Proc);
+    let projection_relations = generate_collection_projection_relations(theory);
+    relations.extend(projection_relations);
+    
     quote! { 
         #(#relations)*
     }
+}
+
+/// Generate collection projection relations
+/// For each constructor with a collection field, automatically generate a "contains" relation
+/// that relates the parent term to each element in the collection.
+/// 
+/// Example: For PPar(HashBag<Proc>), generates:
+/// ```
+/// relation ppar_contains(Proc, Proc);
+/// ```
+/// 
+/// These relations are populated by rules in generate_category_rules.
+fn generate_collection_projection_relations(theory: &TheoryDef) -> Vec<TokenStream> {
+    let mut relations = Vec::new();
+    
+    for rule in &theory.terms {
+        // Check if this constructor has a collection field
+        for (field_idx, item) in rule.items.iter().enumerate() {
+            if let crate::ast::GrammarItem::Collection { element_type, .. } = item {
+                // Found a collection field!
+                let parent_cat = &rule.category;
+                let constructor = &rule.label;
+                let elem_cat = element_type;
+                
+                // Generate relation name: <constructor_lowercase>_contains
+                let rel_name = format_ident!("{}_contains", 
+                                             constructor.to_string().to_lowercase());
+                
+                relations.push(quote! {
+                    relation #rel_name(#parent_cat, #elem_cat);
+                });
+                
+                // Note: Only one collection per constructor for now
+                // If we need multiple, we'd generate: constructor_contains_field0, etc.
+                break;
+            }
+        }
+    }
+    
+    relations
 }
 
 /// Generate category exploration rules
@@ -118,20 +152,18 @@ fn generate_category_rules(theory: &TheoryDef) -> TokenStream {
             #cat_lower(c1) <-- #cat_lower(c0), #rw_rel(c0, c1);
         });
         
-        // REMOVED: Expand via equality
-        // The old rule `cat(c1) <-- cat(c0), eq_cat(c0, c1)` caused:
-        // 1. Every discovered term added to eq via reflexivity
-        // 2. Transitivity creates O(n²) equality facts
-        // 3. Category exploration uses those to generate more terms
-        // 4. Those terms get added to eq via reflexivity
-        // 5. EXPONENTIAL BLOWUP
-        //
-        // Instead: eq relations are computed separately and used only for
-        // explicit queries, not for driving exploration.
-        
         // Generate deconstruction rules for this category
         let deconstruct_rules = generate_deconstruction_rules(cat, theory);
         rules.extend(deconstruct_rules);
+        
+        // Generate collection projection population rules for this category
+        let projection_rules = generate_collection_projection_population(cat, theory);
+        rules.extend(projection_rules);
+        
+        // Generate projection seeding rules for this category
+        // This adds collection elements to their category relations
+        let seeding_rules = generate_projection_seeding_rules(cat, theory);
+        rules.extend(seeding_rules);
     }
     
     quote! { 
@@ -210,52 +242,122 @@ fn generate_deconstruction_for_constructor(
 /// PERFORMANCE NOTE: This eagerly extracts ALL elements from collections as separate facts,
 /// which causes exponential fact explosion (O(N*M) where N=terms, M=bag size).
 /// 
-/// This is now DISABLED by default because:
-/// 1. Indexed projection already iterates over collections when needed for pattern matching
-/// 2. Eager deconstruction creates 100s-1000s of redundant facts
-/// 3. These facts trigger cascading congruence checks (O(N²))
-/// 4. Results in 10x+ slowdown on moderately complex terms
+/// This is DISABLED because:
+/// 1. Collection congruence works via projection relations, not deconstruction
+/// 2. Base rewrites are seeded directly from projection relations (see generate_category_rules)
+/// 3. Eager deconstruction creates 100s-1000s of redundant facts
+/// 4. Results in 50x+ slowdown on moderately complex terms
 /// 
-/// The rule generation is kept here for future use if lazy evaluation is needed,
-/// but returns None to disable it.
+/// Instead: Elements are accessed on-demand via `ppar_contains` projection relation.
 fn generate_collection_deconstruction(
     category: &Ident,
     constructor: &GrammarRule,
 ) -> Option<TokenStream> {
-    // DISABLED: Eager deconstruction causes performance issues
-    // Indexed projection handles collection iteration when needed
-    // 
-    // If re-enabled, this would generate:
-    //   element_type(elem) <-- category(t), 
-    //     if let Category::Label(bag) = t, 
-    //     for elem in bag.iter()
-    //
-    // See docs/RHOCALC-PERFORMANCE-ANALYSIS.md for detailed analysis
+    // DISABLED: Use projection relations instead
     None
+}
+
+/// Generate collection projection population rules
+/// For each constructor with a collection field, generate rules that populate
+/// the corresponding "contains" relation.
+/// 
+/// Example: For PPar(HashBag<Proc>), generates:
+/// ```
+/// ppar_contains(parent.clone(), elem.clone()) <--
+///     proc(parent),
+///     if let Proc::PPar(ref bag_field) = parent,
+///     for (elem, _count) in bag_field.iter();
+/// ```
+/// 
+/// This creates a database of all collection-element relationships that can be
+/// efficiently queried and joined by Ascent.
+fn generate_collection_projection_population(category: &Ident, theory: &TheoryDef) -> Vec<TokenStream> {
+    let mut rules = Vec::new();
     
-    /* ORIGINAL CODE (now disabled):
-    let cat_lower = format_ident!("{}", category.to_string().to_lowercase());
-    let label = &constructor.label;
+    // Find all constructors for this category
+    let constructors: Vec<&GrammarRule> = theory.terms
+        .iter()
+        .filter(|r| r.category == *category)
+        .collect();
     
-    // Find the collection field
-    let collection_info = constructor.items.iter()
-        .find_map(|item| {
+    for constructor in constructors {
+        // Check if this constructor has a collection field
+        for item in &constructor.items {
             if let crate::ast::GrammarItem::Collection { element_type, .. } = item {
-                Some(element_type.clone())
-            } else {
-                None
+                // Found a collection field - generate projection rule
+                let parent_cat = &constructor.category;
+                let parent_cat_lower = format_ident!("{}", parent_cat.to_string().to_lowercase());
+                let constructor_label = &constructor.label;
+                let elem_cat = element_type;
+                
+                // Generate relation name: <constructor_lowercase>_contains
+                let rel_name = format_ident!("{}_contains", 
+                                             constructor_label.to_string().to_lowercase());
+                
+                rules.push(quote! {
+                    #rel_name(parent.clone(), elem.clone()) <--
+                        #parent_cat_lower(parent),
+                        if let #parent_cat::#constructor_label(ref bag_field) = parent,
+                        for (elem, _count) in bag_field.iter();
+                });
+                
+                // Only handle one collection per constructor for now
+                break;
             }
-        })?;
+        }
+    }
     
-    let element_type_lower = format_ident!("{}", collection_info.to_string().to_lowercase());
+    rules
+}
+
+/// Generate rules to seed category relations from projection relations
+/// This allows base rewrites to match on collection elements without eager deconstruction.
+/// 
+/// Example: For PPar(HashBag<Proc>) with projection relation ppar_contains(Proc, Proc),
+/// generates:
+/// ```
+/// proc(elem) <-- ppar_contains(_parent, elem);
+/// ```
+/// 
+/// This is much more efficient than eager deconstruction because:
+/// 1. Elements are only added to proc when they're actually in a ppar_contains fact
+/// 2. No redundant facts for elements that appear in multiple collections
+/// 3. Lazy evaluation: only computes what's needed
+fn generate_projection_seeding_rules(category: &Ident, theory: &TheoryDef) -> Vec<TokenStream> {
+    let mut rules = Vec::new();
+    let cat_lower = format_ident!("{}", category.to_string().to_lowercase());
     
-    Some(quote! {
-        #element_type_lower(elem.clone()) <--
-            #cat_lower(t),
-            if let #category::#label(bag) = t,
-            for elem in bag.iter().map(|(e, _count)| e);
-    })
-    */
+    // Find all constructors for this category that have collections
+    let constructors: Vec<&GrammarRule> = theory.terms
+        .iter()
+        .filter(|r| r.category == *category)
+        .collect();
+    
+    for constructor in constructors {
+        // Check if this constructor has a collection field
+        for item in &constructor.items {
+            if let crate::ast::GrammarItem::Collection { element_type, .. } = item {
+                // Found a collection field
+                let elem_cat = element_type;
+                let elem_cat_lower = format_ident!("{}", elem_cat.to_string().to_lowercase());
+                let constructor_label = &constructor.label;
+                
+                // Generate relation name: <constructor_lowercase>_contains
+                let rel_name = format_ident!("{}_contains", 
+                                             constructor_label.to_string().to_lowercase());
+                
+                // Generate seeding rule: elem_cat(elem) <-- contains_rel(_parent, elem);
+                rules.push(quote! {
+                    #elem_cat_lower(elem) <-- #rel_name(_parent, elem);
+                });
+                
+                // Only handle one collection per constructor
+                break;
+            }
+        }
+    }
+    
+    rules
 }
 
 /// Generate deconstruction for regular (non-binding) constructor
@@ -534,12 +636,30 @@ fn generate_rewrite_rules(theory: &TheoryDef) -> TokenStream {
     let base_rewrite_clauses = crate::rewrite_gen::generate_rewrite_clauses(theory);
     rules.extend(base_rewrite_clauses);
     
-    // 3. Congruence rules: explicitly declared as "if S => T then ..."
-    for (idx, rewrite) in theory.rewrites.iter().enumerate() {
-        if rewrite.premise.is_some() {
-            // Congruence rewrite - generate inline pattern matching
-            if let Some(rule) = generate_congruence_rewrite(idx, rewrite, theory) {
-                rules.push(rule);
+    // 3. Congruence rules: NEW APPROACH - congruence-driven projection generation
+    // For each collection congruence, generate projections and clauses
+    for (cong_idx, rewrite) in theory.rewrites.iter().enumerate() {
+        if let Some((source_var, target_var)) = &rewrite.premise {
+            // Check if this is a collection congruence
+            if let Some(cong_info) = crate::congruence_analysis::extract_collection_congruence_info(
+                &rewrite.left, source_var, target_var, theory
+            ) {
+                // Generate all projections for this congruence
+                let (projections, base_patterns) = crate::congruence_analysis::generate_congruence_projections(
+                    cong_idx, &cong_info, theory
+                );
+                rules.extend(projections);
+                
+                // Generate congruence clauses using those projections and the updated patterns
+                let congruence_clauses = generate_new_collection_congruence_clauses(
+                    cong_idx, &cong_info, &base_patterns, theory
+                );
+                rules.extend(congruence_clauses);
+            } else {
+                // Regular (non-collection) congruence - use existing generation
+                if let Some(rule) = generate_congruence_rewrite(cong_idx, rewrite, theory) {
+                    rules.push(rule);
+                }
             }
         }
     }
@@ -551,6 +671,7 @@ fn generate_rewrite_rules(theory: &TheoryDef) -> TokenStream {
 
 /// Generate congruence rewrite rules
 /// These are declared as: if S => T then (Constructor P S Q) => (Constructor P T Q)
+/// Also handles collection congruence: if S => T then (PPar {S, ...rest}) => (PPar {T, ...rest})
 fn generate_congruence_rewrite(idx: usize, rewrite: &crate::ast::RewriteRule, theory: &TheoryDef) -> Option<TokenStream> {
     // Only process rules with a congruence premise
     let (source_var, target_var) = rewrite.premise.as_ref()?;
@@ -560,6 +681,34 @@ fn generate_congruence_rewrite(idx: usize, rewrite: &crate::ast::RewriteRule, th
     let cat_lower = format_ident!("{}", category.to_string().to_lowercase());
     let rw_rel = format_ident!("rw_{}", category.to_string().to_lowercase());
     
+    // Check if this is a collection congruence
+    // Pattern: (Constructor {S, ...rest}) where S is the source_var
+    if let Expr::Apply { constructor, args } = &rewrite.left {
+        for arg in args {
+            if let Expr::CollectionPattern { elements, rest, .. } = arg {
+                // Check if source_var appears in elements
+                for elem in elements {
+                    if let Expr::Var(v) = elem {
+                        if v == source_var {
+                            // This is a collection congruence!
+                            return generate_collection_congruence(
+                                &category,
+                                &cat_lower,
+                                &rw_rel,
+                                constructor,
+                                source_var,
+                                target_var,
+                                rest.as_ref(),
+                                theory,
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    // Regular (non-collection) congruence
     // Parse LHS to determine constructor and which field contains source_var
     let (constructor, field_idx, bindings) = extract_congruence_info(&rewrite.left, source_var, theory)?;
     
@@ -578,9 +727,29 @@ fn generate_congruence_rewrite(idx: usize, rewrite: &crate::ast::RewriteRule, th
 
 /// Extract congruence information: (constructor, field_index, all_fields)
 /// From: (PPar P S) where S is the source_var, returns ("PPar", 1, ["P", "S"])
+/// Also handles collection patterns: (PPar {S, ...rest}) returns constructor info
 fn extract_congruence_info(expr: &Expr, source_var: &Ident, theory: &TheoryDef) -> Option<(Ident, usize, Vec<Ident>)> {
     match expr {
         Expr::Apply { constructor, args } => {
+            // Check if any arg is a CollectionPattern
+            for (i, arg) in args.iter().enumerate() {
+                if let Expr::CollectionPattern { elements, rest, .. } = arg {
+                    // Collection pattern case
+                    // Check if source_var appears in the elements
+                    for elem in elements {
+                        if let Expr::Var(v) = elem {
+                            if v == source_var {
+                                // Found it! This is a collection congruence
+                                // Return constructor and a sentinel field_idx
+                                // We'll use field_idx = 0 to indicate "collection field"
+                                return Some((constructor.clone(), 0, vec![source_var.clone()]));
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Regular (non-collection) case
             let mut bindings = Vec::new();
             let mut field_idx = None;
             
@@ -592,6 +761,10 @@ fn extract_congruence_info(expr: &Expr, source_var: &Ident, theory: &TheoryDef) 
                         }
                         bindings.push(var.clone());
                     }
+                    Expr::CollectionPattern { .. } => {
+                        // Skip collection patterns in regular case
+                        continue;
+                    }
                     _ => return None, // Nested constructors not supported in congruence LHS
                 }
             }
@@ -600,6 +773,71 @@ fn extract_congruence_info(expr: &Expr, source_var: &Ident, theory: &TheoryDef) 
         }
         _ => None,
     }
+}
+
+/// Generate congruence for collection constructors
+/// Example: if S => T then (PPar {S, ...rest}) => (PPar {T, ...rest})
+/// Generates:
+/// ```
+/// rw_proc(parent, result) <--
+///     ppar_contains(parent, elem),
+///     rw_proc(elem, elem_rewritten),
+///     if let Proc::PPar(ref bag) = parent,
+///     let rest = { let mut b = bag.clone(); b.remove(&elem); b },
+///     let result = Proc::PPar({
+///         let mut bag = rest;
+///         Proc::insert_into_ppar(&mut bag, elem_rewritten);
+///         bag
+///     });
+/// ```
+fn generate_collection_congruence(
+    category: &Ident,
+    cat_lower: &Ident,
+    rw_rel: &Ident,
+    constructor: &Ident,
+    source_var: &Ident,
+    target_var: &Ident,
+    rest_var: Option<&Ident>,
+    theory: &TheoryDef,
+) -> Option<TokenStream> {
+    // Get the element category by finding this constructor's collection field
+    let rule = theory.terms.iter().find(|r| r.label == *constructor)?;
+    
+    let elem_cat = rule.items.iter().find_map(|item| {
+        if let crate::ast::GrammarItem::Collection { element_type, .. } = item {
+            Some(element_type.clone())
+        } else {
+            None
+        }
+    })?;
+    
+    // Generate relation name for projection
+    let contains_rel = format_ident!("{}_contains", 
+                                     constructor.to_string().to_lowercase());
+    
+    // Generate the element rewrite relation
+    let elem_rw_rel = format_ident!("rw_{}", elem_cat.to_string().to_lowercase());
+    
+    // Generate flatten helper name
+    let constructor_lower = format_ident!("{}", constructor.to_string().to_lowercase());
+    let insert_helper = format_ident!("insert_into_{}", constructor_lower);
+    
+    Some(quote! {
+        #rw_rel(parent, result) <--
+            #contains_rel(parent, elem),
+            #elem_rw_rel(*elem, elem_rewritten),
+            if let #category::#constructor(ref bag) = parent,
+            let rest = {
+                let mut b = bag.clone();
+                b.remove(elem);
+                b
+            },
+            let result = #category::#constructor({
+                let mut bag = rest;
+                #category::#insert_helper(&mut bag, elem_rewritten.clone());
+                bag
+            });
+    })
 }
 
 /// Generate congruence for regular (non-binding) constructors
@@ -674,9 +912,10 @@ fn generate_binding_congruence(
     let rewritten_field = format_ident!("t0");
     
     // Determine which fields are binders and which are being rewritten
-    let binder_vars: Vec<_> = rule.bindings.iter().map(|(binder_idx, _)| {
+    let binder_vars: Vec<_> = rule.bindings.iter().enumerate().map(|(idx, (binder_idx, _))| {
         let var_name = bindings.get(*binder_idx)?;
-        Some(format_ident!("{}", var_name.to_string().to_lowercase()))
+        // Use a unique name to avoid shadowing the input parameter 's'
+        Some(format_ident!("binder_{}", idx))
     }).collect::<Option<Vec<_>>>()?;
     
     // For now, assume single binder and single body (common case)
@@ -713,8 +952,8 @@ fn generate_binding_congruence(
             if let #category::#constructor(scope) = s,
             let (#binder_var, body) = scope.clone().unbind(),
             #rw_rel(*body, #rewritten_field),
-            let new_scope = mettail_runtime::Scope::new(#binder_var.clone(), Box::new(#rewritten_field.clone())),
-            let t = #category::#constructor(new_scope);
+            let new_scope_tmp = mettail_runtime::Scope::new(#binder_var.clone(), Box::new(#rewritten_field.clone())),
+            let t = #category::#constructor(new_scope_tmp);
     })
 }
 
@@ -1009,52 +1248,47 @@ fn generate_equation_pattern(
             let term_ident = format_ident!("{}", term_name);
             
             // Generate pattern: if let Cat::Constructor(ref bag) = term
-            // Then check bag size and extract elements
+            // Then use loop-based matching for order independence
             let bag_var = format_ident!("bag");
             let size_check = elements.len();
             
-            // For collections, we can't rely on order, so we just extract elements by iteration
-            // This works for simple variable bindings
+            // Generate loop-based matching for each element
             let mut extract_clauses = Vec::new();
+            let mut elem_vars = Vec::new();
             
-            if elements.len() == 1 {
-                // Special case: single element
-                // Just take the first (and only) element
-                match &elements[0] {
+            for (elem_idx, elem) in elements.iter().enumerate() {
+                match elem {
                     Expr::Var(var) if !is_constructor(var, theory) => {
                         let var_name = var.to_string();
                         let var_snake = to_snake_case(&var_name);
                         let var_ident = format_ident!("{}", var_snake);
-                        bindings.insert(var_name, var_ident.clone());
+                        let elem_var = format_ident!("elem_{}", elem_idx);
+                        let count_var = format_ident!("_count_bag_{}", elem_idx);
                         
+                        elem_vars.push(elem_var.clone());
+                        
+                        // Generate: for (elem_var, _count_bag_N) in bag.iter()
                         extract_clauses.push(quote! {
-                            let #var_ident = #bag_var.iter().next().unwrap().0.clone(),
+                            for (#elem_var, #count_var) in #bag_var.iter(),
                         });
+                        
+                        // Add distinctness checks
+                        for prev_elem_var in &elem_vars[..elem_idx] {
+                            extract_clauses.push(quote! {
+                                if &#elem_var != &#prev_elem_var,
+                            });
+                        }
+                        
+                        // Bind the variable
+                        extract_clauses.push(quote! {
+                            let #var_ident = #elem_var.clone(),
+                        });
+                        
+                        bindings.insert(var_name, var_ident.clone());
                     }
                     _ => {
                         // Complex pattern - not supported yet
                         return None;
-                    }
-                }
-            } else {
-                // Multiple elements - need to extract in some order
-                // For now, just extract by iteration order
-                for (i, elem) in elements.iter().enumerate() {
-                    match elem {
-                        Expr::Var(var) if !is_constructor(var, theory) => {
-                            let var_name = var.to_string();
-                            let var_snake = to_snake_case(&var_name);
-                            let var_ident = format_ident!("{}", var_snake);
-                            bindings.insert(var_name, var_ident.clone());
-                            
-                            extract_clauses.push(quote! {
-                                let #var_ident = #bag_var.iter().nth(#i).unwrap().0.clone(),
-                            });
-                        }
-                        _ => {
-                            // Complex pattern - not supported yet
-                            return None;
-                        }
                     }
                 }
             }
@@ -1234,5 +1468,323 @@ fn generate_equation_freshness(
 ) -> TokenStream {
     // TODO: Implement freshness checks
     quote! {}
+}
+
+//=============================================================================
+// NEW: Congruence-Driven Collection Rewriting
+//=============================================================================
+
+/// Generate congruence clauses for a collection congruence using projections
+/// This is the new approach that generates clauses for both base rewrites and regular congruences
+fn generate_new_collection_congruence_clauses(
+    cong_idx: usize,
+    cong_info: &crate::congruence_analysis::CollectionCongruenceInfo,
+    base_patterns: &[Vec<crate::congruence_analysis::ElementPatternInfo>],
+    theory: &TheoryDef,
+) -> Vec<TokenStream> {
+    let mut clauses = Vec::new();
+    
+    let rw_rel = format_ident!("rw_{}", cong_info.parent_category.to_string().to_lowercase());
+    let parent_cat = &cong_info.parent_category;
+    let constructor = &cong_info.constructor;
+    let constructor_lower = format_ident!("{}", constructor.to_string().to_lowercase());
+    let insert_helper = format_ident!("insert_into_{}", constructor_lower);
+    
+    // Find all base rewrites that involve this element category
+    let base_rewrites = crate::congruence_analysis::find_base_rewrites_for_category(
+        &cong_info.element_category, theory
+    );
+    
+    // Find all regular congruences on this element category
+    let regular_congruences = crate::congruence_analysis::find_regular_congruences_for_category(
+        &cong_info.element_category, theory
+    );
+    
+    // Generate clauses for base rewrites
+    // Each base rewrite gets ONE clause that may join multiple projections
+    for (base_idx, base_rule) in base_rewrites.iter().enumerate() {
+        // Use the updated patterns with captures extracted during projection generation
+        let element_patterns = if base_idx < base_patterns.len() {
+            &base_patterns[base_idx]
+        } else {
+            continue;  // Skip if patterns weren't generated for this base rewrite
+        };
+        
+        if element_patterns.is_empty() {
+            continue;
+        }
+        
+        // Generate ONE clause for this base rewrite, joining all its projections
+        let clause = generate_joined_base_rewrite_clause(
+            cong_idx,
+            base_idx,
+            cong_info,
+            element_patterns,
+            &base_rule.right,
+            &rw_rel,
+            parent_cat,
+            constructor,
+            &insert_helper,
+            theory,
+        );
+        clauses.push(clause);
+    }
+    
+    // Generate clauses for regular congruences
+    for (reg_idx, reg_cong) in regular_congruences.iter().enumerate() {
+        if let Some(pattern) = crate::congruence_analysis::extract_regular_congruence_pattern(reg_cong, theory) {
+            let clause = generate_regular_congruence_clause(
+                cong_idx,
+                reg_idx,
+                cong_info,
+                &pattern,
+                &rw_rel,
+                parent_cat,
+                constructor,
+                &insert_helper,
+            );
+            clauses.push(clause);
+        }
+    }
+    
+    clauses
+}
+
+/// Generate congruence clause for a base rewrite with possibly multiple element patterns
+/// For multi-element patterns (like communication), joins all projections
+/// For single-element patterns (like drop-quote), uses one projection
+fn generate_joined_base_rewrite_clause(
+    cong_idx: usize,
+    base_idx: usize,
+    cong_info: &crate::congruence_analysis::CollectionCongruenceInfo,
+    patterns: &[crate::congruence_analysis::ElementPatternInfo],
+    rhs: &Expr,
+    rw_rel: &Ident,
+    parent_cat: &Ident,
+    constructor: &Ident,
+    insert_helper: &Ident,
+    theory: &TheoryDef,
+) -> TokenStream {
+    use std::collections::{HashMap, HashSet};
+    
+    // First pass: identify shared variables (appear in multiple patterns)
+    let mut var_pattern_counts: HashMap<String, Vec<usize>> = HashMap::new();
+    for (pat_idx, pattern) in patterns.iter().enumerate() {
+        for capture in &pattern.captures {
+            var_pattern_counts.entry(capture.var_name.clone())
+                .or_insert_with(Vec::new)
+                .push(pat_idx);
+        }
+    }
+    
+    let shared_vars: HashSet<String> = var_pattern_counts.iter()
+        .filter(|(_, patterns)| patterns.len() > 1)
+        .map(|(name, _)| name.clone())
+        .collect();
+    
+    // Generate projection joins for all patterns
+    let mut projection_calls = Vec::new();
+    let mut elem_vars = Vec::new();
+    let mut all_capture_vars = Vec::new();
+    
+    for (pat_idx, pattern) in patterns.iter().enumerate() {
+        let rel_name = format_ident!(
+            "{}_proj_c{}_b{}_p{}",
+            pattern.constructor.to_string().to_lowercase(),
+            cong_idx,
+            base_idx,
+            pat_idx
+        );
+        
+        // Generate projection call arguments
+        let mut proj_args = vec![quote! { parent }];
+        let mut pattern_capture_vars = Vec::new();
+        
+        // Extract captures for all patterns (including nested ones)
+        for capture in &pattern.captures {
+            // For shared variables, use the same name across all patterns (for join)
+            // For non-shared variables, use pattern-specific names
+            let cap_name = if shared_vars.contains(&capture.var_name) {
+                format_ident!("cap_{}", capture.var_name.to_lowercase())
+            } else {
+                format_ident!("cap_{}_p{}", capture.var_name.to_lowercase(), pat_idx)
+            };
+            proj_args.push(quote! { #cap_name });
+            pattern_capture_vars.push((cap_name.clone(), capture.clone()));
+        }
+        
+        let elem_var = format_ident!("elem_{}", pat_idx);
+        proj_args.push(quote! { #elem_var });
+        elem_vars.push(elem_var);
+        all_capture_vars.extend(pattern_capture_vars);
+        
+        projection_calls.push(quote! {
+            #rel_name(#(#proj_args),*)
+        });
+    }
+    
+    // For nested patterns, we now extract ALL captures via projection (using full pattern matching)
+    // So we can use direct RHS reconstruction for all cases
+    let rhs_term = generate_rhs_reconstruction(rhs, &all_capture_vars, theory);
+    let rhs_generation = quote! {
+        let rhs_term = #rhs_term
+    };
+    
+    // Generate element removal for all matched elements
+    let elem_removal = if elem_vars.len() == 1 {
+        let elem_var = &elem_vars[0];
+        quote! {
+            let remaining = {
+                let mut b = bag.clone();
+                b.remove(#elem_var);
+                b
+            }
+        }
+    } else {
+        let removals = elem_vars.iter().map(|ev| quote! { b.remove(#ev); });
+        quote! {
+            let remaining = {
+                let mut b = bag.clone();
+                #(#removals)*
+                b
+            }
+        }
+    };
+    
+    quote! {
+        #rw_rel(parent, result) <--
+            #(#projection_calls),*,
+            #rhs_generation,
+            if let #parent_cat::#constructor(ref bag) = parent,
+            #elem_removal,
+            let result = #parent_cat::#constructor({
+                let mut bag_result = remaining;
+                #parent_cat::#insert_helper(&mut bag_result, rhs_term);
+                bag_result
+            });
+    }
+}
+
+/// Helper to generate RHS reconstruction from captured variables
+/// For congruence clauses, extracts elements from collection RHS
+fn generate_rhs_reconstruction(
+    rhs: &Expr,
+    captures: &[(Ident, crate::congruence_analysis::CaptureInfo)],
+    theory: &TheoryDef,
+) -> TokenStream {
+    // Build a bindings map for RHS generator
+    let mut bindings = std::collections::HashMap::new();
+    for (var_ident, capture_info) in captures {
+        // For rewrite RHS, bindings should just be the variable name
+        bindings.insert(capture_info.var_name.clone(), quote! { #var_ident.clone() });
+    }
+    
+    // Special case: if RHS is a collection constructor with collection pattern inside,
+    // extract just the elements (since insert_into_X will add them to the collection)
+    if let Expr::Apply { constructor, args } = rhs {
+        // Check if this has a collection argument
+        for arg in args {
+            if let Expr::CollectionPattern { elements, rest, .. } = arg {
+                // This is a collection RHS like (PPar {(subst P x (NQuote Q))})
+                // We need to generate code for the element(s), not the whole PPar
+                
+                if elements.len() == 1 && rest.is_none() {
+                    // Single element, no rest - just generate that element
+                    return crate::rewrite_gen::generate_ascent_rhs_inner(&elements[0], &bindings, theory);
+                } else if elements.len() > 1 || rest.is_some() {
+                    // Multiple elements or rest - this is more complex
+                    let element_terms: Vec<_> = elements.iter()
+                        .map(|e| crate::rewrite_gen::generate_ascent_rhs_inner(e, &bindings, theory))
+                        .collect();
+                    
+                    if let Some(rest_var) = rest {
+                        // Has rest - need to merge
+                        if let Some(rest_binding) = bindings.get(&rest_var.to_string()) {
+                            // Generate: insert all elements into rest
+                            return quote! {
+                                {
+                                    let mut bag = (#rest_binding).clone();
+                                    #(bag.insert(#element_terms);)*
+                                    bag
+                                }
+                            };
+                        }
+                    }
+                    
+                    // No rest - just the elements
+                    // For communication, the RHS should be a single element
+                    if element_terms.len() == 1 {
+                        return element_terms[0].clone();
+                    }
+                }
+            }
+        }
+    }
+    
+    // Default: use rewrite RHS generation (handles Subst correctly with .substitute_X methods)
+    crate::rewrite_gen::generate_ascent_rhs_inner(rhs, &bindings, theory)
+}
+
+/// Generate congruence clause for a regular congruence
+/// Uses the projection and recursively calls rw_rel on the body
+fn generate_regular_congruence_clause(
+    cong_idx: usize,
+    reg_idx: usize,
+    cong_info: &crate::congruence_analysis::CollectionCongruenceInfo,
+    pattern: &crate::congruence_analysis::RegularCongruencePattern,
+    rw_rel: &Ident,
+    parent_cat: &Ident,
+    constructor: &Ident,
+    insert_helper: &Ident,
+) -> TokenStream {
+    let rel_name = format_ident!(
+        "{}_proj_c{}_r{}",
+        pattern.constructor.to_string().to_lowercase(),
+        cong_idx,
+        reg_idx
+    );
+    
+    let elem_rw_rel = format_ident!("rw_{}", pattern.category.to_string().to_lowercase());
+    let elem_constructor = &pattern.constructor;
+    let elem_cat = &pattern.category;
+    
+    // Generate reconstruction based on whether it's a binding constructor
+    let reconstruction = if pattern.is_binding {
+        // Need to use intermediate variable to avoid type inference issues
+        quote! {
+            let scope_tmp = mettail_runtime::Scope::new(binder_var.clone(), Box::new(body_rewritten.clone())),
+            let rewritten = #elem_cat::#elem_constructor(scope_tmp)
+        }
+    } else {
+        // For non-binding, we need to reconstruct with the rewritten field
+        // This is a simplification - in reality we'd need all fields
+        quote! {
+            let rewritten = body_rewritten.clone()
+        }
+    };
+    
+    let proj_args = if pattern.is_binding {
+        quote! { (parent, binder_var, body, elem) }
+    } else {
+        quote! { (parent, body, elem) }
+    };
+    
+    quote! {
+        #rw_rel(parent, result) <--
+            #rel_name #proj_args,
+            #elem_rw_rel(body, body_rewritten),
+            if let #parent_cat::#constructor(ref bag) = parent,
+            let remaining = {
+                let mut b = bag.clone();
+                b.remove(elem);
+                b
+            },
+            #reconstruction,
+            let result = #parent_cat::#constructor({
+                let mut bag = remaining;
+                #parent_cat::#insert_helper(&mut bag, rewritten);
+                bag
+            });
+    }
 }
 

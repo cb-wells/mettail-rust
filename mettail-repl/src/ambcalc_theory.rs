@@ -1,56 +1,61 @@
 use crate::theory::{AscentResults, Rewrite, Term, TermInfo, Theory};
-use anyhow::Result; 
 use crate::examples::TheoryName;
+use anyhow::Result;
 use std::fmt;
 
 use mettail_macros::theory;
 use lalrpop_util::lalrpop_mod;
 
-// Define the RhoCalc theory directly here so we have access to rhocalc_source!
 theory! {
-    name: RhoCalc,
-    
+    name: Ambcalc,
     exports {
         Proc
         Name
     },
-    
     terms {
         PZero . Proc ::= "0" ;
-        PDrop . Proc ::= "*" Name ;
-        POutput . Proc ::= Name "!" "(" Proc ")" ;
-        PInput . Proc ::= "for" "(" Name "->" <Name> ")" "{" Proc "}" ;
+        
+        PIn . Proc ::= "in(" Name "," Proc ")";
+        POut . Proc ::= "out(" Name "," Proc ")";
+        POpen . Proc ::= "open(" Name "," Proc ")";
+        
+        PAmb . Proc ::= Name "[" Proc "]";
+        PNew . Proc ::= "new(" <Name> "," Proc ")";
 
         PPar . Proc ::= HashBag(Proc) sep "," delim "{" "}" ;
 
-        NQuote . Name ::= "@" "(" Proc ")" ;
+        PVar . Proc ::= Var;
         NVar . Name ::= Var ;
     },
-    
     equations {
-        (NQuote (PDrop N)) == N ;
-        (PPar {}) == PZero;
-        // Flattening equations are no longer needed - automatic!
+        // if x # C then (PPar P (PNew x C)) == (PNew x (PPar P C));
+        // if x # N then (PNew x (PIn N P)) == (PIn N (PNew x P));
+        // if x # N then (PNew x (POut N P)) == (POut N (PNew x P));
+        // if x # N then (PNew x (POpen N P)) == (POpen N (PNew x P));
+        // if x # N then (PNew x (PAmb N P)) == (PAmb N (PNew x P));
+        // (PNew x (PNew y P)) == (PNew y (PNew x P));
     },
-        
     rewrites {
-        // Base rewrites (no ...rest!)
-        (PPar {(PInput chan x P), (POutput chan Q)})
-            => (PPar {(subst P x (NQuote Q))});
-        
-        (PDrop (NQuote P)) => P;
-        
-        // Collection congruence - the ONLY place ...rest appears!
+        (PPar {(PAmb N (PPar {(PIn M P) , Q})) , (PAmb M R)}) 
+            => (PPar {(PAmb M (PPar {(PAmb N (PPar {P , Q})), R}))});
+            
+        (PAmb M (PPar {(PAmb N (PPar {(POut M P), Q})), R}))
+            => (PPar {(PAmb N (PPar {P, Q})), (PAmb M R)});
+        (PPar {(POpen N P), (PAmb N Q)})
+            => (PPar {P,Q});
+
         if S => T then (PPar {S, ...rest}) => (PPar {T, ...rest});
+        if S => T then (PNew x S) => (PNew x T);
+        if S => T then (PAmb N S) => (PAmb N T);
     }
 }
 
 /// RhoCalc theory implementation
-pub struct RhoCalculusTheory;
+pub struct AmbCalculusTheory;
 
-impl Theory for RhoCalculusTheory {
+impl Theory for AmbCalculusTheory {
     fn name(&self) -> TheoryName {
-        TheoryName::RhoCalculus
+        TheoryName::AmbientCalculus
     }
 
     fn categories(&self) -> Vec<String> {
@@ -71,7 +76,7 @@ impl Theory for RhoCalculusTheory {
 
     fn parse_term(&self, input: &str) -> Result<Box<dyn Term>> {
         mettail_runtime::clear_var_cache();
-        let parser = rhocalc::ProcParser::new();
+        let parser = ambcalc::ProcParser::new();
         let proc = parser
             .parse(input)
             .map_err(|e| anyhow::anyhow!("Parse error: {:?}", e))?;
@@ -89,7 +94,7 @@ impl Theory for RhoCalculusTheory {
 
         // Run Ascent with the generated source (rhocalc_source! is defined by the theory! macro above)
         let prog = ascent::ascent_run! {
-            include_source!(rhocalc_source);
+            include_source!(ambcalc_source);
             
             // Seed the initial term
             proc(initial_proc.clone());

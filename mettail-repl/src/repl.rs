@@ -1,7 +1,8 @@
 use crate::registry::TheoryRegistry;
 use crate::state::ReplState;
-use crate::examples::{Example, ExampleCategory};
+use crate::examples::{Example, ExampleCategory, TheoryName};
 use crate::pretty::format_term_pretty;
+use crate::theory::Theory;
 use anyhow::Result;
 use colored::Colorize;
 use rustyline::error::ReadlineError;
@@ -23,6 +24,10 @@ impl Repl {
             registry,
             editor,
         })
+    }
+
+    pub fn name_str(&self) -> Option<&str> {
+        self.state.theory_name().map(|name| name.as_str())
     }
     
     /// Run the REPL
@@ -64,8 +69,8 @@ impl Repl {
     
     fn print_banner(&self) {
         println!("{}", "╔════════════════════════════════════════════════════════════╗".cyan());
-        println!("{}", "║                   MeTTaIL Term Explorer                     ║".cyan());
-        println!("{}", "║                      Version 0.1.0                          ║".cyan());
+        println!("{}", "║                   MeTTaIL Term Explorer                    ║".cyan());
+        println!("{}", "║                      Version 0.1.0                         ║".cyan());
         println!("{}", "╚════════════════════════════════════════════════════════════╝".cyan());
         println!();
         println!("Type {} for available commands.", "'help'".green());
@@ -74,7 +79,7 @@ impl Repl {
     
     fn make_prompt(&self) -> String {
         if let Some(theory_name) = self.state.theory_name() {
-            format!("{}> ", theory_name.green())
+            format!("{}> ", theory_name.as_str().green())
         } else {
             "mettail> ".to_string()
         }
@@ -85,6 +90,9 @@ impl Repl {
         if parts.is_empty() {
             return Ok(());
         }
+
+        // let theory_name = self.name_str().unwrap_or_default();
+        // let theory = self.registry.get(theory_name)?;
         
         match parts[0] {
             "help" => self.cmd_help(),
@@ -96,7 +104,7 @@ impl Repl {
             "apply" => self.cmd_apply(&parts[1..]),
             "goto" => self.cmd_goto(&parts[1..]),
             "example" => self.cmd_example(&parts[1..]),
-            "list-examples" => self.cmd_list_examples(),
+            "list-examples" => self.cmd_list_examples(&self.state.theory_name().unwrap()),
             "quit" | "exit" => {
                 println!("Goodbye!");
                 std::process::exit(0);
@@ -164,7 +172,7 @@ impl Repl {
         println!();
         
         // Store the theory name in state
-        self.state.load_theory(theory_name.to_string());
+        self.state.load_theory(theory.name());
         
         println!("{} Theory loaded successfully!", "✓".green());
         println!("Use {} to parse and execute a term.", "'term: <expr>'".cyan());
@@ -194,9 +202,9 @@ impl Repl {
     
     fn cmd_info(&self) -> Result<()> {
         if let Some(theory_name) = self.state.theory_name() {
-            let theory = self.registry.get(theory_name)?;
+            let theory = self.registry.get(theory_name.as_str())?;
             println!();
-            println!("{} {}", "Theory:".bold(), theory.name().green());
+            println!("{} {}", "Theory:".bold(), theory.name().as_str().green());
             println!("  Categories: {}", theory.categories().len());
             println!("  Constructors: {}", theory.constructor_count());
             println!("  Equations: {}", theory.equation_count());
@@ -214,7 +222,7 @@ impl Repl {
             .ok_or_else(|| anyhow::anyhow!("No theory loaded. Use 'load <theory>' first."))?;
 
         // Get the theory from the registry
-        let theory = self.registry.get(theory_name)?;
+        let theory = self.registry.get(theory_name.as_str())?;
 
         println!();
         print!("Parsing... ");
@@ -323,7 +331,7 @@ impl Repl {
         let theory_name = self.state.theory_name()
             .ok_or_else(|| anyhow::anyhow!("No theory loaded"))?;
         
-        let theory = self.registry.get(theory_name)?;
+        let theory = self.registry.get(theory_name.as_str())?;
         
         let results = self.state.ascent_results()
             .ok_or_else(|| anyhow::anyhow!("No term loaded"))?;
@@ -375,7 +383,7 @@ impl Repl {
         let theory_name = self.state.theory_name()
             .ok_or_else(|| anyhow::anyhow!("No theory loaded"))?;
         
-        let theory = self.registry.get(theory_name)?;
+        let theory = self.registry.get(theory_name.as_str())?;
         
         let results = self.state.ascent_results()
             .ok_or_else(|| anyhow::anyhow!("No term loaded"))?;
@@ -426,7 +434,7 @@ impl Repl {
         Ok(())
     }
     
-    fn cmd_list_examples(&self) -> Result<()> {
+    fn cmd_list_examples(&self, theory_name: &TheoryName) -> Result<()> {
         println!();
         println!("{}", "Available Examples:".bold());
         println!();
@@ -441,7 +449,7 @@ impl Repl {
             ExampleCategory::Performance,
             ExampleCategory::EdgeCase,
         ] {
-            let examples = Example::by_category(category);
+            let examples = Example::by_theory_and_category(*theory_name, category);
             if !examples.is_empty() {
                 println!("{}", format!("  {:?}:", category).yellow());
                 for ex in examples {

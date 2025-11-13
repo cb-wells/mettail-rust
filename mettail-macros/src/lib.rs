@@ -12,6 +12,8 @@ mod rewrite_gen;
 mod termgen_gen;
 mod random_generation;
 mod ascent_gen;
+mod utils;
+mod congruence_analysis;  // New module for congruence-driven projection analysis
 
 use proc_macro::TokenStream;
 use proc_macro_error::{proc_macro_error, abort};

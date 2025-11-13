@@ -1,10 +1,12 @@
 use anyhow::Result;
 use std::fmt;
 
+use crate::examples::TheoryName;
+
 /// A trait that all theories must implement to be usable in the REPL
 pub trait Theory: Send + Sync {
     /// Get the name of this theory
-    fn name(&self) -> &str;
+    fn name(&self) -> TheoryName;
     
     /// Get the category names exported by this theory
     fn categories(&self) -> Vec<String>;

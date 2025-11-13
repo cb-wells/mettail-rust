@@ -1,10 +1,11 @@
 use crate::theory::{AscentResults, Term, Theory};
+use crate::examples::TheoryName;
 use anyhow::Result;
 
 /// The current state of the REPL session
 pub struct ReplState {
     /// The name of the currently loaded theory
-    theory_name: Option<String>,
+    theory_name: Option<TheoryName>,
     
     /// The current term being explored
     current_term: Option<Box<dyn Term>>,
@@ -44,8 +45,8 @@ impl ReplState {
     }
     
     /// Load a theory by name
-    pub fn load_theory(&mut self, name: String) {
-        self.theory_name = Some(name);
+    pub fn load_theory(&mut self, name: TheoryName) {
+        self.theory_name = Some(name);  
         self.current_term = None;
         self.current_graph_id = None;
         self.history.clear();
@@ -54,8 +55,8 @@ impl ReplState {
     }
     
     /// Get the name of the current theory
-    pub fn theory_name(&self) -> Option<&str> {
-        self.theory_name.as_deref()
+    pub fn theory_name(&self) -> Option<TheoryName> {
+        self.theory_name
     }
     
     /// Set the current term (without running Ascent - that's done externally now)

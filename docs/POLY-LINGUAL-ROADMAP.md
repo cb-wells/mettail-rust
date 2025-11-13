@@ -157,14 +157,23 @@ Automatic flattening via generated helper functions makes nested collections (`{
 
 ---
 
-#### Q1 2026: Developer Tooling & Core Completeness (NEXT)
-**Milestone:** Interactive exploration + production-ready pattern matching
+#### 🚨 Q1 2026: Critical Correctness Fix + Developer Tooling (CURRENT)
+**Milestone:** Fix collection pattern matching bug + Interactive exploration
 
-**Priority Order:**
-1. **Term Generation for Collections** (2 weeks) - Unblock testing
-2. **Deep Projection for Ambient Calculus** (3-4 weeks) - Critical correctness
-3. **Term Explorer REPL** (4 weeks) - Developer experience
-4. **Debugging & Diagnostics** (2-3 weeks) - Polish
+**URGENT - Correctness Issue Discovered:**
+- **Collection Pattern Matching Bug** - Single-pattern rules only check first element
+  - Impact: False normal forms, missing rewrites
+  - Example: `{*@(P), ...} => {P, ...}` doesn't match if P isn't first in iteration
+  - Fix: Always use indexed projection, not naive `.iter().next()`
+  - Timeline: 1-2 weeks implementation
+  - See: `docs/design/COLLECTION-PATTERN-FIX.md`
+
+**Priority Order (Updated):**
+1. **Collection Pattern Fix** (1-2 weeks) - **CRITICAL CORRECTNESS**  
+2. **REPL Enhancements** (1-2 weeks) - History, context display, ambient calculus
+3. **Term Generation for Collections** (2 weeks) - Unblock testing
+4. **Deep Projection** (3-4 weeks) - Nested shared variables
+5. **Debugging & Diagnostics** (2-3 weeks) - Polish
 
 ---
 

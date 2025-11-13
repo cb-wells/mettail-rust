@@ -3,6 +3,7 @@ pub mod registry;
 pub mod state;
 pub mod repl;
 pub mod rhocalc_theory;
+pub mod ambcalc_theory;
 pub mod examples;
 pub mod pretty;
 
