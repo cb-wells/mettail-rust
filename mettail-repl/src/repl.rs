@@ -4,6 +4,7 @@ use crate::examples::{Example, ExampleCategory, TheoryName};
 use crate::pretty::format_term_pretty;
 use crate::theory::Theory;
 use anyhow::Result;
+use std::time::Instant;
 use colored::Colorize;
 use rustyline::error::ReadlineError;
 use rustyline::{DefaultEditor, Result as RustyResult};
@@ -233,8 +234,12 @@ impl Repl {
 
         print!("Running Ascent... ");
 
+        let start_time = Instant::now();
         // Run Ascent
         let results = theory.run_ascent(term.clone_box())?;
+        let end_time = Instant::now();
+        let duration = end_time.duration_since(start_time);
+        println!("Time taken: {:?}", duration);
         println!("{}", "Done!".green());
 
         println!();

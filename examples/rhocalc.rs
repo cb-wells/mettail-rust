@@ -111,20 +111,19 @@ fn main() {
     println!("Time: {:?}", elapsed);
 }
 
+//// GENERATED CODE ////
 
 ascent_source! {
-    rs:
+    rho:
 
     // Relations
 relation proc(Proc);
 relation name(Name);
-#[ds(crate :: eqrel)] relation
-eq_proc(Proc, Proc);
+#[ds(crate :: eqrel)] relation eq_proc(Proc, Proc);
 #[ds(crate :: eqrel)] relation eq_name(Name, Name);
 relation rw_proc(Proc, Proc);
 relation rw_name(Name, Name);
-relation
-ppar_contains(Proc, Proc);
+relation ppar_contains(Proc, Proc);
 
     // Category rules
 proc(c1) <--
@@ -133,65 +132,54 @@ proc(c1) <--
 name(field_0.as_ref().clone()) <--
     proc(t),
     if let Proc :: PDrop(field_0) = t;
-name(field_0.as_ref().clone()),
-proc(field_1.as_ref().clone()) <--
+name(field_0.as_ref().clone()), proc(field_1.as_ref().clone()) <--
     proc(t),
-    if let Proc ::
-POutput(field_0, field_1) = t;
-name(field_0.as_ref().clone()),
-proc(body.as_ref().clone()) <--
+    if let Proc :: POutput(field_0, field_1) = t;
+name(field_0.as_ref().clone()), proc(body.as_ref().clone()) <--
     proc(t),
-    if let Proc ::
-PInput(field_0, scope_field) = t,
-    let (binder, body) =
-scope_field.clone().unbind();
+    if let Proc :: PInput(field_0, scope_field) = t,
+    let (binder, body) = scope_field.clone().unbind();
 ppar_contains(parent.clone(), elem.clone()) <--
     proc(parent),
     if let Proc :: PPar(ref bag_field) = parent,
-    for (elem, _count)
-in bag_field.iter();
+    for (elem, _count) in bag_field.iter();
+proc(elem) <--
+    ppar_contains(_parent, elem);
 name(c1) <--
     name(c0),
     rw_name(c0, c1);
 proc(field_0.as_ref().clone()) <--
     name(t),
-    if let Name :: NQuote(field_0) =
-t;
+    if let Name :: NQuote(field_0) = t;
 
     // Equation rules
 eq_proc(t.clone(), t.clone()) <--
     proc(t);
 eq_name(t.clone(), t.clone()) <--
     name(t);
-eq_proc(Proc :: PDrop(Box :: new(x0.clone())), Proc ::
-PDrop(Box :: new(y0.clone()))) <--
+eq_proc(Proc :: PDrop(Box :: new(x0.clone())), Proc :: PDrop(Box :: new(y0.clone()))) <--
     name(x0),
     name(y0),
     eq_name(x0.clone(), y0.clone());
-eq_proc(Proc :: POutput(Box :: new(x0.clone()), Box :: new(x1.clone())), Proc
-:: POutput(Box :: new(y0.clone()), Box :: new(y1.clone()))) <--
+eq_proc(Proc :: POutput(Box :: new(x0.clone()), Box :: new(x1.clone())), Proc :: POutput(Box :: new(y0.clone()), Box :: new(y1.clone()))) <--
     name(x0),
     name(y0),
     eq_name(x0.clone(), y0.clone()),
     proc(x1),
     proc(y1),
     eq_proc(x1.clone(), y1.clone());
-eq_name(Name :: NQuote(Box :: new(x0.clone())), Name ::
-NQuote(Box :: new(y0.clone()))) <--
+eq_name(Name :: NQuote(Box :: new(x0.clone())), Name :: NQuote(Box :: new(y0.clone()))) <--
     proc(x0),
     proc(y0),
     eq_proc(x0.clone(), y0.clone());
 eq_name(p0, p1) <--
     name(p0),
-    if let Name ::
-NQuote(field_0) = p0,
+    if let Name :: NQuote(field_0) = p0,
     if let Proc :: PDrop(n) = field_0.as_ref(),
-    let p1 =
-n.as_ref().clone();
+    let p1 = n.as_ref().clone();
 eq_proc(p0, p1) <--
     proc(p0),
-    if let Proc ::
-PPar(ref bag) = p0,
+    if let Proc :: PPar(ref bag) = p0,
     if bag.len() == 0usize,
     let p1 = Proc :: PZero;
 
@@ -211,14 +199,10 @@ rw_name(s, t1) <--
 rw_proc(s, t) <--
     proc(s),
     if let Proc :: PDrop(s_f0) = s,
-    let s_f0_inner =
-s_f0.as_ref(),
+    let s_f0_inner = s_f0.as_ref(),
     if let Name :: NQuote(s_f0_inner_f0) = s_f0_inner,
-    let
-s_f0_inner_f0_val = s_f0_inner_f0.as_ref(),
+    let s_f0_inner_f0_val = s_f0_inner_f0.as_ref(),
     let t = s_f0_inner_f0_val.clone();
-
-
 relation pinput_proj_c2_b0_p0(Proc, Name, mettail_runtime :: Binder < String > , Proc, Proc);
 pinput_proj_c2_b0_p0(parent.clone(), cap_chan.clone(), cap_x.clone(), cap_p.clone(), elem.clone()) <--
     proc(parent),
@@ -226,9 +210,8 @@ pinput_proj_c2_b0_p0(parent.clone(), cap_chan.clone(), cap_x.clone(), cap_p.clon
     for (elem, _count) in bag_field.iter(),
     if let Proc :: PInput(ref f0, ref f1) = elem,
     let cap_chan = (* * f0).clone(),
-    let (cap_x, body_box) = (* f1).clone().unbind(),
-    let cap_p = (* body_box).clone();
-
+    let cap_x = (* f1).inner().unsafe_pattern.clone(),
+    let cap_p = (* f1).inner().unsafe_body.as_ref().clone();
 relation poutput_proj_c2_b0_p1(Proc, Name, Proc, Proc);
 poutput_proj_c2_b0_p1(parent.clone(), cap_chan.clone(), cap_q.clone(), elem.clone()) <--
     proc(parent),
@@ -237,7 +220,6 @@ poutput_proj_c2_b0_p1(parent.clone(), cap_chan.clone(), cap_q.clone(), elem.clon
     if let Proc :: POutput(ref f0, ref f1) = elem,
     let cap_chan = (* * f0).clone(),
     let cap_q = (* * f1).clone();
-
 relation pdrop_proj_c2_b1_p0(Proc, Proc, Proc);
 pdrop_proj_c2_b1_p0(parent.clone(), p.clone(), elem.clone()) <--
     proc(parent),
@@ -248,39 +230,24 @@ pdrop_proj_c2_b1_p0(parent.clone(), p.clone(), elem.clone()) <--
     if let Name :: NQuote(elem_f0_inner_f0) = elem_f0_inner,
     let elem_f0_inner_f0_val = elem_f0_inner_f0.as_ref(),
     let p = elem_f0_inner_f0_val.clone();
-    
 rw_proc(parent, result) <--
     pinput_proj_c2_b0_p0(parent, cap_chan, cap_x_p0, cap_p_p0, elem_0),
     poutput_proj_c2_b0_p1(parent, cap_chan, cap_q_p1, elem_1),
-    let rhs_term =
-(cap_p_p0.clone()).substitute_name(& cap_x_p0.clone().0, & Name ::
-NQuote(Box :: new(cap_q_p1.clone()))),
+    let rhs_term = (cap_p_p0.clone()).substitute_name(& cap_x_p0.clone().0, & Name :: NQuote(Box :: new(cap_q_p1.clone()))),
     if let Proc :: PPar(ref bag) = parent,
-    let remaining =
-{ let mut b = bag.clone();
+    let remaining = { let mut b = bag.clone();
 b.remove(elem_0);
 b.remove(elem_1);
-b }, let result
-= Proc ::
-PPar({
-    let mut bag_result = remaining;
-Proc ::
-    insert_into_ppar(& mut bag_result, rhs_term);
-bag_result
-});
+b }, let result = Proc :: PPar({ let mut bag_result = remaining;
+Proc :: insert_into_ppar(& mut bag_result, rhs_term);
+bag_result });
 rw_proc(parent, result) <--
     pdrop_proj_c2_b1_p0(parent, cap_p_p0, elem_0),
-    let rhs_term =
-cap_p_p0.clone(),
+    let rhs_term = cap_p_p0.clone(),
     if let Proc :: PPar(ref bag) = parent,
-    let remaining =
-{ let mut b = bag.clone();
+    let remaining = { let mut b = bag.clone();
 b.remove(elem_0);
-b }, let result = Proc ::
-PPar({
-    let mut bag_result = remaining;
-Proc ::
-    insert_into_ppar(& mut bag_result, rhs_term);
-bag_result
-});
+b }, let result = Proc :: PPar({ let mut bag_result = remaining;
+Proc :: insert_into_ppar(& mut bag_result, rhs_term);
+bag_result });
 }

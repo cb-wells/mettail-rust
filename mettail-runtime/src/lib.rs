@@ -138,6 +138,29 @@ mod scope_wrapper {
         pub fn inner(&self) -> &MonikerScope<P, T> {
             &self.inner
         }
+        
+        /// Direct access to the pattern (unsafe - preserves bound variables)
+        /// Use this instead of unbind() when you need stable variable identity
+        pub fn unsafe_pattern(&self) -> &P {
+            &self.inner.unsafe_pattern
+        }
+        
+        /// Direct access to the body (unsafe - preserves bound variables)
+        /// Use this instead of unbind() when you need stable variable identity
+        pub fn unsafe_body(&self) -> &T {
+            &self.inner.unsafe_body
+        }
+        
+        /// Construct a Scope from pattern and body directly (unsafe - no closing)
+        /// This assumes the body already has the correct bound variable structure
+        pub fn from_parts_unsafe(pattern: P, body: T) -> Scope<P, T> {
+            Scope {
+                inner: MonikerScope {
+                    unsafe_pattern: pattern,
+                    unsafe_body: body,
+                }
+            }
+        }
     }
 
     // Implement BoundTerm by delegating to inner Scope

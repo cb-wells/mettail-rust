@@ -51,18 +51,20 @@ Enable **poly-lingual computation**: the ability to compose, translate, and exec
 - **Term Sorting** - Total ordering on terms (`Ord` trait)
 - **Pretty-Printing** - Automatic `Display` implementation
 
-#### Collection Types (Phase 6) - COMPLETE ✅
+#### Collection Types (Phase 6.0-6.3) - COMPLETE ✅
 - **`HashBag<T>` Collections** - Efficient multiset representation with O(1) equality
 - **Collection Patterns** - Match and extract from collections with rest patterns
-- **Indexed Projection** - Order-independent matching via Ascent joins
+- **Indexed Projection** - Order-independent matching via Ascent joins (ALL nesting levels)
+- **Nested Shared Variables** - Correctly handles deeply nested shared vars (e.g., `{n[{in(m,p)}], m[r]}`)
 - **Automatic Flattening** - Nested collections flatten structurally during construction
 - **Collection Equations** - Automatic normalization (e.g., `{P} == P`)
+- **Binding Congruences** - Full support for binders in all contexts (direct, nested, collections)
 - **LALRPOP Integration** - Parse collection syntax with separators and delimiters
 
 #### Execution Engine (Ascent-Based)
 - **Equational Matching** - Rewrites work modulo equations via Datalog
 - **Nested Pattern Matching** - Arbitrary-depth patterns with binders
-- **Order-Independent Matching** - Automatically generates indexed joins for shared variables
+- **Order-Independent Matching** - Automatically generates indexed joins for shared variables (all nesting levels)
 - **Type-Aware Variable Tracking** - Category inference from constructors
 - **Freshness Checking** - Automatic generation of side conditions
 - **Reflexivity & Transitivity** - `eqrel` handles equivalence closure
@@ -70,7 +72,7 @@ Enable **poly-lingual computation**: the ability to compose, translate, and exec
 
 #### Examples Working
 - **Rho Calculus** - Communication via name-passing with collection-based parallelism
-- **Ambient Calculus** - Mobile computation with capabilities (basic cases)
+- **Ambient Calculus** - Complete! All mobility patterns (entry, exit, open) with nested shared vars
 
 ### 🎯 Current Focus: Term Explorer REPL (Q1 2026)
 
@@ -105,14 +107,10 @@ Building an **interactive term exploration tool** to make MeTTaIL accessible and
 ### ⚠️ Known Limitations
 
 #### Performance Considerations
-- **Deep nesting**: Indexed projection only works for top-level shared variables
-  - Simple cases (2 patterns, top-level shared vars): ✅ Order-independent
-  - Complex cases (nested shared vars): ⚠️ Order-dependent fallback
 - **Collection overhead**: HashBag adds ~2-3 bytes per element vs binary operations
 - **Ascent materialization**: Relations fully materialized in memory
 
 #### Missing Features for Production
-- **No deep projection** - Nested shared variables not yet optimized
 - **No theory composition** - Can't reuse or extend theories
 - **No optimization passes** - Generated code is straightforward but unoptimized
 - **No incremental computation** - Recomputes everything from scratch
@@ -124,6 +122,8 @@ Building an **interactive term exploration tool** to make MeTTaIL accessible and
 - **No shared abstractions** - Can't identify equivalent constructs
 - **No cross-theory proofs** - Can't reason about theory relationships
 - **No federated execution** - Can't distribute across systems
+
+**Note**: Previous "deep nesting" limitation has been **RESOLVED**! Indexed projection correctly handles nested shared variables at all depths.
 
 ---
 
@@ -157,23 +157,16 @@ Automatic flattening via generated helper functions makes nested collections (`{
 
 ---
 
-#### 🚨 Q1 2026: Critical Correctness Fix + Developer Tooling (CURRENT)
-**Milestone:** Fix collection pattern matching bug + Interactive exploration
+#### 🚨 Q1 2026: Developer Tooling + Term Generation (CURRENT)
+**Milestone:** Interactive exploration + automated testing
 
-**URGENT - Correctness Issue Discovered:**
-- **Collection Pattern Matching Bug** - Single-pattern rules only check first element
-  - Impact: False normal forms, missing rewrites
-  - Example: `{*@(P), ...} => {P, ...}` doesn't match if P isn't first in iteration
-  - Fix: Always use indexed projection, not naive `.iter().next()`
-  - Timeline: 1-2 weeks implementation
-  - See: `docs/design/COLLECTION-PATTERN-FIX.md`
-
-**Priority Order (Updated):**
-1. **Collection Pattern Fix** (1-2 weeks) - **CRITICAL CORRECTNESS**  
+**Priority Order:**
+1. **Term Generation for Collections** (2 weeks) - **ENABLES TESTING**  
 2. **REPL Enhancements** (1-2 weeks) - History, context display, ambient calculus
-3. **Term Generation for Collections** (2 weeks) - Unblock testing
-4. **Deep Projection** (3-4 weeks) - Nested shared variables
-5. **Debugging & Diagnostics** (2-3 weeks) - Polish
+3. **Performance Benchmarking** (1-2 weeks) - Quantify improvements
+4. **Debugging & Diagnostics** (2-3 weeks) - Polish
+
+**NOTE**: "Deep Projection" task REMOVED - feature already works! Nested shared variables are correctly handled by indexed projection.
 
 ---
 
@@ -228,90 +221,7 @@ fn test_random_with_collections() {
 
 ---
 
-##### 2. Deep Projection for Ambient Calculus (3-4 weeks)
-
-**Problem**: Current indexed projection only detects top-level shared variables. Deeply nested shared variables (like `M` in `{(PAmb N {(PIn M P), Q}), (PAmb M R)}`) are not detected, causing fallback to order-dependent matching.
-
-**Impact**: 
-- **Ambient calculus rewrite rules don't work correctly**
-- Order-dependent matching is unreliable for nested patterns
-- Limits expressiveness of rewrite rules
-- Forces workarounds like manual reordering
-
-**Example Rule (currently broken)**:
-```rust
-// Ambient calculus capability matching
-(PPar {(PAmb N (PPar {(PIn M P), Q})), (PAmb M R), ...rest})
-    => (PPar {(PAmb M (PPar {(PAmb N (PPar {P, Q})), R})), ...rest})
-//                         ^-- M is nested 2 levels deep, not detected!
-```
-
-**Implementation** (see `docs/design/DEEP-PROJECTION-DESIGN.md`):
-
-1. **Enhanced Variable Extraction** (Week 1)
-   - Recursively traverse nested `Apply` patterns inside collections
-   - Track variable path: `[collection_idx, nested_apply_idx, arg_idx]`
-   - Build full dependency graph of shared variables
-   - Example: `M` at path `[0, PAmb, 1, PPar, 0, PIn, 0]`
-
-2. **Intermediate Relation Generation** (Week 1-2)
-   - Generate helper relations for nested patterns
-   - Example: `ppar_contains_pamb(outer_bag, ambient_name, inner_proc)`
-   - Chain these relations to reach deeply nested variables
-   - Join on nested shared variables
-
-3. **Join Strategy** (Week 2)
-   - Generate multi-level joins in Ascent
-   - Example pseudo-code:
-     ```rust
-     // Level 1: Extract PAmb from PPar
-     ppar_contains_pamb(bag, name, inner_proc) <--
-         proc(Proc::PPar(bag)),
-         for (elem, _) in bag.iter(),
-         if let Proc::PAmb(n, p) = elem;
-     
-     // Level 2: Extract PIn from nested PPar
-     pamb_contains_pin(outer_name, channel, binding, body) <--
-         ppar_contains_pamb(_, outer_name, inner_proc),
-         if let Proc::PPar(inner_bag) = inner_proc.as_ref(),
-         for (elem, _) in inner_bag.iter(),
-         if let Proc::PIn(chan, Scope(binder, body)) = elem;
-     
-     // Join on shared channel
-     rw_proc(original, result) <--
-         ppar_contains_pamb(bag1, n, _),
-         pamb_contains_pin(n, m, x, p),
-         ppar_contains_pamb(bag2, m, r),
-         if bag1 != bag2;  // Different ambients
-     ```
-
-4. **Optimization** (Week 3)
-   - Fast path: Detect if only top-level variables (current code)
-   - Slow path: Use deep projection only when needed
-   - Cache intermediate relations across rewrites
-
-5. **Testing** (Week 4)
-   - Ambient calculus test suite
-   - Verify order-independence with permuted inputs
-   - Benchmark performance vs. fallback
-   - Stress test with deep nesting (4+ levels)
-
-**Success Criteria**:
-- ✅ Ambient calculus example finds all rewrites (currently 0 paths → should be 10+)
-- ✅ Order-independent for nested shared variables
-- ✅ Works for arbitrary nesting depth
-- ✅ Performance acceptable (< 2x overhead vs. flat projection)
-- ✅ Clear diagnostic when deep projection is used
-
-**Fallback Strategy**:
-If full solution is too complex, implement "Quick Win" from design doc:
-- Only handle 2-level nesting (90% of use cases)
-- Simpler implementation (~2 weeks)
-- Can extend to full solution later
-
----
-
-##### 3. Term Explorer REPL (4 weeks)
+##### 2. Term Explorer REPL (4 weeks)
   - Interactive REPL for exploring rewrite systems
   - **Theory Selection**: Load any defined theory dynamically
   - **Term Input**: Parse, select from examples, or generate random terms
@@ -331,7 +241,9 @@ If full solution is too complex, implement "Quick Win" from design doc:
 
 ---
 
-##### 4. Debugging & Diagnostics (2-3 weeks)
+##### 3. Debugging & Diagnostics (2-3 weeks)
+
+##### 2. Term Explorer REPL (4 weeks)
   - Pretty-print Ascent relations
   - Trace rewrite rule applications
   - Explain why terms are equivalent
@@ -343,11 +255,11 @@ If full solution is too complex, implement "Quick Win" from design doc:
 
 **Success Criteria for Q1 2026:**
 - ✅ Term generation produces valid collection terms (enables testing)
-- ✅ Ambient calculus rules work correctly (deep projection)
 - ✅ REPL works for all example theories (developer experience)
 - ✅ Can interactively explore 1000+ term rewrite graph
-- ✅ All collection patterns order-independent (including nested)
 - ✅ Clear error messages and helpful diagnostics
+
+**Note**: Ambient calculus already works correctly! All nested shared variables handled by indexed projection.
 
 **User Experience:**
 ```

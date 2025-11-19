@@ -36,11 +36,11 @@ theory! {
         // (PNew x (PNew y P)) == (PNew y (PNew x P));
     },
     rewrites {
-        (PPar {(PAmb N (PPar {(PIn M P) , Q})) , (PAmb M R)}) 
-            => (PPar {(PAmb M (PPar {(PAmb N (PPar {P , Q})), R}))});
+        (PPar {(PAmb N (PPar {(PIn M P) , ...rest})) , (PAmb M R)}) 
+            => (PPar {(PAmb M (PPar {(PAmb N (PPar {P , ...rest})), R}))});
             
-        (PAmb M (PPar {(PAmb N (PPar {(POut M P), Q})), R}))
-            => (PPar {(PAmb N (PPar {P, Q})), (PAmb M R)});
+        (PAmb M (PPar {(PAmb N (PPar {(POut M P), ...rest})), R}))
+            => (PPar {(PAmb N (PPar {P, ...rest})), (PAmb M R)});
         (PPar {(POpen N P), (PAmb N Q)})
             => (PPar {P,Q});
 

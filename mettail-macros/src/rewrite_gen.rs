@@ -25,10 +25,24 @@ pub fn generate_rewrite_clauses(theory: &TheoryDef) -> Vec<TokenStream> {
         // that's covered by a collection congruence
         let is_covered_by_congruence = if congruence_analysis::contains_collection_pattern(&rule.left) {
             // This rule has a collection pattern in its LHS
-            // Get the element category from within the collection
-            if let Some(elem_cat) = get_collection_element_category(&rule.left, theory) {
-                // Check if this element category is covered by a collection congruence
-                collection_cong_categories.contains(&elem_cat)
+            // We only skip if the ROOT of the LHS is a collection constructor that's covered
+            // by a collection congruence.
+            //
+            // For example:
+            // - (PPar {(PIn ...), (POut ...)}) => ... should be SKIPPED (root is PPar collection)
+            // - (PAmb M (PPar {...})) => ... should NOT be skipped (root is PAmb, not a collection)
+            
+            if let Expr::Apply { constructor, .. } = &rule.left {
+                // Check if this constructor has a collection field
+                if let Some(elem_cat) = get_constructor_collection_element_type(constructor, theory) {
+                    // Root is a collection constructor
+                    // Check if this element category is covered by a collection congruence
+                    collection_cong_categories.contains(&elem_cat)
+                } else {
+                    // Root is not a collection constructor, but may contain nested collections
+                    // Generate the rule directly (don't skip)
+                    false
+                }
             } else {
                 false
             }
@@ -394,12 +408,29 @@ fn generate_ascent_collection_pattern(
         
         // Bind the rest variable
         // Rest has type HashBag<ElementCategory>, not ElementCategory
-        bindings.insert(rest_var_name, quote! { #rest_ident });
+        // Use .clone() since HashBag doesn't implement Copy and may be used multiple times
+        bindings.insert(rest_var_name, quote! { #rest_ident.clone() });
         // Don't add to variable_categories since it's a different type (collection vs element)
     }
 }
 
-/// Get the element category from within a collection pattern
+/// Get the element category of a specific constructor's collection field (not recursive)
+/// Returns Some only if the constructor itself has a collection field
+fn get_constructor_collection_element_type(constructor: &Ident, theory: &TheoryDef) -> Option<Ident> {
+    use crate::ast::GrammarItem;
+    
+    let grammar_rule = theory.terms.iter().find(|r| r.label == *constructor)?;
+    
+    for item in &grammar_rule.items {
+        if let GrammarItem::Collection { element_type, .. } = item {
+            return Some(element_type.clone());
+        }
+    }
+    
+    None
+}
+
+/// Get the element category from within a collection pattern (recursive search)
 /// For example, (PPar {(PAmb ...), ...}) returns Proc (the element type)
 fn get_collection_element_category(expr: &Expr, theory: &TheoryDef) -> Option<Ident> {
     use crate::ast::GrammarItem;
@@ -814,7 +845,7 @@ fn generate_ascent_regular_pattern(
                         });
                     }
                     
-                    bindings.insert(rest_var_name, quote! { #rest_ident });
+                    bindings.insert(rest_var_name, quote! { #rest_ident.clone() });
                 }
             }
             Expr::Var(_) => {

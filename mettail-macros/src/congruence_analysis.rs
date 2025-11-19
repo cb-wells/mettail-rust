@@ -281,6 +281,7 @@ pub struct ElementPatternInfo {
     pub captures: Vec<CaptureInfo>,
     pub is_nested: bool,         // True if pattern has nested structure (like PDrop with NQuote inside)
     pub expr: Option<Expr>,      // The full element expression for nested pattern matching
+    pub rest_var: Option<Ident>, // Rest variable from the collection pattern (e.g., "rest" in {A, B, ...rest})
 }
 
 /// Information about a captured variable
@@ -375,7 +376,7 @@ pub fn extract_element_patterns_from_base_rewrite(
             // This is the collection constructor we're interested in
             // Extract element patterns from inside the collection
             for arg in args {
-                if let Expr::CollectionPattern { elements, .. } = arg {
+                if let Expr::CollectionPattern { elements, rest, .. } = arg {
                     // Extract each element pattern
                     for elem in elements {
                         if let Some(mut pattern_info) = analyze_constructor_pattern(elem, theory) {
@@ -383,6 +384,8 @@ pub fn extract_element_patterns_from_base_rewrite(
                             if pattern_info.is_nested {
                                 pattern_info.expr = Some(elem.clone());
                             }
+                            // Store the rest variable from this collection pattern
+                            pattern_info.rest_var = rest.clone();
                             patterns.push(pattern_info);
                         }
                     }
@@ -411,6 +414,7 @@ pub fn extract_element_patterns_from_base_rewrite(
                         captures,
                         is_nested: true,  // Direct patterns use full pattern matching
                         expr: Some(lhs.clone()),  // Store full LHS for pattern matching
+                        rest_var: None,  // Direct patterns don't have rest (they're the whole term)
                     });
                 }
             }
@@ -449,6 +453,7 @@ fn analyze_constructor_pattern(
             captures,
             is_nested,
             expr: None,  // Will be set by caller if needed
+            rest_var: None,  // Will be set by caller based on parent collection pattern
         });
     }
     None
@@ -733,33 +738,79 @@ fn generate_base_rewrite_projection(
         // Extract variables and their categories from the expression
         let var_categories = extract_variable_categories(pattern_expr, theory);
         
-        // Also build a map for RHS reconstruction: original var name -> lowercase ident
+        // Also build a map for RHS reconstruction and detect rest variables
         let mut rhs_bindings = HashMap::new();
+        let mut nested_rest_vars = Vec::new();  // Rest variables from nested patterns
         
         for (var_name, binding_ts) in &bindings {
             let var_ident = format_ident!("{}", var_name.to_lowercase());
             // Try to get category from variable_categories (for duplicates) or infer from var_categories
             let cat = variable_categories.get(var_name)
-                .or_else(|| var_categories.get(var_name))
-                .expect(&format!("Variable category not found for '{}'", var_name));
-            field_types.push(quote! { #cat });
-            rel_fields.push(quote! { #var_ident.clone() });
-            binding_vars.push((var_ident.clone(), binding_ts.clone()));
+                .or_else(|| var_categories.get(var_name));
             
-            // For RHS reconstruction, map original name to the lowercase ident
+            if let Some(cat) = cat {
+                // This is a regular capture variable
+                field_types.push(quote! { #cat });
+                rel_fields.push(quote! { #var_ident.clone() });
+                binding_vars.push((var_ident.clone(), binding_ts.clone()));
+            } else {
+                // No category found - this is a rest variable from nested pattern matching
+                // Add it to projection signature as HashBag<ElementCategory>
+                field_types.push(quote! { mettail_runtime::HashBag<#elem_cat> });
+                rel_fields.push(quote! { #var_ident.clone() });
+                // For rest variables, the binding from pattern matching is just the identifier
+                // We need to add .clone() since HashBag doesn't implement Copy
+                let rest_binding_with_clone = quote! { (#binding_ts).clone() };
+                binding_vars.push((var_ident.clone(), binding_ts.clone()));
+                nested_rest_vars.push(var_name.clone());
+                
+                // For RHS reconstruction, use the cloned version
+                rhs_bindings.insert(var_name.clone(), rest_binding_with_clone);
+                continue;  // Skip the general rhs_bindings insert below
+            }
+            
+            // For RHS reconstruction, include ALL variables (including rest)
             rhs_bindings.insert(var_name.clone(), quote! { #var_ident.clone() });
         }
         field_types.push(quote! { #elem_cat });
         rel_fields.push(quote! { elem.clone() });
         
+        // Add rest bag to signature if rest variable present
+        if let Some(rest_var) = &pattern.rest_var {
+            field_types.push(quote! { mettail_runtime::HashBag<#elem_cat> });
+            let rest_ident = format_ident!("rest_{}", rest_var.to_string().to_lowercase());
+            rel_fields.push(quote! { #rest_ident.clone() });
+        }
+        
         let rel_decl = quote! {
             relation #rel_name(#(#field_types),*);
         };
         
-        // Generate let bindings for captured variables
-        let capture_bindings: Vec<_> = binding_vars.iter().map(|(var_ident, binding)| {
-            quote! { let #var_ident = #binding }
-        }).collect();
+        // Generate let bindings for captured variables (excluding rest)
+        let rest_var_name = pattern.rest_var.as_ref().map(|v| v.to_string());
+        let capture_bindings: Vec<_> = binding_vars.iter()
+            .filter(|(var_ident, _)| {
+                // Exclude rest variable from capture bindings
+                Some(var_ident.to_string().as_str()) != rest_var_name.as_deref().map(|s| s.to_lowercase()).as_deref()
+            })
+            .map(|(var_ident, binding)| {
+                quote! { let #var_ident = #binding }
+            })
+            .collect();
+        
+        // Generate rest bag computation if needed
+        let rest_computation = if let Some(rest_var) = &pattern.rest_var {
+            let rest_ident = format_ident!("rest_{}", rest_var.to_string().to_lowercase());
+            quote! {
+                let #rest_ident = {
+                    let mut b = bag_field.clone();
+                    b.remove(elem);
+                    b
+                },
+            }
+        } else {
+            quote! {}
+        };
         
         let population_rule = quote! {
             #rel_name(#(#rel_fields),*) <--
@@ -767,22 +818,38 @@ fn generate_base_rewrite_projection(
                 if let #parent_cat::#collection_constructor(ref bag_field) = parent,
                 for (elem, _count) in bag_field.iter(),
                 #(#clauses),*,
-                #(#capture_bindings),*;
+                #(#capture_bindings),*
+                #rest_computation;
         };
         
         // Build updated pattern with extracted captures
         // Use the order from bindings to ensure consistent ordering with projection signature
-        let updated_captures: Vec<CaptureInfo> = bindings.keys().map(|var_name| {
-            let cat = variable_categories.get(var_name)
-                .or_else(|| var_categories.get(var_name))
-                .expect(&format!("Variable category not found for '{}'", var_name));
-            CaptureInfo {
-                var_name: var_name.clone(),
-                category: cat.clone(),
-                field_idx: 0,  // Not used for nested patterns
-                is_binder: false,  // TODO: detect binders properly
-            }
-        }).collect();
+        // Include both regular captures and rest variables (rest variables have no category in variable_categories)
+        let updated_captures: Vec<CaptureInfo> = bindings.keys()
+            .filter_map(|var_name| {
+                // Try to get category - if found, it's a regular capture; if not, it's a rest variable
+                let cat_opt = variable_categories.get(var_name)
+                    .or_else(|| var_categories.get(var_name));
+                
+                if let Some(cat) = cat_opt {
+                    // Regular capture
+                    Some(CaptureInfo {
+                        var_name: var_name.clone(),
+                        category: cat.clone(),
+                        field_idx: 0,  // Not used for nested patterns
+                        is_binder: false,  // TODO: detect binders properly
+                    })
+                } else {
+                    // Rest variable - include it with elem_cat as placeholder (actual type is HashBag<elem_cat>)
+                    // Use field_idx = usize::MAX as a marker that this is a rest variable
+                    Some(CaptureInfo {
+                        var_name: var_name.clone(),
+                        category: elem_cat.clone(),  // Placeholder - actual type is HashBag<elem_cat>
+                        field_idx: usize::MAX,  // Marker for rest variable
+                        is_binder: false,
+                    })
+                }
+            }).collect();
         
         let mut updated_pattern = pattern.clone();
         updated_pattern.captures = updated_captures;
@@ -792,7 +859,7 @@ fn generate_base_rewrite_projection(
         return (result, updated_pattern);
     }
     
-    // Build relation signature: (Parent, Capture1, Capture2, ..., Element)
+    // Build relation signature: (Parent, Capture1, Capture2, ..., Element, Rest?)
     let mut field_types = vec![quote! { #parent_cat }];
     for capture in &pattern.captures {
         let cat = &capture.category;
@@ -803,6 +870,11 @@ fn generate_base_rewrite_projection(
         }
     }
     field_types.push(quote! { #elem_cat });
+    
+    // Add rest bag to signature if rest variable present
+    if pattern.rest_var.is_some() {
+        field_types.push(quote! { mettail_runtime::HashBag<#elem_cat> });
+    }
     
     // Generate relation declaration
     let rel_decl = quote! {
@@ -827,6 +899,26 @@ fn generate_base_rewrite_projection(
     }
     rel_fields.push(quote! { elem.clone() });
     
+    // Add rest bag to relation tuple if present
+    if let Some(rest_var) = &pattern.rest_var {
+        let rest_ident = format_ident!("rest_{}", rest_var.to_string().to_lowercase());
+        rel_fields.push(quote! { #rest_ident.clone() });
+    }
+    
+    // Generate rest bag computation if needed
+    let rest_computation = if let Some(rest_var) = &pattern.rest_var {
+        let rest_ident = format_ident!("rest_{}", rest_var.to_string().to_lowercase());
+        quote! {
+            let #rest_ident = {
+                let mut b = bag_field.clone();
+                b.remove(elem);
+                b
+            },
+        }
+    } else {
+        quote! {}
+    };
+    
     // Generate the population rule with conditional capture bindings
     let population_rule = if pattern.captures.is_empty() {
         // No captures - simpler pattern without bindings
@@ -835,7 +927,8 @@ fn generate_base_rewrite_projection(
                 #parent_cat_lower(parent),
                 if let #parent_cat::#collection_constructor(ref bag_field) = parent,
                 for (elem, _count) in bag_field.iter(),
-                if let #elem_cat::#elem_constructor(#field_patterns) = elem;
+                if let #elem_cat::#elem_constructor(#field_patterns) = elem,
+                #rest_computation;
         }
     } else {
         // Has captures - include capture bindings
@@ -845,7 +938,8 @@ fn generate_base_rewrite_projection(
                 if let #parent_cat::#collection_constructor(ref bag_field) = parent,
                 for (elem, _count) in bag_field.iter(),
                 if let #elem_cat::#elem_constructor(#field_patterns) = elem,
-                #capture_bindings;
+                #capture_bindings
+                #rest_computation;
         }
     };
     
@@ -882,20 +976,20 @@ fn generate_field_extraction(pattern: &ElementPatternInfo) -> (TokenStream, Toke
         
         // Check if this is a binder field (has a binder capture)
         if let Some(binder_capture) = captures_for_field.iter().find(|c| c.is_binder) {
-            // This is a scope field - unbind it to get binder and body
+            // This is a scope field - access unsafe fields directly to preserve bound variables
             let binder_name = format_ident!("cap_{}", binder_capture.var_name.to_lowercase());
             
             // Find the body capture (should be at the same field index, non-binder)
             if let Some(body_capture) = captures_for_field.iter().find(|c| !c.is_binder) {
                 let body_name = format_ident!("cap_{}", body_capture.var_name.to_lowercase());
                 capture_bindings.push(quote! {
-                    let (#binder_name, body_box) = (* #field_name).clone().unbind(),
-                    let #body_name = (* body_box).clone()
+                    let #binder_name = (* #field_name).inner().unsafe_pattern.clone(),
+                    let #body_name = (* #field_name).inner().unsafe_body.as_ref().clone()
                 });
             } else {
                 // Only binder, no body capture
                 capture_bindings.push(quote! {
-                    let (#binder_name, _body) = (* #field_name).clone().unbind()
+                    let #binder_name = (* #field_name).inner().unsafe_pattern.clone()
                 });
             }
         } else {
@@ -964,11 +1058,11 @@ fn generate_regular_congruence_projection(
     
     // Generate extraction based on whether it's a binding constructor
     let extraction = if pattern.is_binding {
-        // Binding constructor: extract scope and unbind
+        // Binding constructor: extract scope and access unsafe fields directly to preserve bound variables
         quote! {
             if let #elem_cat::#elem_constructor(ref scope) = elem,
-            let (binder_var, body_box) = scope.clone().unbind(),
-            let rewrite_field = (*body_box).clone()
+            let binder_var = scope.inner().unsafe_pattern.clone(),
+            let rewrite_field = scope.inner().unsafe_body.as_ref().clone()
         }
     } else {
         // Non-binding constructor: directly extract the rewrite field

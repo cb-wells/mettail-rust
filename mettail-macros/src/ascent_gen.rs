@@ -432,11 +432,14 @@ fn generate_binding_deconstruction(
     
     if field_count == 1 {
         // Only the scope field (body)
+        // IMPORTANT: Access unsafe_body field directly to avoid fresh IDs from unbind()
+        // The inner moniker Scope has public unsafe_body and unsafe_pattern fields
+        // We access via .inner() to get the moniker Scope, then access the field directly
         Some(quote! {
-            #body_cat_lower(body.as_ref().clone()) <--
+            #body_cat_lower(body_value) <--
                 #cat_lower(t),
                 if let #category::#label(scope) = t,
-                let (binder, body) = scope.clone().unbind();
+                let body_value = scope.inner().unsafe_body.as_ref().clone();
         })
     } else {
         // Has other fields besides the scope
@@ -717,7 +720,13 @@ fn generate_congruence_rewrite(idx: usize, rewrite: &crate::ast::RewriteRule, th
     let is_binding = !rule.bindings.is_empty();
     
     let result = if is_binding {
-        generate_binding_congruence(&category, &cat_lower, &rw_rel, constructor, field_idx, &bindings, rule)
+        // NEW: Use projection-based binding congruence
+        eprintln!("DEBUG: Generating projection-based binding congruence for {} (idx={})", constructor, idx);
+        let result = generate_projection_based_binding_congruence(idx, &category, constructor.clone(), field_idx, rule, theory);
+        if result.is_none() {
+            eprintln!("DEBUG: generate_projection_based_binding_congruence returned None for {}", constructor);
+        }
+        result
     } else {
         generate_regular_congruence(&category, &cat_lower, &rw_rel, constructor, field_idx, &bindings)
     };
@@ -955,6 +964,202 @@ fn generate_binding_congruence(
             let new_scope_tmp = mettail_runtime::Scope::new(#binder_var.clone(), Box::new(#rewritten_field.clone())),
             let t = #category::#constructor(new_scope_tmp);
     })
+}
+
+/// Generate projection-based binding congruence
+/// For: if S => T then (PNew x S) => (PNew x T)
+/// Generates:
+///   1. Projection relation: pnew_direct_congruence_proj(parent, binder, body)
+///   2. Population rule: extracts parent, unbinds, projects body
+///   3. Congruence clause: joins projection with rw_proc(body, _)
+fn generate_projection_based_binding_congruence(
+    _congruence_idx: usize,
+    category: &Ident,
+    constructor: Ident,
+    rewrite_field_idx: usize,
+    rule: &crate::ast::GrammarRule,
+    _theory: &TheoryDef,
+) -> Option<TokenStream> {
+    // Validate: only single binder supported for now
+    if rule.bindings.len() != 1 {
+        eprintln!(
+            "Warning: Multiple binders not yet supported for projection-based congruence: {}",
+            constructor
+        );
+        return None;
+    }
+    
+    let (binder_idx, body_indices) = &rule.bindings[0];
+    
+    // Validate: binder must bind in exactly one body
+    if body_indices.len() != 1 {
+        eprintln!(
+            "Warning: Binder binding in multiple bodies not supported: {}",
+            constructor
+        );
+        return None;
+    }
+    
+    let body_idx = body_indices[0];
+    
+    // Get the body category
+    let body_cat = match &rule.items[body_idx] {
+        crate::ast::GrammarItem::NonTerminal(cat) => cat,
+        _ => {
+            eprintln!("Warning: Body field is not a non-terminal: {}", constructor);
+            return None;
+        }
+    };
+    
+    // Map field_idx (from args) to grammar item index
+    // field_idx counts only Var arguments in the congruence LHS
+    // We need to find which grammar item position this corresponds to
+    let mut non_terminal_count = 0;
+    let mut rewrite_grammar_idx = None;
+    for (grammar_idx, item) in rule.items.iter().enumerate() {
+        match item {
+            crate::ast::GrammarItem::NonTerminal(_) => {
+                if non_terminal_count == rewrite_field_idx {
+                    rewrite_grammar_idx = Some(grammar_idx);
+                    break;
+                }
+                non_terminal_count += 1;
+            }
+            crate::ast::GrammarItem::Binder { .. } => {
+                // Binders are also counted as fields in the congruence args
+                if non_terminal_count == rewrite_field_idx {
+                    rewrite_grammar_idx = Some(grammar_idx);
+                    break;
+                }
+                non_terminal_count += 1;
+            }
+            _ => {}
+        }
+    }
+    
+    let rewrite_grammar_idx = match rewrite_grammar_idx {
+        Some(idx) => idx,
+        None => {
+            eprintln!(
+                "Warning: Could not map field_idx {} to grammar index for {}",
+                rewrite_field_idx, constructor
+            );
+            return None;
+        }
+    };
+    
+    // Validate: the rewrite field must be the body
+    if rewrite_grammar_idx != body_idx {
+        eprintln!(
+            "Warning: Rewrite field is not the bound body for {}: field={}, body={}, mapped_grammar_idx={}",
+            constructor, rewrite_field_idx, body_idx, rewrite_grammar_idx
+        );
+        return None;
+    }
+    
+    // Generate projection relation name
+    let constructor_lower = format_ident!("{}", constructor.to_string().to_lowercase());
+    let proj_rel = format_ident!("{}_direct_congruence_proj", constructor_lower);
+    
+    // Generate components
+    let proj_decl = generate_binding_proj_declaration(
+        &proj_rel, category, body_cat
+    );
+    
+    let proj_population = generate_binding_proj_population(
+        &proj_rel, category, &constructor, body_cat, rule, *binder_idx
+    );
+    
+    let rw_rel = format_ident!("rw_{}", category.to_string().to_lowercase());
+    let congruence_clause = generate_binding_congruence_clause(
+        &rw_rel, &proj_rel, category, &constructor, body_cat
+    );
+    
+    Some(quote! {
+        #proj_decl
+        #proj_population
+        #congruence_clause
+    })
+}
+
+/// Generate projection relation declaration
+/// pnew_direct_congruence_proj(Proc, Binder<String>, Proc)
+fn generate_binding_proj_declaration(
+    proj_rel: &Ident,
+    parent_cat: &Ident,
+    body_cat: &Ident,
+) -> TokenStream {
+    quote! {
+        relation #proj_rel(#parent_cat, mettail_runtime::Binder<String>, #body_cat);
+    }
+}
+
+/// Generate projection population rule
+/// Projects parent term, unbinds scope, extracts body
+fn generate_binding_proj_population(
+    proj_rel: &Ident,
+    parent_cat: &Ident,
+    constructor: &Ident,
+    _body_cat: &Ident,
+    rule: &crate::ast::GrammarRule,
+    _binder_idx: usize,
+) -> TokenStream {
+    let cat_lower = format_ident!("{}", parent_cat.to_string().to_lowercase());
+    
+    // Count non-terminal fields
+    let field_count = rule.items
+        .iter()
+        .filter(|item| matches!(item, crate::ast::GrammarItem::NonTerminal(_)))
+        .count();
+    
+    if field_count == 1 {
+        // Simple case: only the scope field (common for PNew)
+        // IMPORTANT: Access unsafe_body field directly instead of unbind() to avoid fresh IDs
+        // This preserves the Bound variables which have stable structure
+        quote! {
+            #proj_rel(parent, binder_var, body) <--
+                #cat_lower(parent),
+                if let #parent_cat::#constructor(ref scope) = parent,
+                let binder_var = scope.inner().unsafe_pattern.clone(),
+                let body = scope.inner().unsafe_body.as_ref().clone();
+        }
+    } else {
+        // Complex case: has other fields besides scope
+        // For now, we don't support this (would need to handle all fields)
+        eprintln!(
+            "Warning: Binding constructor with multiple fields not yet supported: {}",
+            constructor
+        );
+        quote! {
+            // TODO: Support binding constructors with multiple fields
+            // Projection not generated for {}
+        }
+    }
+}
+
+/// Generate congruence clause using projection
+/// Joins projection with rw_proc, reconstructs term
+/// IMPORTANT: body still has Bound variables (we didn't unbind), so we reconstruct
+/// the Scope directly without rebinding. We also re-box the body.
+fn generate_binding_congruence_clause(
+    rw_rel: &Ident,
+    proj_rel: &Ident,
+    parent_cat: &Ident,
+    constructor: &Ident,
+    body_cat: &Ident,
+) -> TokenStream {
+    let body_rw_rel = format_ident!("rw_{}", body_cat.to_string().to_lowercase());
+    
+    quote! {
+        #rw_rel(parent, result) <--
+            #proj_rel(parent, binder_var, body),
+            #body_rw_rel(body, body_rewritten),
+            let scope_tmp = mettail_runtime::Scope::from_parts_unsafe(
+                binder_var.clone(), 
+                Box::new(body_rewritten.clone())
+            ),
+            let result = #parent_cat::#constructor(scope_tmp);
+    }
 }
 
 /// Generate a single equation clause
@@ -1586,6 +1791,7 @@ fn generate_joined_base_rewrite_clause(
     let mut projection_calls = Vec::new();
     let mut elem_vars = Vec::new();
     let mut all_capture_vars = Vec::new();
+    let mut rest_vars = Vec::new();  // Track rest variables
     
     for (pat_idx, pattern) in patterns.iter().enumerate() {
         let rel_name = format_ident!(
@@ -1602,6 +1808,9 @@ fn generate_joined_base_rewrite_clause(
         
         // Extract captures for all patterns (including nested ones)
         for capture in &pattern.captures {
+            // Check if this is a rest variable (marked by field_idx == usize::MAX)
+            let is_rest = capture.field_idx == usize::MAX;
+            
             // For shared variables, use the same name across all patterns (for join)
             // For non-shared variables, use pattern-specific names
             let cap_name = if shared_vars.contains(&capture.var_name) {
@@ -1610,13 +1819,34 @@ fn generate_joined_base_rewrite_clause(
                 format_ident!("cap_{}_p{}", capture.var_name.to_lowercase(), pat_idx)
             };
             proj_args.push(quote! { #cap_name });
-            pattern_capture_vars.push((cap_name.clone(), capture.clone()));
+            
+            // Only add to capture_vars if it's not a rest variable
+            // Rest variables are tracked separately for RHS reconstruction
+            if !is_rest {
+                pattern_capture_vars.push((cap_name.clone(), capture.clone()));
+            } else {
+                // Track rest variables separately
+                let rest_var_name = syn::Ident::new(&capture.var_name, proc_macro2::Span::call_site());
+                rest_vars.push((cap_name.clone(), rest_var_name));
+            }
         }
         
         let elem_var = format_ident!("elem_{}", pat_idx);
         proj_args.push(quote! { #elem_var });
         elem_vars.push(elem_var);
         all_capture_vars.extend(pattern_capture_vars);
+        
+        // Add rest variable from pattern-level rest (if present and not already in captures)
+        // This handles rest at the pattern's collection level (e.g., {A, B, ...rest})
+        if let Some(rest_var) = &pattern.rest_var {
+            // Check if this rest was already added via captures (nested rest)
+            let already_added = rest_vars.iter().any(|(_, rv)| rv.to_string() == rest_var.to_string());
+            if !already_added {
+                let rest_ident = format_ident!("rest_{}_p{}", rest_var.to_string().to_lowercase(), pat_idx);
+                proj_args.push(quote! { #rest_ident });
+                rest_vars.push((rest_ident, rest_var.clone()));
+            }
+        }
         
         projection_calls.push(quote! {
             #rel_name(#(#proj_args),*)
@@ -1625,7 +1855,7 @@ fn generate_joined_base_rewrite_clause(
     
     // For nested patterns, we now extract ALL captures via projection (using full pattern matching)
     // So we can use direct RHS reconstruction for all cases
-    let rhs_term = generate_rhs_reconstruction(rhs, &all_capture_vars, theory);
+    let rhs_term = generate_rhs_reconstruction(rhs, &all_capture_vars, &rest_vars, theory);
     let rhs_generation = quote! {
         let rhs_term = #rhs_term
     };
@@ -1670,6 +1900,7 @@ fn generate_joined_base_rewrite_clause(
 fn generate_rhs_reconstruction(
     rhs: &Expr,
     captures: &[(Ident, crate::congruence_analysis::CaptureInfo)],
+    rest_vars: &[(Ident, Ident)],  // (rest_binding_ident, rest_var_name)
     theory: &TheoryDef,
 ) -> TokenStream {
     // Build a bindings map for RHS generator
@@ -1677,6 +1908,11 @@ fn generate_rhs_reconstruction(
     for (var_ident, capture_info) in captures {
         // For rewrite RHS, bindings should just be the variable name
         bindings.insert(capture_info.var_name.clone(), quote! { #var_ident.clone() });
+    }
+    
+    // Add rest variables to bindings (as HashBag)
+    for (rest_ident, rest_var_name) in rest_vars {
+        bindings.insert(rest_var_name.to_string(), quote! { #rest_ident.clone() });
     }
     
     // Special case: if RHS is a collection constructor with collection pattern inside,
@@ -1692,7 +1928,7 @@ fn generate_rhs_reconstruction(
                     // Single element, no rest - just generate that element
                     return crate::rewrite_gen::generate_ascent_rhs_inner(&elements[0], &bindings, theory);
                 } else if elements.len() > 1 || rest.is_some() {
-                    // Multiple elements or rest - this is more complex
+                    // Multiple elements or rest - need to handle merging
                     let element_terms: Vec<_> = elements.iter()
                         .map(|e| crate::rewrite_gen::generate_ascent_rhs_inner(e, &bindings, theory))
                         .collect();
@@ -1750,9 +1986,10 @@ fn generate_regular_congruence_clause(
     
     // Generate reconstruction based on whether it's a binding constructor
     let reconstruction = if pattern.is_binding {
-        // Need to use intermediate variable to avoid type inference issues
+        // IMPORTANT: Use from_parts_unsafe to avoid rebinding (which would change variable IDs)
+        // The body still has Bound variables, so we preserve them
         quote! {
-            let scope_tmp = mettail_runtime::Scope::new(binder_var.clone(), Box::new(body_rewritten.clone())),
+            let scope_tmp = mettail_runtime::Scope::from_parts_unsafe(binder_var.clone(), Box::new(body_rewritten.clone())),
             let rewritten = #elem_cat::#elem_constructor(scope_tmp)
         }
     } else {

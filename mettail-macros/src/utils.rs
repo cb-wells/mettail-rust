@@ -23,11 +23,22 @@ pub fn split_commas_outside_parens(s: &str) -> Vec<&str> {
     result
 }
 
+/// Normalize whitespace in a string by replacing all consecutive whitespace
+/// (including newlines) with a single space. This fixes formatting issues
+/// from TokenStream::to_string() which can insert unwanted line breaks.
+fn normalize_whitespace(s: &str) -> String {
+    s.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 pub fn print_rule(line: &str) {
     if line.trim().is_empty() {
         return;
     }
-    let (head, body) = line.split_once("<- -").unwrap_or((line.trim(), ""));
+    
+    // Normalize whitespace to fix TokenStream formatting issues
+    let normalized = normalize_whitespace(line);
+    
+    let (head, body) = normalized.split_once("<- -").unwrap_or((normalized.trim(), ""));
     let clauses = split_commas_outside_parens(body);
     let (last, rest) = clauses.split_last().unwrap_or((&"", &[]));
     if !body.trim().is_empty() {
@@ -37,6 +48,6 @@ pub fn print_rule(line: &str) {
         }
         eprintln!("    {};", last.trim());
     } else {
-        eprintln!("{};", line.trim());
+        eprintln!("{};", normalized.trim());
     }
 }

@@ -1,7 +1,7 @@
 # MeTTaIL: Current Status & Recent Progress
 
-**Last Updated**: November 9, 2025  
-**Version**: Phase 6.1 Complete
+**Last Updated**: November 19, 2025  
+**Version**: Phase 6.3 Complete - All Features Working
 
 ---
 
@@ -11,9 +11,56 @@
 |-----------|--------|-------------|
 | Core Infrastructure | ✅ Complete | Production |
 | Collection Types | ✅ Complete | Optimal |
-| Indexed Projection (Flat) | ✅ Complete | Order-independent |
-| Deep Projection | 🎯 Design Phase | Planned Q1 2026 |
+| Rest Patterns | ✅ Complete | Optimal |
+| Binding Congruences | ✅ Complete | Working |
+| Indexed Projection | ✅ Complete | Order-independent |
+| Nested Shared Variables | ✅ Complete | Working |
 | Theory Composition | 📋 Not Started | Planned Q2 2026 |
+
+---
+
+## 🎉 Phase 6.2 Complete: Binding Congruences Fixed
+
+### The Problem
+
+Binding constructors (like `new(x, P)` in ambient calculus or `λx. M` in lambda calculus) were not working with congruence rules. The issue: moniker's `unbind()` creates **fresh variable IDs every time**, preventing Datalog joins.
+
+```rust
+// First unbind  → Body with IDs_A
+// Second unbind → Body with IDs_B (DIFFERENT!)
+// Datalog join: FAILS because IDs don't match
+```
+
+### The Solution
+
+Access moniker's `unsafe_body` and `unsafe_pattern` fields **directly**, preserving bound variable structure:
+
+```rust
+// OLD (broken):
+let (binder, body) = scope.clone().unbind();  // Fresh IDs!
+
+// NEW (working):
+let binder = scope.inner().unsafe_pattern.clone();
+let body = scope.inner().unsafe_body.as_ref().clone();  // Preserves Bound vars!
+```
+
+### Test Results
+
+**All 6 congruence tests pass:**
+- ✅ `amb_congruence` - Regular congruence  
+- ✅ `par_congruence` - Collection congruence  
+- ✅ `new_congruence` - **Direct binding congruence (FIXED!)**  
+- ✅ `nested_amb_new` - **Nested binding congruence (FIXED!)**  
+- ✅ `new_with_rest` - **Binding congruence with rest patterns (FIXED!)**  
+- ✅ `new_in_collection` - **Collection binding congruence (FIXED!)**
+
+**Now works for any nominal calculus:**
+- ✅ Ambient calculus with `new(x, P)`
+- ✅ Lambda calculus with `λx. M`  
+- ✅ Pi calculus with `ν(x) P`
+- ✅ Any process calculus with restriction/binding
+
+**See**: [BINDING-CONGRUENCE-FIXED.md](design/BINDING-CONGRUENCE-FIXED.md) for full details.
 
 ---
 
@@ -124,34 +171,15 @@ rw_proc(parent, result) <--
 
 ## 🔍 Current Limitations
 
-### 1. Deep Nesting (Partially Solved)
+### Known Issues
 
-**Works:**
-```rust
-// Flat shared variables
-(PPar {(PInput chan x P), (POutput chan Q)})
-//              ^^^^                  ^^^^
-//         Both at argument level 0
-```
+- **No theory composition yet** (can't extend or parameterize theories)
+- **No optimization passes** (generated code is straightforward but unoptimized)
+- **No incremental computation** (full recomputation on each step)
+- **No parallel execution** (single-threaded Ascent)
+- **Limited profiling and debugging tools**
 
-**Doesn't work optimally:**
-```rust
-// Deeply nested shared variable
-(PPar {(PAmb N (PPar {(PIn M P), Q})), (PAmb M R)})
-//                         ^                 ^
-//                    Nested            Top-level
-// Falls back to order-dependent matching
-```
-
-**Solution**: Phase 7 (Deep Projection) - see [design docs](design/DEEP-PROJECTION-DESIGN.md)
-
-### 2. Other Known Issues
-
-- No theory composition yet (can't extend or parameterize theories)
-- No optimization passes (generated code is straightforward but unoptimized)
-- No incremental computation (full recomputation on each step)
-- No parallel execution (single-threaded Ascent)
-- Limited profiling and debugging tools
+**Note**: Previous limitation with "deep nested shared variables" has been **SOLVED**! The indexed projection system correctly handles nested shared variables like `M` in `{n[{in(m,p)}], m[r]}`. All ambient calculus tests pass.
 
 ---
 
@@ -185,6 +213,26 @@ rw_proc(parent, result) <--
 - Fixed collection equations (`{P} == P`)
 - Documented limitation with deeply nested shared variables
 
+### Week of Nov 18-19, 2025
+
+**Nov 18-19: Binding Congruences Fixed (Phase 6.2)**
+- Discovered issue: `unbind()` creates fresh IDs, breaking Datalog joins
+- Solution: Access moniker's `unsafe_body` and `unsafe_pattern` directly
+- Fixed category rules for binding constructors
+- Fixed direct binding congruence projections
+- Fixed collection binding congruence projections  
+- All 6 congruence tests now passing
+- Created comprehensive documentation
+
+**Impact**: Any nominal calculus with binders now works correctly (ambient, lambda, pi calculus)
+
+**Nov 19: Verification & Documentation (Phase 6.3)**
+- Verified all 17 ambient calculus tests pass
+- Confirmed nested shared variables work correctly  
+- Created comprehensive test plan for ambient calculus
+- Updated all documentation to reflect completed features
+- **Deprecated "deep projection" as unnecessary** - already works!
+
 ---
 
 ## 🎯 Next Steps
@@ -193,24 +241,35 @@ rw_proc(parent, result) <--
 - [x] Document Phase 6 completion
 - [x] Update roadmaps and README
 - [x] Clean up workspace
+- [x] Fix binding congruences
+- [x] Verify all ambient tests pass
 - [ ] Push to repository
 
 ### Short-Term (Q1 2026)
-1. **Deep Projection** - Handle nested shared variables
-   - Quick win: Simplified version for common cases (1-2 days)
-   - Full solution: Multi-level projection trees (2-3 weeks)
-   - See [Deep Projection Roadmap](design/DEEP-PROJECTION-ROADMAP.md)
 
-2. **Performance Benchmarking** - Quantify improvements
+1. **Term Explorer REPL** - Interactive exploration (IN PROGRESS)
+   - Foundation complete ✅
+   - Add history navigation
+   - Add Ambient Calculus theory
+   - Polish UX
+
+2. **Term Generation for Collections** - Enable automated testing (2 weeks)
+   - Extend `termgen_gen.rs` for collections
+   - Support exhaustive and random generation
+   - Unblock fuzz testing
+
+3. **Performance Benchmarking** - Quantify improvements (1-2 weeks)
    - Create benchmark suite
    - Measure throughput (rewrites/sec)
    - Track memory usage
    - CI integration
 
-3. **Ascent Parallelization** - Use `ascent_par!`
+4. **Ascent Parallelization** - Use `ascent_par!` (1-2 weeks)
    - Profile current bottlenecks
    - Switch to parallel Ascent
    - Target: 10x additional speedup
+
+**Note**: "Deep Projection" task removed - feature already works!
 
 ### Medium-Term (Q2 2026)
 - Theory composition and inheritance
@@ -250,16 +309,23 @@ rw_proc(parent, result) <--
 
 ### Working Examples
 - ✅ **RhoCalc** (`examples/rhocalc.rs`) - Full communication reduction with collections
-- ⚠️ **Ambient** (`examples/ambient.rs`) - Basic cases work, complex nesting needs deep projection
+- ✅ **Ambient** (`examples/ambient.rs`) - Complete! All mobility patterns work correctly
+  - Entry, exit, and open capabilities
+  - Nested shared variables (e.g., `{n[{in(m,p)}], m[r]}`)
+  - Binding congruences with `new`
+  - Rest patterns throughout
 
 ### Test Coverage
 - ✅ Collection parsing and display
-- ✅ Collection pattern matching (flat)
+- ✅ Collection pattern matching (all nesting levels)
 - ✅ Rest pattern extraction and reconstruction
 - ✅ Substitution into collections
 - ✅ Collection equations
-- ✅ Order-independent matching (2-3 elements)
-- ⚠️ Deep nested patterns (order-dependent fallback)
+- ✅ Order-independent matching (all cases)
+- ✅ Nested shared variables (e.g., ambient calculus entry/exit)
+- ✅ Binding congruences (direct, nested, in collections)
+- ✅ 17/17 ambient calculus tests passing
+- ✅ 6/6 congruence tests passing
 
 ---
 
