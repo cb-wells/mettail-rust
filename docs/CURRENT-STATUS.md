@@ -171,6 +171,21 @@ rw_proc(parent, result) <--
 
 ## 🔍 Current Limitations
 
+### Critical Issues
+
+**🚨 EQUATIONS NOT IMPLEMENTED** (Discovered Nov 19, 2025)
+- **All user-defined equations are silently failing to generate**
+- Ambient calculus: 0/6 equations working
+- Root causes:
+  1. Bare variable LHS (e.g., `P == {P, 0}`) can't be pattern matched
+  2. Complex patterns in collections (e.g., `{P, (PNew x C)}`) not supported
+  3. Only simple variables work in collection equation patterns
+- **Impact**: Semantic incorrectness - zero identity, scope extrusion missing
+- **Why tests pass**: Rewrites work without equations, tests don't check equivalence
+- **Priority**: HIGH - Correctness issue, not just missing feature
+- **Plan**: See [EQUATION-IMPLEMENTATION-PLAN.md](design/EQUATION-IMPLEMENTATION-PLAN.md)
+- **Timeline**: 2 weeks to implement
+
 ### Known Issues
 
 - **No theory composition yet** (can't extend or parameterize theories)
@@ -243,28 +258,36 @@ rw_proc(parent, result) <--
 - [x] Clean up workspace
 - [x] Fix binding congruences
 - [x] Verify all ambient tests pass
+- [ ] **CRITICAL: Fix equation generation** (0/6 equations working!)
 - [ ] Push to repository
 
 ### Short-Term (Q1 2026)
 
-1. **Term Explorer REPL** - Interactive exploration (IN PROGRESS)
+1. **Equation Support** - FIX SEMANTIC CORRECTNESS (2 weeks) **HIGH PRIORITY**
+   - Auto-flip bare variable LHS
+   - Support complex patterns in collections
+   - Implement freshness conditions
+   - Add equation-specific tests
+   - See [EQUATION-IMPLEMENTATION-PLAN.md](design/EQUATION-IMPLEMENTATION-PLAN.md)
+
+2. **Term Explorer REPL** - Interactive exploration (IN PROGRESS)
    - Foundation complete ✅
    - Add history navigation
    - Add Ambient Calculus theory
    - Polish UX
 
-2. **Term Generation for Collections** - Enable automated testing (2 weeks)
+3. **Term Generation for Collections** - Enable automated testing (2 weeks)
    - Extend `termgen_gen.rs` for collections
    - Support exhaustive and random generation
    - Unblock fuzz testing
 
-3. **Performance Benchmarking** - Quantify improvements (1-2 weeks)
+4. **Performance Benchmarking** - Quantify improvements (1-2 weeks)
    - Create benchmark suite
    - Measure throughput (rewrites/sec)
    - Track memory usage
    - CI integration
 
-4. **Ascent Parallelization** - Use `ascent_par!` (1-2 weeks)
+5. **Ascent Parallelization** - Use `ascent_par!` (1-2 weeks)
    - Profile current bottlenecks
    - Switch to parallel Ascent
    - Target: 10x additional speedup

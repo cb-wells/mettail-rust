@@ -7,7 +7,7 @@ use mettail_macros::theory;
 use lalrpop_util::lalrpop_mod;
 
 theory! {
-    name: Ambcalc,
+    name: Ambient,
     exports {
         Proc
         Name
@@ -28,23 +28,31 @@ theory! {
         NVar . Name ::= Var ;
     },
     equations {
-        // if x # C then (PPar P (PNew x C)) == (PNew x (PPar P C));
-        // if x # N then (PNew x (PIn N P)) == (PIn N (PNew x P));
-        // if x # N then (PNew x (POut N P)) == (POut N (PNew x P));
-        // if x # N then (PNew x (POpen N P)) == (POpen N (PNew x P));
-        // if x # N then (PNew x (PAmb N P)) == (PAmb N (PNew x P));
+        // (PPar {P}) == P;
+        // (PPar {PZero, ...rest}) == (PPar {...rest});
+        if x # C then (PPar {P, (PNew x C)}) == (PNew x (PPar {P, C}));
+        if x # N then (PNew x (PPar {P, (PIn N Q)})) == (PPar {P, (PIn N (PNew x Q))});
+        if x # N then (PNew x (PPar {P, (POut N Q)})) == (PPar {P, (POut N (PNew x Q))});
+        if x # N then (PNew x (PPar {P, (POpen N Q)})) == (PPar {P, (POpen N (PNew x Q))});
+        if x # N then (PNew x (PPar {P, (PAmb N Q)})) == (PPar {P, (PAmb N (PNew x Q))});
         // (PNew x (PNew y P)) == (PNew y (PNew x P));
     },
     rewrites {
+
+        // {n[{in(m,p), ...q}], m[r]} => {m[{n[{p, ...q}], r}]}
         (PPar {(PAmb N (PPar {(PIn M P) , ...rest})) , (PAmb M R)}) 
             => (PPar {(PAmb M (PPar {(PAmb N (PPar {P , ...rest})), R}))});
-            
+        
+        // m[{n[{out(m,p), ...q}], r}] => {n[{p, ...q}], m[r]}
         (PAmb M (PPar {(PAmb N (PPar {(POut M P), ...rest})), R}))
             => (PPar {(PAmb N (PPar {P, ...rest})), (PAmb M R)});
+
+        // {open(n,p), n[q]} => {p, q}
         (PPar {(POpen N P), (PAmb N Q)})
             => (PPar {P,Q});
 
         if S => T then (PPar {S, ...rest}) => (PPar {T, ...rest});
+
         if S => T then (PNew x S) => (PNew x T);
         if S => T then (PAmb N S) => (PAmb N T);
     }
@@ -76,7 +84,7 @@ impl Theory for AmbCalculusTheory {
 
     fn parse_term(&self, input: &str) -> Result<Box<dyn Term>> {
         mettail_runtime::clear_var_cache();
-        let parser = ambcalc::ProcParser::new();
+        let parser = ambient::ProcParser::new();
         let proc = parser
             .parse(input)
             .map_err(|e| anyhow::anyhow!("Parse error: {:?}", e))?;
@@ -94,7 +102,7 @@ impl Theory for AmbCalculusTheory {
 
         // Run Ascent with the generated source (rhocalc_source! is defined by the theory! macro above)
         let prog = ascent::ascent_run! {
-            include_source!(ambcalc_source);
+            include_source!(ambient_source);
             
             // Seed the initial term
             proc(initial_proc.clone());

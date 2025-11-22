@@ -3,7 +3,7 @@ use lalrpop_util::lalrpop_mod;
 use ascent_byods_rels::*;
 use ascent::*;
 
-// Re-use the language specification from ambient.rs
+// the language specification
 theory! {
     name: Ambient,
     exports {
@@ -26,14 +26,15 @@ theory! {
         NVar . Name ::= Var ;
     },
     equations {
-        P == (PPar {P, PZero});
         if x # C then (PPar {P, (PNew x C)}) == (PNew x (PPar {P, C}));
-        if x # N then (PNew x {P, (PIn N P)}) == {P, (PIn N (PNew x P))};
-        if x # N then (PNew x {P, (POut N P)}) == {P, (POut N (PNew x P))};
-        if x # N then (PNew x {P, (POpen N P)}) == {P, (POpen N (PNew x P))};
-        if x # N then (PNew x {P, (PAmb N P)}) == {P, (PAmb N (PNew x P))};
+        if x # N then (PNew x (PPar {P, (PIn N Q)})) == (PPar {P, (PIn N (PNew x Q))});
+        if x # N then (PNew x (PPar {P, (POut N Q)})) == (PPar {P, (POut N (PNew x Q))});
+        if x # N then (PNew x (PPar {P, (POpen N Q)})) == (PPar {P, (POpen N (PNew x Q))});
+        if x # N then (PNew x (PPar {P, (PAmb N Q)})) == (PPar {P, (PAmb N (PNew x Q))});
+        // (PNew x (PNew y P)) == (PNew y (PNew x P));
     },
     rewrites {
+
         // {n[{in(m,p), ...q}], m[r]} => {m[{n[{p, ...q}], r}]}
         (PPar {(PAmb N (PPar {(PIn M P) , ...rest})) , (PAmb M R)}) 
             => (PPar {(PAmb M (PPar {(PAmb N (PPar {P , ...rest})), R}))});
@@ -47,10 +48,12 @@ theory! {
             => (PPar {P,Q});
 
         if S => T then (PPar {S, ...rest}) => (PPar {T, ...rest});
+
         if S => T then (PNew x S) => (PNew x T);
         if S => T then (PAmb N S) => (PAmb N T);
     }
 }
+
 
 struct TestCase {
     name: &'static str,
@@ -71,6 +74,9 @@ fn run_test(test: &TestCase) -> Result<(), String> {
     let input_term = parser.parse(test.input)
         .map_err(|e| format!("Parse error: {:?}", e))?;
     
+    // Normalize to flatten any nested collections
+    let input_term = input_term.normalize();
+    
     println!("Parsed: {}", input_term);
     
     let prog = ascent_run! {
@@ -90,6 +96,13 @@ fn run_test(test: &TestCase) -> Result<(), String> {
 
     let mut rewrites: Vec<_> = prog.rw_proc.iter().collect();
     rewrites.sort_by(|a, b| a.0.cmp(&b.0));
+
+    println!("Equations:");
+    for (lhs, rhs) in prog.__eq_proc_ind_common.iter_all_added() {
+        if lhs.to_string() != rhs.to_string() {
+            println!("  {} = {}", lhs, rhs);
+        }
+    }
     
     println!("\nRewrites found: {}", rewrites.len());
     for (i, (s, t)) in rewrites.iter().enumerate() {
@@ -234,7 +247,7 @@ fn main() {
         // Sequential operations
         TestCase {
             name: "sequential_mobility",
-            input: "{agent[{in(loc1, in(loc2, 0))}], loc1[0], loc2[0]}",
+            input: "{agent[{in(loc1, in(loc2, {}))}], loc1[{}], loc2[{}]}",
             expected_output: None, // Complex chain
             should_normalize: false,
             min_rewrites: 1, // At least the first move
@@ -244,8 +257,8 @@ fn main() {
         // Nested mobility
         TestCase {
             name: "nested_mobility",
-            input: "{parent[{in(grandparent,0), child[0]}], grandparent[0]}",
-            expected_output: Some("grandparent[{0, parent[{0, child[0]}]}]"),
+            input: "{parent[{in(grandparent,{}), child[{}]}], grandparent[{}]}",
+            expected_output: Some("grandparent[{parent[{child[{}]}]}]"),
             should_normalize: true,
             min_rewrites: 1,
             description: "Parent with child moves together",
@@ -263,7 +276,7 @@ fn main() {
         
         TestCase {
             name: "open_after_entry",
-            input: "{agent[{in(container, 0)}], container[{open(agent, result)}]}",
+            input: "{agent[{in(container, {})}], container[{open(agent, result)}]}",
             expected_output: None, // Multi-step
             should_normalize: true,
             min_rewrites: 2, // Entry then open
@@ -273,8 +286,8 @@ fn main() {
         // Edge cases
         TestCase {
             name: "zero_in_context",
-            input: "{n[{in(m,p), 0}], m[r]}",
-            expected_output: Some("m[{n[{p, 0}], r}]"),
+            input: "{n[{in(m,p), {}}], m[r]}",
+            expected_output: Some("m[{n[{p, {}}], r}]"),
             should_normalize: true,
             min_rewrites: 1,
             description: "Zero explicitly in rest pattern",
@@ -306,6 +319,127 @@ fn main() {
             should_normalize: false,
             min_rewrites: 1,
             description: "Rewrite applies within parallel composition",
+        },
+        
+        // =====================================================================
+        // PHASE 4: Complex Equation + Rewrite Interaction Tests
+        // =====================================================================
+        
+        TestCase {
+            name: "equation_then_rewrite_extrusion_in",
+            input: "{n[{in(m,{})}], new(x,m[{}])}",
+            expected_output: Some("new(x, {m[{n[{}],{}}]})"),
+            should_normalize: true,
+            min_rewrites: 1,
+            description: "Extrusion equation allows in-capability rewrite: {n[{in(m,{})}], new(x,m[{}])} =eq= new(x,{n[{in(m,{})}], m[{}]}) =>rw new(x,{m[{n[{}],{}}]})",
+        },
+        
+        TestCase {
+            name: "equation_zero_then_rewrite",
+            input: "{n[{in(m,p)}], m[{}], {}}",
+            expected_output: Some("{m[{n[{p}]}]}"),
+            should_normalize: true,
+            min_rewrites: 1,
+            description: "Zero elimination via equation, then in-capability rewrite",
+        },
+        
+        TestCase {
+            name: "nested_extrusion_in",
+            input: "new(x, new(y, {p, in(n, q)}))",
+            expected_output: Some("new(x, new(y, {p, in(n, q)}))"), // Doesn't reduce, but equations apply
+            should_normalize: false,
+            min_rewrites: 0,
+            description: "Nested binders with capability - tests equation application",
+        },
+        
+        TestCase {
+            name: "extrusion_enables_out",
+            input: "{open(n, p), new(x, n[{out(m, q)}])}",
+            expected_output: None, // Complex multi-step
+            should_normalize: false,
+            min_rewrites: 1,
+            description: "Scope extrusion positions term for later open/out interaction",
+        },
+        
+        TestCase {
+            name: "parallel_with_extrusion",
+            input: "{new(x, {p, n[{in(m, q)}]}), m[r]}",
+            expected_output: Some("{new(x, {p, m[{n[{q}], r}]})}"), // Equation then rewrite
+            should_normalize: true,
+            min_rewrites: 1,
+            description: "Extrusion equation enables parallel in-capability: {new(x,{p,n[{in(m,q)}]}), m[r]} =eq= {p, n[{in(m, new(x,q))}], m[r]} =>rw {p, m[{n[{r, new(x,q)}]}]}",
+        },
+        
+        TestCase {
+            name: "zero_in_multiple_contexts",
+            input: "{{}, p, {{}, q}}",
+            expected_output: Some("{p, q}"),
+            should_normalize: true,
+            min_rewrites: 0, // Only equations
+            description: "Multiple zero eliminations through equations",
+        },
+        
+        TestCase {
+            name: "extrusion_amb_then_open",
+            input: "{open(n, p), new(x, {q, n[r]})}",
+            expected_output: None, // Multi-step
+            should_normalize: false,
+            min_rewrites: 1,
+            description: "Ambient extrusion equation positions for open rewrite",
+        },
+        
+        TestCase {
+            name: "complex_mobility_with_binding",
+            input: "new(x, {n[{in(m, x)}], m[{}]})",
+            expected_output: Some("new(x, {m[{n[{x}]}]})"),
+            should_normalize: true,
+            min_rewrites: 1,
+            description: "Bound variable in capability - tests freshness and rewrite",
+        },
+        
+        TestCase {
+            name: "sequential_extrusions",
+            input: "new(x, new(y, {p, in(n, q)}))",
+            expected_output: Some("new(x, new(y, {p, in(n, q)}))"), // Equations apply but no rewrites
+            should_normalize: false,
+            min_rewrites: 0,
+            description: "Multiple nested binders with capability",
+        },
+        
+        TestCase {
+            name: "zero_elimination_cascade",
+            input: "{{}, {}, {}, {}}",
+            expected_output: Some("{}"),
+            should_normalize: true,
+            min_rewrites: 0,
+            description: "Cascading zero elimination through equations",
+        },
+        
+        TestCase {
+            name: "extrusion_with_out_and_in",
+            input: "new(x, {n[{in(m, p), out(k, q)}], m[r]})",
+            expected_output: Some("new(x, {m[{n[{p, out(k, q)}], r}]})"),
+            should_normalize: true,
+            min_rewrites: 1,
+            description: "Extrusion doesn't interfere with mixed capabilities",
+        },
+        
+        TestCase {
+            name: "open_after_amb_extrusion",
+            input: "{open(n, p), new(x, {q, n[r]})}",
+            expected_output: None, // Requires equation then multiple rewrites
+            should_normalize: false,
+            min_rewrites: 1,
+            description: "Ambient extrusion followed by open: {open(n,p), new(x,{q,n[r]})} =eq= {open(n,p), q, n[new(x,r)]} =>rw {p, q, new(x,r)}",
+        },
+        
+        TestCase {
+            name: "in_with_zero_elimination",
+            input: "{n[{in(m, {p, {}})}], m[q]}",
+            expected_output: Some("{m[{n[{p}], q}]}"),
+            should_normalize: true,
+            min_rewrites: 1,
+            description: "Zero elimination in capability before mobility",
         },
     ];
     

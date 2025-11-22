@@ -982,9 +982,12 @@ fn generate_field_extraction(pattern: &ElementPatternInfo) -> (TokenStream, Toke
             // Find the body capture (should be at the same field index, non-binder)
             if let Some(body_capture) = captures_for_field.iter().find(|c| !c.is_binder) {
                 let body_name = format_ident!("cap_{}", body_capture.var_name.to_lowercase());
+                // For rewrite pattern matching, use unbind() to get fresh free variables
+                // This prevents bound variables from escaping their scope
                 capture_bindings.push(quote! {
-                    let #binder_name = (* #field_name).inner().unsafe_pattern.clone(),
-                    let #body_name = (* #field_name).inner().unsafe_body.as_ref().clone()
+                    let (binder_tmp, body_tmp) = (* #field_name).clone().unbind(),
+                    let #binder_name = binder_tmp,
+                    let #body_name = *body_tmp
                 });
             } else {
                 // Only binder, no body capture
@@ -1061,8 +1064,8 @@ fn generate_regular_congruence_projection(
         // Binding constructor: extract scope and access unsafe fields directly to preserve bound variables
         quote! {
             if let #elem_cat::#elem_constructor(ref scope) = elem,
-            let binder_var = scope.inner().unsafe_pattern.clone(),
-            let rewrite_field = scope.inner().unsafe_body.as_ref().clone()
+            let (binder_var, body_box) = scope.clone().unbind(),
+            let rewrite_field = *body_box
         }
     } else {
         // Non-binding constructor: directly extract the rewrite field

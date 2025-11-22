@@ -28,7 +28,7 @@ theory! {
     },
     
     equations {
-        (NQuote (PDrop N)) == N ;
+        // (NQuote (PDrop N)) == N ;
         (PPar {}) == PZero;
         // Flattening equations are no longer needed - automatic!
     },

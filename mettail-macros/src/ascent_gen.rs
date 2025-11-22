@@ -1,5 +1,6 @@
 use crate::ast::{TheoryDef, GrammarRule, Equation, Expr, RewriteRule};
 use crate::utils::{print_rule};
+use crate::rewrite_gen::generate_ascent_pattern;
 use proc_macro2::TokenStream;
 use quote::{quote, format_ident};
 use syn::Ident;
@@ -469,13 +470,20 @@ fn generate_binding_deconstruction(
             let field_name = format_ident!("field_{}", idx);
             subterm_facts.push(quote! { #cat_lower(#field_name.as_ref().clone()) });
         }
-        subterm_facts.push(quote! { #body_cat_lower(body.as_ref().clone()) });
         
+        // NOTE: We do NOT add the binder to its category relation here.
+        // The binder is a Binder<String> which is not convertible to the category type.
+        // Binders only exist inside Scope and are not standalone category values.
+        
+        // The body from unsafe_body is T (not Box<T>), so we just clone it directly
+        subterm_facts.push(quote! { #body_cat_lower(body.clone()) });
+        
+        // IMPORTANT: Access unsafe_body directly instead of unbind() to avoid fresh IDs
         Some(quote! {
             #(#subterm_facts),* <--
                 #cat_lower(t),
                 if let #category::#label(#(#field_names),*) = t,
-                let (binder, body) = scope_field.clone().unbind();
+                let body = (* scope_field.inner().unsafe_body).clone();
         })
     }
 }
@@ -603,9 +611,13 @@ fn generate_equation_rules(theory: &TheoryDef) -> TokenStream {
     
     // Generate clauses for each equation declaration
     // These add the BASE equalities specified by the theory
-    for equation in &theory.equations {
+    for (idx, equation) in theory.equations.iter().enumerate() {
+        eprintln!("\nEquation {}: {:?} == {:?}", idx, equation.left, equation.right);
         if let Some(rule) = generate_equation_clause(equation, theory) {
+            eprintln!("  ✅ Generated successfully");
             rules.push(rule);
+        } else {
+            eprintln!("  ❌ Failed to generate (returned None)");
         }
     }
     
@@ -845,7 +857,7 @@ fn generate_collection_congruence(
                 let mut bag = rest;
                 #category::#insert_helper(&mut bag, elem_rewritten.clone());
                 bag
-            });
+            }).normalize();
     })
 }
 
@@ -1158,7 +1170,202 @@ fn generate_binding_congruence_clause(
                 binder_var.clone(), 
                 Box::new(body_rewritten.clone())
             ),
-            let result = #parent_cat::#constructor(scope_tmp);
+            let result = #parent_cat::#constructor(scope_tmp).normalize();
+    }
+}
+
+/// Adapter function: Use rewrite rule pattern matching for equations
+/// Converts between equation-style bindings and rewrite-style bindings
+/// This allows equations to leverage the full power of rewrite pattern matching
+fn generate_equation_pattern_via_rewrite_logic(
+    expr: &Expr,
+    term_name: &str,
+    bindings: &mut HashMap<String, Ident>,
+    theory: &TheoryDef,
+) -> Option<Vec<TokenStream>> {
+    // Setup for rewrite pattern matching
+    let mut rewrite_bindings: HashMap<String, TokenStream> = HashMap::new();
+    let mut variable_categories: HashMap<String, Ident> = HashMap::new();
+    let mut clauses: Vec<TokenStream> = Vec::new();
+    let duplicate_vars: HashSet<String> = HashSet::new(); // No duplicates in single-occurrence equations
+    let mut equational_checks: Vec<TokenStream> = Vec::new();
+    
+    // Call rewrite pattern logic
+    let term_ident = format_ident!("{}", term_name);
+    let expected_category = extract_category_from_expr(expr, theory)?;
+    
+    generate_ascent_pattern(
+        expr,
+        &term_ident,
+        &expected_category,
+        theory,
+        &mut rewrite_bindings,
+        &mut variable_categories,
+        &mut clauses,
+        &duplicate_vars,
+        &mut equational_checks,
+    );
+    
+    // Convert bindings to equation format
+    // Rewrite bindings are TokenStream like `term.clone()` or `(*field).clone()`
+    // For equations, we need explicit `let var = ...` bindings after pattern matching
+    // so the RHS can reference simple variable names
+    let mut explicit_bindings = Vec::new();
+    
+    for (var_name, binding_expr) in &rewrite_bindings {
+        // Skip internal binder variable names (binder_0, binder_1, etc.)
+        // These are implementation details, not user-facing variables
+        if var_name.starts_with("binder_") {
+            continue;
+        }
+        
+        let var_snake = to_snake_case(var_name);
+        let var_ident = format_ident!("{}", var_snake);
+        
+        // Check if this is a binder variable binding (e.g., x -> binder_1)
+        // Binder bindings are just identifiers, not expressions with .clone()
+        let binding_str = binding_expr.to_string();
+        let is_binder_binding = binding_str.starts_with("binder_") && 
+                                !binding_str.contains('.') && 
+                                !binding_str.contains('(') &&
+                                binding_str.trim() == binding_str; // No whitespace, just the identifier
+        
+        if is_binder_binding {
+            // For binder variables like `x -> binder_1`, we DO need the explicit binding
+            // `let x = binder_1.clone()` so the user variable name is available
+            // We need to clone because Binder doesn't implement Copy
+            let binder_ident_str = binding_str.trim();
+            let binder_ident = format_ident!("{}", binder_ident_str);
+            explicit_bindings.push(quote! {
+                let #var_ident = #binder_ident.clone()
+            });
+        } else {
+            // Regular variable binding with .clone()
+            explicit_bindings.push(quote! {
+                let #var_ident = #binding_expr
+            });
+        }
+        bindings.insert(var_name.clone(), var_ident);
+    }
+    
+    // Also add variables from variable_categories
+    for (var_name, _category) in &variable_categories {
+        if !bindings.contains_key(var_name) {
+            let var_snake = to_snake_case(var_name);
+            let var_ident = format_ident!("{}", var_snake);
+            bindings.insert(var_name.clone(), var_ident);
+        }
+    }
+    
+    // Combine pattern matching clauses with explicit bindings
+    let mut all_clauses = clauses;
+    all_clauses.extend(explicit_bindings);
+    
+    Some(all_clauses)
+}
+
+/// Generate RHS for equations where variables are already bound as T (not &Box<T>)
+/// This is simpler than generate_equation_rhs which assumes Apply pattern matching
+fn generate_equation_rhs_simple(expr: &Expr, bindings: &HashMap<String, Ident>, theory: &TheoryDef) -> TokenStream {
+    match expr {
+        Expr::Var(var) => {
+            // Check if this is a constructor or a variable
+            if is_constructor(var, theory) {
+                // It's a nullary constructor
+                let constructor_category = theory.terms.iter()
+                    .find(|r| r.label == *var)
+                    .map(|r| &r.category)
+                    .expect("Constructor not found in theory");
+                quote! { #constructor_category::#var }
+            } else {
+                // It's a variable - already bound as plain T
+                let var_name = var.to_string();
+                if let Some(var_ident) = bindings.get(&var_name) {
+                    quote! { #var_ident.clone() }
+                } else {
+                    panic!("Variable {} not found in bindings", var_name);
+                }
+            }
+        }
+        Expr::Apply { constructor, args } => {
+            let grammar_rule = theory.terms.iter()
+                .find(|r| r.label == *constructor)
+                .expect("Constructor not found in theory");
+            let category = &grammar_rule.category;
+            
+            // Special case: Apply(Constructor, [CollectionPattern{constructor: None}])
+            // This means the collection should have the Apply's constructor
+            if args.len() == 1 {
+                if let Expr::CollectionPattern { constructor: None, elements, rest } = &args[0] {
+                    // Treat as CollectionPattern{constructor: Some(constructor)}
+                    let normalized = Expr::CollectionPattern {
+                        constructor: Some(constructor.clone()),
+                        elements: elements.clone(),
+                        rest: rest.clone(),
+                    };
+                    return generate_equation_rhs_simple(&normalized, bindings, theory);
+                }
+            }
+            
+            // Check if this constructor has binders
+            if !grammar_rule.bindings.is_empty() {
+                // This is a binding constructor like PNew
+                // Args should be: [binder_var, body_expr]
+                // We need to construct a Scope
+                if args.len() >= 2 {
+                    let binder_expr = generate_equation_rhs_simple(&args[0], bindings, theory);
+                    let body_expr = generate_equation_rhs_simple(&args[1], bindings, theory);
+                    
+                    return quote! {
+                        #category::#constructor(mettail_runtime::Scope::from_parts_unsafe(#binder_expr, Box::new(#body_expr)))
+                    };
+                } else {
+                    panic!("Binding constructor {} requires at least 2 arguments", constructor);
+                }
+            }
+            
+            let arg_tokens: Vec<_> = args.iter()
+                .map(|arg| {
+                    let inner = generate_equation_rhs_simple(arg, bindings, theory);
+                    quote! { Box::new(#inner) }
+                })
+                .collect();
+            
+            quote! {
+                #category::#constructor(#(#arg_tokens),*)
+            }
+        }
+        Expr::CollectionPattern { constructor, elements, rest } => {
+            // Reconstruct collection
+            let elem_inserts: Vec<_> = elements.iter()
+                .map(|elem| {
+                    let elem_expr = generate_equation_rhs_simple(elem, bindings, theory);
+                    quote! {
+                        bag.insert(#elem_expr);
+                    }
+                })
+                .collect();
+            
+            if let Some(cons) = constructor {
+                let category = theory.terms.iter()
+                    .find(|r| r.label == *cons)
+                    .map(|r| &r.category)
+                    .expect("Constructor category not found");
+                
+                quote! {
+                    #category::#cons({
+                        let mut bag = mettail_runtime::HashBag::new();
+                        #(#elem_inserts)*
+                        bag
+                    })
+                }
+            } else {
+                panic!("Collection pattern without constructor in RHS: Elements={:?}", elements.iter().map(|e| format!("{:?}", e)).collect::<Vec<_>>());
+            }
+        }
+        Expr::Subst { .. } => {
+            panic!("Substitution expressions are not supported in equation RHS");
+        }
     }
 }
 
@@ -1175,20 +1382,19 @@ fn generate_equation_clause(equation: &Equation, theory: &TheoryDef) -> Option<T
     let cat_lower = format_ident!("{}", category.to_string().to_lowercase());
     let eq_rel = format_ident!("eq_{}", category.to_string().to_lowercase());
     
-    // Generate pattern matching for LHS
+    // Generate pattern matching for LHS using rewrite rule logic!
     let mut bindings: HashMap<String, Ident> = HashMap::new();
-    let mut nested_patterns = Vec::new();
-    let lhs_pattern = generate_equation_pattern(&normalized_left, "p0", &mut bindings, theory, &mut nested_patterns)?;
+    let lhs_clauses = generate_equation_pattern_via_rewrite_logic(
+        &normalized_left,
+        "p0",
+        &mut bindings,
+        theory,
+    )?;
     
     // Generate RHS construction  
-    // For collection patterns, variables are bound as T, not &Box<T>
-    // So we need to use a modified RHS generator
-    let is_collection_lhs = matches!(normalized_left, Expr::CollectionPattern { .. });
-    let rhs_construction = if is_collection_lhs {
-        generate_collection_equation_rhs(&equation.right, &bindings, theory)
-    } else {
-        generate_equation_rhs(&equation.right, &bindings, theory, false)
-    };
+    // Variables from our explicit bindings are already T, not &Box<T>
+    // So we use a simpler RHS generator
+    let rhs_construction = generate_equation_rhs_simple(&equation.right, &bindings, theory);
     
     // Generate freshness checks if any
     let freshness_checks = generate_equation_freshness(&equation.conditions, &bindings);
@@ -1196,10 +1402,9 @@ fn generate_equation_clause(equation: &Equation, theory: &TheoryDef) -> Option<T
     Some(quote! {
         #eq_rel(p0, p1) <--
             #cat_lower(p0),
-            #lhs_pattern
-            #(#nested_patterns)*
-            #freshness_checks
-            let p1 = #rhs_construction;
+            #(#lhs_clauses,)*
+            #(#freshness_checks,)*
+            let p1 = (#rhs_construction).normalize();
     })
 }
 
@@ -1302,209 +1507,6 @@ fn to_snake_case(name: &str) -> String {
     }
     
     result
-}
-
-/// Returns the "if let" pattern match
-fn generate_equation_pattern(
-    expr: &Expr,
-    term_name: &str,
-    bindings: &mut HashMap<String, Ident>,
-    theory: &TheoryDef,
-    nested_patterns: &mut Vec<TokenStream>,
-) -> Option<TokenStream> {
-    match expr {
-        Expr::Var(var) => {
-            // Check if this is actually a constructor (nullary or otherwise)
-            if is_constructor(var, theory) {
-                // This is a constructor, not a variable - shouldn't happen at top level
-                None
-            } else {
-                // Just bind the variable
-                let var_name = var.to_string();
-                // Convert to snake_case for Rust naming conventions
-                let var_snake = to_snake_case(&var_name);
-                let var_ident = format_ident!("{}", var_snake);
-                bindings.insert(var_name, var_ident.clone());
-                None // No pattern match needed, just use the term directly
-            }
-        }
-        Expr::Apply { constructor, args } => {
-            // Generate if let Constructor(field_0, field_1, ...) = term_name
-            let term_ident = format_ident!("{}", term_name);
-            
-            // Look up the category in the theory
-            let category = extract_category_from_expr(expr, theory)?;
-            
-            let mut field_patterns = Vec::new();
-            for (i, arg) in args.iter().enumerate() {
-                match arg {
-                    Expr::Var(var) => {
-                        // Check if this is actually a constructor
-                        if is_constructor(var, theory) {
-                            // It's a constructor
-                            if is_nullary_constructor(var, theory) {
-                                // Nullary constructor - bind to temp and match
-                                let field_ident = format_ident!("field_{}", i);
-                                field_patterns.push(quote! { #field_ident });
-                                
-                                // Get the constructor's category
-                                let constructor_category = theory.terms.iter()
-                                    .find(|r| r.label == *var)
-                                    .map(|r| &r.category)?;
-                                
-                                // Generate nested pattern: if let Cat::Constructor = *field_i.as_ref()
-                                // Note: field_i is &Box<T>, as_ref() gives &T, then * dereferences to T
-                                nested_patterns.push(quote! {
-                                    if let #constructor_category::#var = *#field_ident.as_ref(),
-                                });
-                            } else {
-                                // Non-nullary constructor - bind to temp and match (shouldn't happen for Var)
-                                let field_ident = format_ident!("field_{}", i);
-                                field_patterns.push(quote! { #field_ident });
-                                
-                                // Get the constructor's category
-                                let constructor_category = theory.terms.iter()
-                                    .find(|r| r.label == *var)
-                                    .map(|r| &r.category)?;
-                                
-                                // Generate nested pattern: if let Cat::Constructor(...) = field_i.as_ref()
-                                nested_patterns.push(quote! {
-                                    if let #constructor_category::#var = #field_ident.as_ref(),
-                                });
-                            }
-                        } else {
-                            // It's a real variable
-                            let var_name = var.to_string();
-                            // Convert to snake_case for Rust naming conventions
-                            let var_snake = to_snake_case(&var_name);
-                            let var_ident = format_ident!("{}", var_snake);
-                            bindings.insert(var_name, var_ident.clone());
-                            field_patterns.push(quote! { #var_ident });
-                        }
-                    }
-                    Expr::Apply { constructor: nested_constructor, args: nested_args } => {
-                        // Nested pattern - bind to a temp variable and generate a nested if-let
-                        let field_ident = format_ident!("field_{}", i);
-                        field_patterns.push(quote! { #field_ident });
-                        
-                        // Generate nested pattern match: if let Cat::Constructor(p, q) = &**field_i
-                        let nested_category = extract_category_from_expr(arg, theory)?;
-                        let mut nested_field_patterns = Vec::new();
-                        
-                        for nested_arg in nested_args {
-                            match nested_arg {
-                                Expr::Var(var) => {
-                                    // Check if it's a constructor
-                                    if is_constructor(var, theory) {
-                                        // Nested nullary constructor - we'd need another level
-                                        // For now, skip deeply nested constructors
-                                        return None;
-                                    } else {
-                                        let var_name = var.to_string();
-                                        // Convert to snake_case for Rust naming conventions
-                                        let var_snake = to_snake_case(&var_name);
-                                        let var_ident = format_ident!("{}", var_snake);
-                                        bindings.insert(var_name, var_ident.clone());
-                                        nested_field_patterns.push(var_ident);
-                                    }
-                                }
-                                _ => {
-                                    // Deeply nested patterns - TODO: handle recursively
-                                    return None;
-                                }
-                            }
-                        }
-                        
-                        nested_patterns.push(quote! {
-                            if let #nested_category::#nested_constructor(#(#nested_field_patterns),*) = #field_ident.as_ref(),
-                        });
-                    }
-                    Expr::Subst { .. } => {
-                        // Substitution in LHS pattern - shouldn't happen
-                        return None;
-                    }
-                    Expr::CollectionPattern { .. } => {
-                        // Collection pattern in nested position - not yet supported
-                        return None;
-                    }
-                }
-            }
-            
-            Some(quote! {
-                if let #category::#constructor(#(#field_patterns),*) = #term_ident,
-            })
-        }
-        Expr::Subst { .. } => {
-            // Substitution shouldn't appear in equation LHS
-            None
-        }
-        Expr::CollectionPattern { constructor, elements, rest } => {
-            // Collection pattern: PPar {P, Q, ...rest}
-            // Generate pattern matching for collection
-            
-            if rest.is_some() {
-                // Rest patterns in equations are complex - skip for now
-                // TODO: Implement rest pattern support for equations
-                return None;
-            }
-            
-            let constructor = constructor.as_ref()?;
-            let category = extract_category_from_expr(expr, theory)?;
-            let term_ident = format_ident!("{}", term_name);
-            
-            // Generate pattern: if let Cat::Constructor(ref bag) = term
-            // Then use loop-based matching for order independence
-            let bag_var = format_ident!("bag");
-            let size_check = elements.len();
-            
-            // Generate loop-based matching for each element
-            let mut extract_clauses = Vec::new();
-            let mut elem_vars = Vec::new();
-            
-            for (elem_idx, elem) in elements.iter().enumerate() {
-                match elem {
-                    Expr::Var(var) if !is_constructor(var, theory) => {
-                        let var_name = var.to_string();
-                        let var_snake = to_snake_case(&var_name);
-                        let var_ident = format_ident!("{}", var_snake);
-                        let elem_var = format_ident!("elem_{}", elem_idx);
-                        let count_var = format_ident!("_count_bag_{}", elem_idx);
-                        
-                        elem_vars.push(elem_var.clone());
-                        
-                        // Generate: for (elem_var, _count_bag_N) in bag.iter()
-                        extract_clauses.push(quote! {
-                            for (#elem_var, #count_var) in #bag_var.iter(),
-                        });
-                        
-                        // Add distinctness checks
-                        for prev_elem_var in &elem_vars[..elem_idx] {
-                            extract_clauses.push(quote! {
-                                if &#elem_var != &#prev_elem_var,
-                            });
-                        }
-                        
-                        // Bind the variable
-                        extract_clauses.push(quote! {
-                            let #var_ident = #elem_var.clone(),
-                        });
-                        
-                        bindings.insert(var_name, var_ident.clone());
-                    }
-                    _ => {
-                        // Complex pattern - not supported yet
-                        return None;
-                    }
-                }
-            }
-            
-            Some(quote! {
-                if let #category::#constructor(ref #bag_var) = #term_ident,
-                if #bag_var.len() == #size_check,
-                #(#extract_clauses)*
-            })
-        }
-    }
 }
 
 /// Generate RHS construction code for collection pattern equations
@@ -1668,11 +1670,29 @@ fn generate_equation_rhs(expr: &Expr, bindings: &HashMap<String, Ident>, theory:
 
 /// Generate freshness checks for equation
 fn generate_equation_freshness(
-    _conditions: &[crate::ast::FreshnessCondition],
-    _bindings: &HashMap<String, Ident>,
-) -> TokenStream {
-    // TODO: Implement freshness checks
-    quote! {}
+    conditions: &[crate::ast::FreshnessCondition],
+    bindings: &HashMap<String, Ident>,
+) -> Vec<TokenStream> {
+    let mut checks = Vec::new();
+    
+    for condition in conditions {
+        let var_name = condition.var.to_string();
+        let term_name = condition.term.to_string();
+        
+        // Find the bound identifiers for both the binder variable and the term
+        let var_ident = bindings.get(&var_name)
+            .unwrap_or_else(|| panic!("Freshness variable '{}' not found in bindings", var_name));
+        let term_ident = bindings.get(&term_name)
+            .unwrap_or_else(|| panic!("Freshness term '{}' not found in bindings", term_name));
+        
+        // Generate: if is_fresh(var, term)
+        // The is_fresh function checks if the binder is not free in the term
+        checks.push(quote! {
+            if is_fresh(&#var_ident, &#term_ident)
+        });
+    }
+    
+    checks
 }
 
 //=============================================================================
@@ -1891,7 +1911,7 @@ fn generate_joined_base_rewrite_clause(
                 let mut bag_result = remaining;
                 #parent_cat::#insert_helper(&mut bag_result, rhs_term);
                 bag_result
-            });
+            }).normalize();
     }
 }
 
@@ -2021,7 +2041,7 @@ fn generate_regular_congruence_clause(
                 let mut bag = remaining;
                 #parent_cat::#insert_helper(&mut bag, rewritten);
                 bag
-            });
+            }).normalize();
     }
 }
 

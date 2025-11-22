@@ -109,11 +109,23 @@
 
 ### 3. Equations
 
+**🚨 CRITICAL: Equations are NOT being generated!** (Discovered Nov 19, 2025)
+
+All 6 ambient equations fail to generate due to limitations in `generate_equation_pattern`:
+- Bare variable LHS (Equation 0): Can't pattern match on `P`
+- Complex patterns in collections (Equations 1-6): Only simple variables supported
+
+**Current Status**: 0/6 equations implemented
+**Impact**: Semantic incorrectness - equivalences not enforced
+**See**: [EQUATION-IMPLEMENTATION-PLAN.md](EQUATION-IMPLEMENTATION-PLAN.md)
+
 #### 3.1 Zero Identity
 - [ ] `{P}` normalizes to `P`
 - [ ] `{P, 0}` normalizes to `P`
 - [ ] `{P, 0, 0}` normalizes to `P`
 - [ ] Zero in nested contexts
+
+**Blocker**: Equation not generated (bare variable LHS)
 
 #### 3.2 New Extrusion
 - [ ] Basic extrusion (collection)
@@ -123,6 +135,8 @@
 - [ ] Extrusion with ambient
 - [ ] Multiple extrusions
 - [ ] Extrusion blockage (when name is free)
+
+**Blocker**: Equations not generated (complex patterns in collections)
 
 ### 4. Complex Interactions
 

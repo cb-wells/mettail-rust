@@ -7,6 +7,7 @@ use std::collections::HashMap;
 pub fn generate_ast(theory: &TheoryDef) -> TokenStream {
     let ast_enums = generate_ast_enums(theory);
     let flatten_helpers = generate_flatten_helpers(theory);
+    let normalize_impl = generate_normalize_functions(theory);
     let subst_impl = subst_gen::generate_substitution(theory);
     let display_impl = display_gen::generate_display(theory);
     let generation_impl = termgen_gen::generate_term_generation(theory);
@@ -21,6 +22,8 @@ pub fn generate_ast(theory: &TheoryDef) -> TokenStream {
         #ast_enums
         
         #flatten_helpers
+        
+        #normalize_impl
         
         #subst_impl
         
@@ -314,6 +317,178 @@ fn generate_flatten_helpers(theory: &TheoryDef) -> TokenStream {
             }
         })
     }).collect();
+    
+    quote! {
+        #(#impls)*
+    }
+}
+
+/// Generate normalize functions that recursively flatten nested collections
+fn generate_normalize_functions(theory: &TheoryDef) -> TokenStream {
+    use quote::format_ident;
+    
+    let mut impls = Vec::new();
+    
+    for export in &theory.exports {
+        let category = &export.name;
+        
+        // Find all rules for this category
+        let rules_for_category: Vec<_> = theory.terms.iter()
+            .filter(|rule| rule.category == *category)
+            .collect();
+        
+        // Find collection constructors
+        let has_collections = rules_for_category.iter().any(|rule| {
+            rule.items.iter().any(|item| matches!(item, GrammarItem::Collection { .. }))
+        });
+        
+        // Only generate normalize if this category has collections
+        if !has_collections {
+            continue;
+        }
+        
+        // Generate match arms for each constructor
+        let match_arms: Vec<TokenStream> = rules_for_category.iter().filter_map(|rule| {
+            let label = &rule.label;
+            
+            // Check if this is a collection constructor
+            let is_collection = rule.items.iter().any(|item| matches!(item, GrammarItem::Collection { .. }));
+            
+            if is_collection {
+                // For collection constructors, rebuild using the flattening helper
+                let helper_name = format_ident!("insert_into_{}", label.to_string().to_lowercase());
+                
+                Some(quote! {
+                    #category::#label(bag) => {
+                        // Rebuild the bag using the flattening insert helper
+                        let mut new_bag = mettail_runtime::HashBag::new();
+                        for (elem, count) in bag.iter() {
+                            for _ in 0..count {
+                                // Recursively normalize the element before inserting
+                                let normalized_elem = elem.normalize();
+                                Self::#helper_name(&mut new_bag, normalized_elem);
+                            }
+                        }
+                        #category::#label(new_bag)
+                    }
+                })
+            } else if rule.bindings.is_empty() {
+                // For non-collection, non-binder constructors
+                // Get fields (excluding Terminals)
+                let fields: Vec<_> = rule.items.iter()
+                    .filter(|item| {
+                        matches!(item, GrammarItem::NonTerminal(_) | GrammarItem::Collection { .. })
+                    })
+                    .collect();
+                
+                if fields.is_empty() {
+                    // Nullary - no changes needed
+                    Some(quote! {
+                        #category::#label => self.clone()
+                    })
+                } else if fields.len() == 1 {
+                    // Single field constructor
+                    match fields[0] {
+                        GrammarItem::NonTerminal(field_cat) if field_cat == category => {
+                            // Recursive case - normalize the field
+                            Some(quote! {
+                                #category::#label(f0) => {
+                                    #category::#label(Box::new(f0.as_ref().normalize()))
+                                }
+                            })
+                        }
+                        GrammarItem::NonTerminal(field_cat) if field_cat.to_string() == "Var" => {
+                            // Var field - just clone (no Box)
+                            Some(quote! {
+                                #category::#label(v) => {
+                                    #category::#label(v.clone())
+                                }
+                            })
+                        }
+                        _ => {
+                            // Different category or unsupported - just clone
+                            Some(quote! {
+                                #category::#label(f0) => {
+                                    #category::#label(f0.clone())
+                                }
+                            })
+                        }
+                    }
+                } else {
+                    // Multiple fields - skip for now (too complex)
+                    None
+                }
+            } else {
+                // Binder constructor
+                // Count total AST fields (non-terminal, non-binder)
+                let (_binder_idx, body_indices) = &rule.bindings[0];
+                let body_idx = body_indices[0];
+                
+                let mut field_names = Vec::new();
+                let mut scope_field_idx = None;
+                for (i, item) in rule.items.iter().enumerate() {
+                    if i == *_binder_idx {
+                        continue; // Skip binder
+                    }
+                    match item {
+                        GrammarItem::NonTerminal(_) => {
+                            if i == body_idx {
+                                scope_field_idx = Some(field_names.len());
+                                field_names.push(format_ident!("scope"));
+                            } else {
+                                field_names.push(format_ident!("f{}", field_names.len()));
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                
+                let scope_idx = scope_field_idx.expect("Should have scope");
+                
+                // Generate field reconstruction
+                let reconstructed_fields: Vec<_> = field_names.iter().enumerate().map(|(i, name)| {
+                    if i == scope_idx {
+                        quote! {
+                            mettail_runtime::Scope::from_parts_unsafe(
+                                #name.inner().unsafe_pattern.clone(),
+                                Box::new(#name.inner().unsafe_body.as_ref().normalize())
+                            )
+                        }
+                    } else {
+                        quote! { #name.clone() }
+                    }
+                }).collect();
+                
+                Some(quote! {
+                    #category::#label(#(#field_names),*) => {
+                        #category::#label(#(#reconstructed_fields),*)
+                    }
+                })
+            }
+        }).collect();
+        
+        // Add a fallback for any unhandled patterns
+        let fallback = quote! {
+            _ => self.clone()
+        };
+        
+        let impl_block = quote! {
+            impl #category {
+                /// Recursively normalize this term by flattening any nested collections.
+                ///
+                /// For example, `PPar({PPar({a, b}), c})` becomes `PPar({a, b, c})`.
+                /// This ensures that collection constructors are always in canonical flat form.
+                pub fn normalize(&self) -> Self {
+                    match self {
+                        #(#match_arms,)*
+                        #fallback
+                    }
+                }
+            }
+        };
+        
+        impls.push(impl_block);
+    }
     
     quote! {
         #(#impls)*

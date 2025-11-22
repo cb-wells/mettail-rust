@@ -19,6 +19,10 @@ path = "ambient_tests.rs"
 name = "congruence_tests"
 path = "congruence_tests.rs"
 
+[[bin]]
+name = "equation_tests"
+path = "equation_tests.rs"
+
 [dependencies]
 mettail-macros = { path = "../mettail-macros" }
 mettail-runtime = { path = "../mettail-runtime" }

@@ -205,6 +205,7 @@ fn generate_binder_display_arm(rule: &GrammarRule) -> TokenStream {
     
     quote! {
         #category::#label(#(#field_idents),*) => {
+            // Use unbind() to get fresh variables with proper names for display
             let (binder, body) = scope.clone().unbind();
             let binder_name = binder.0.pretty_name.as_ref().map(|s| s.as_str()).unwrap_or("_");
             write!(f, #format_str, #(#regular_field_idents,)* binder_name, body)

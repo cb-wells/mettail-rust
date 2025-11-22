@@ -358,8 +358,9 @@ fn generate_scope_substitution_arm(category: &Ident, rule: &GrammarRule, replace
         
         quote! {
             #category::#label(#(#field_bindings),*) => {
-                // Unbind to check if this scope shadows the variable
-                let (binder, body) = scope.clone().unbind();
+                // Use unsafe_pattern and unsafe_body to avoid generating fresh IDs for comparison
+                let binder = &scope.inner().unsafe_pattern;
+                let body = &scope.inner().unsafe_body;
                 
                 // Check if the binder shadows our variable
                 if binder.0 == *var {
@@ -368,8 +369,9 @@ fn generate_scope_substitution_arm(category: &Ident, rule: &GrammarRule, replace
                     self.clone()
                 } else {
                     // The scope doesn't shadow our variable - substitute in the body
-                    let subst_body = body.#subst_method(var, replacement);
-                    let new_scope = mettail_runtime::Scope::new(binder, Box::new(subst_body));
+                    let subst_body = (**body).#subst_method(var, replacement);
+                    // Use Scope::new to properly handle variable binding (capture-avoiding)
+                    let new_scope = mettail_runtime::Scope::new(binder.clone(), Box::new(subst_body));
                     
                     // Reconstruct with updated scope and cloned other fields
                     #category::#label(#(#field_reconstructions),*)

@@ -133,7 +133,7 @@ fn generate_rewrite_clause(rule: &RewriteRule, theory: &TheoryDef) -> TokenStrea
     
     // Generate RHS
     let rhs = generate_ascent_rhs(&rule.right, &bindings, theory);
-    clauses.push(quote! { let t = #rhs });
+    clauses.push(quote! { let t = (#rhs).normalize() });
     
     quote! {
         #rw_rel(s, t) <--
@@ -194,28 +194,51 @@ pub fn generate_ascent_pattern(
     match expr {
         Expr::Var(var) => {
             let var_name = var.to_string();
-            let binding = quote! { #term_name.clone() };
             
-            // Check if this is a duplicate variable
-            if duplicate_vars.contains(&var_name) {
-                // Check if we've seen this variable before
-                if let Some(first_binding) = bindings.get(&var_name) {
-                    // Duplicate occurrence - use the stored category
-                    let category = variable_categories.get(&var_name)
-                        .expect(&format!("Variable {} should have been tracked", var_name));
-                    let eq_rel = quote::format_ident!("eq_{}", category.to_string().to_lowercase());
-                    
-                    equational_checks.push(quote! {
-                        #eq_rel(#first_binding, #binding)
-                    });
-                } else {
-                    // First occurrence of duplicate variable - bind it and track its category
-                    bindings.insert(var_name.clone(), binding);
-                    variable_categories.insert(var_name, expected_category.clone());
-                }
+            // Check if this is actually a nullary constructor (like PZero)
+            // Nullary constructors have no semantic fields (NonTerminal, Binder, Collection)
+            // They may have Terminal items for syntax (like "0")
+            let is_nullary_constructor = theory.terms.iter().any(|rule| {
+                use crate::ast::GrammarItem;
+                let matches_name = rule.label.to_string() == var_name;
+                let matches_category = rule.category == *expected_category;
+                let has_no_semantic_fields = rule.items.iter().all(|item| {
+                    matches!(item, GrammarItem::Terminal(_))
+                });
+                matches_name && matches_category && has_no_semantic_fields
+            });
+            
+            if is_nullary_constructor {
+                // Match the constructor exactly
+                let constructor_ident = var;
+                clauses.push(quote! {
+                    if let #expected_category::#constructor_ident = #term_name
+                });
             } else {
-                // Single occurrence - just bind (no need to track category)
-                bindings.insert(var_name, binding);
+                // It's a pattern variable
+                let binding = quote! { #term_name.clone() };
+                
+                // Check if this is a duplicate variable
+                if duplicate_vars.contains(&var_name) {
+                    // Check if we've seen this variable before
+                    if let Some(first_binding) = bindings.get(&var_name) {
+                        // Duplicate occurrence - use the stored category
+                        let category = variable_categories.get(&var_name)
+                            .expect(&format!("Variable {} should have been tracked", var_name));
+                        let eq_rel = quote::format_ident!("eq_{}", category.to_string().to_lowercase());
+                        
+                        equational_checks.push(quote! {
+                            #eq_rel(#first_binding, #binding)
+                        });
+                    } else {
+                        // First occurrence of duplicate variable - bind it and track its category
+                        bindings.insert(var_name.clone(), binding);
+                        variable_categories.insert(var_name, expected_category.clone());
+                    }
+                } else {
+                    // Single occurrence - just bind (no need to track category)
+                    bindings.insert(var_name, binding);
+                }
             }
         }
         
@@ -642,12 +665,16 @@ fn generate_ascent_binder_pattern(
     let scope_field_idx = grammar_idx_to_field[*binder_idx].expect("Binder should have field index");
     let scope_field = &field_names[scope_field_idx];
     
-    // Unbind the scope
+    // Access scope without unbinding to preserve variable IDs
+    // This is critical for equations where we need structural equality
     let binder_var = quote::format_ident!("binder_{}", bindings.len());
     let body_var = quote::format_ident!("body_{}", bindings.len());
     
     clauses.push(quote! {
-        let (#binder_var, #body_var) = #scope_field.clone().unbind()
+        let #binder_var = #scope_field.inner().unsafe_pattern.clone()
+    });
+    clauses.push(quote! {
+        let #body_var = #scope_field.inner().unsafe_body.as_ref().clone()
     });
     
     // Bind the binder variable name if present in args
@@ -675,16 +702,11 @@ fn generate_ascent_binder_pattern(
                 _ => panic!("Body should be NonTerminal"),
             };
             
-            // For body variables, create a dereferenced binding
-            // body_0 is Box<Proc>, so we want to access *body_0
-            let body_deref = quote::format_ident!("{}_deref", body_var);
-            clauses.push(quote! {
-                let #body_deref = body_0.as_ref()
-            });
-            
+            // Body is already the inner value (not Box) due to unsafe_body access
+            // So we can use it directly
             generate_ascent_pattern(
                 arg,
-                &body_deref,
+                &body_var,
                 &body_category,
                 theory,
                 bindings,

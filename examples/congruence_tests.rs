@@ -3,7 +3,7 @@ use lalrpop_util::lalrpop_mod;
 use ascent_byods_rels::*;
 use ascent::*;
 
-// Re-use the language specification from ambient.rs
+// the language specification
 theory! {
     name: Ambient,
     exports {
@@ -26,14 +26,16 @@ theory! {
         NVar . Name ::= Var ;
     },
     equations {
-        P == (PPar {P, PZero});
+        (PPar {P, PZero}) == P;
         if x # C then (PPar {P, (PNew x C)}) == (PNew x (PPar {P, C}));
-        if x # N then (PNew x {P, (PIn N P)}) == {P, (PIn N (PNew x P))};
-        if x # N then (PNew x {P, (POut N P)}) == {P, (POut N (PNew x P))};
-        if x # N then (PNew x {P, (POpen N P)}) == {P, (POpen N (PNew x P))};
-        if x # N then (PNew x {P, (PAmb N P)}) == {P, (PAmb N (PNew x P))};
+        if x # N then (PNew x (PPar {P, (PIn N P)})) == (PPar {P, (PIn N (PNew x P))});
+        if x # N then (PNew x (PPar {P, (POut N P)})) == (PPar {P, (POut N (PNew x P))});
+        if x # N then (PNew x (PPar {P, (POpen N P)})) == (PPar {P, (POpen N (PNew x P))});
+        if x # N then (PNew x (PPar {P, (PAmb N P)})) == (PPar {P, (PAmb N (PNew x P))});
+        // (PNew x (PNew y P)) == (PNew y (PNew x P));
     },
     rewrites {
+
         // {n[{in(m,p), ...q}], m[r]} => {m[{n[{p, ...q}], r}]}
         (PPar {(PAmb N (PPar {(PIn M P) , ...rest})) , (PAmb M R)}) 
             => (PPar {(PAmb M (PPar {(PAmb N (PPar {P , ...rest})), R}))});
@@ -47,6 +49,7 @@ theory! {
             => (PPar {P,Q});
 
         if S => T then (PPar {S, ...rest}) => (PPar {T, ...rest});
+
         if S => T then (PNew x S) => (PNew x T);
         if S => T then (PAmb N S) => (PAmb N T);
     }
