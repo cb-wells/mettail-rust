@@ -101,6 +101,7 @@ impl Repl {
             "list" | "list-theories" => self.cmd_list_theories(),
             "info" => self.cmd_info(),
             "rewrites" => self.cmd_rewrites(),
+            "equations" => self.cmd_equations(),
             "normal-forms" | "nf" => self.cmd_normal_forms(),
             "apply" => self.cmd_apply(&parts[1..]),
             "goto" => self.cmd_goto(&parts[1..]),
@@ -260,6 +261,21 @@ impl Repl {
         Ok(())
     }
     
+    fn cmd_equations(&self) -> Result<()> {
+        let results = self.state.ascent_results()
+            .ok_or_else(|| anyhow::anyhow!("No term loaded. Use 'term: <expr>' first."))?;
+
+        let equivalences = results.equivalences.clone();
+        println!();
+        println!("{}", "Equivalence Classes:".bold());
+        for equ_class in equivalences {
+            let terms = equ_class.term_ids.iter().map(|id| results.all_terms.iter().find(|t| t.term_id == *id).unwrap().display.as_str()).collect::<Vec<_>>();
+            println!("  {}", terms.join(" == "));
+        }
+        println!();
+        Ok(())
+    }
+
     fn cmd_rewrites(&self) -> Result<()> {
         let results = self.state.ascent_results()
             .ok_or_else(|| anyhow::anyhow!("No term loaded. Use 'term: <expr>' first."))?;

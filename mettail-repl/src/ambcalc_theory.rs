@@ -1,4 +1,4 @@
-use crate::theory::{AscentResults, Rewrite, Term, TermInfo, Theory};
+use crate::theory::{AscentResults, EquivClass, Rewrite, Term, TermInfo, Theory};
 use crate::examples::TheoryName;
 use anyhow::Result;
 use std::fmt;
@@ -28,13 +28,11 @@ theory! {
         NVar . Name ::= Var ;
     },
     equations {
-        // (PPar {P}) == P;
-        // (PPar {PZero, ...rest}) == (PPar {...rest});
-        if x # C then (PPar {P, (PNew x C)}) == (PNew x (PPar {P, C}));
-        if x # N then (PNew x (PPar {P, (PIn N Q)})) == (PPar {P, (PIn N (PNew x Q))});
-        if x # N then (PNew x (PPar {P, (POut N Q)})) == (PPar {P, (POut N (PNew x Q))});
-        if x # N then (PNew x (PPar {P, (POpen N Q)})) == (PPar {P, (POpen N (PNew x Q))});
-        if x # N then (PNew x (PPar {P, (PAmb N Q)})) == (PPar {P, (PAmb N (PNew x Q))});
+        if x # P then (PPar {(PNew x P), ...rest}) == (PNew x (PPar {P, ...rest}));
+        if x # P then (PIn N (PNew x P)) == (PNew x (PIn N P));
+        if x # P then (POut N (PNew x P)) == (PNew x (POut N P));
+        if x # P then (POpen N (PNew x P)) == (PNew x (POpen N P));
+        if x # P then (PAmb N (PNew x P)) == (PNew x (PAmb N P));
         // (PNew x (PNew y P)) == (PNew y (PNew x P));
     },
     rewrites {
@@ -139,7 +137,15 @@ impl Theory for AmbCalculusTheory {
             .collect();
 
         // Build equivalence classes (from eq_proc)
-        let equivalences = Vec::new(); // TODO: Extract from prog.eq_proc
+        let mut equivalences = Vec::new(); 
+        // TODO: Extract from prog.eq_proc
+        for (lhs, rhs) in prog.__eq_proc_ind_common.iter_all_added() {
+            if lhs.to_string() != rhs.to_string() {
+                equivalences.push(EquivClass {
+                    term_ids: vec![compute_term_id(lhs), compute_term_id(rhs)],
+                });
+            }
+        }
 
         Ok(AscentResults {
             all_terms: term_infos,

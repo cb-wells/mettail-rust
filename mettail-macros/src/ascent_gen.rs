@@ -630,21 +630,24 @@ fn generate_equation_rules(theory: &TheoryDef) -> TokenStream {
 fn generate_rewrite_rules(theory: &TheoryDef) -> TokenStream {
     let mut rules = Vec::new();
     
+    //////////////////////////////////
+    // EXTENSION ALONG EQUALITY IS DISABLED FOR NOW
+    //////////////////////////////////
     // For each category, generate:
     // 1. Extension along eq: rw_cat(s1, t) <-- rw_cat(s0, t), eq_cat(s0, s1);
-    for export in &theory.exports {
-        let cat = &export.name;
-        let eq_rel = format_ident!("eq_{}", cat.to_string().to_lowercase());
-        let rw_rel = format_ident!("rw_{}", cat.to_string().to_lowercase());
+    // for export in &theory.exports {
+    //     let cat = &export.name;
+    //     let eq_rel = format_ident!("eq_{}", cat.to_string().to_lowercase());
+    //     let rw_rel = format_ident!("rw_{}", cat.to_string().to_lowercase());
         
-        // Extension along eq
-        rules.push(quote! {
-            #rw_rel(s1, t) <-- #rw_rel(s0, t), #eq_rel(s0, s1);
-        });
-        rules.push(quote! {
-            #rw_rel(s, t1) <-- #rw_rel(s, t0), #eq_rel(t0, t1);
-        });
-    }
+    //     // Extension along eq
+    //     rules.push(quote! {
+    //         #rw_rel(s1, t) <-- #rw_rel(s0, t), #eq_rel(s0, s1);
+    //     });
+    //     rules.push(quote! {
+    //         #rw_rel(s, t1) <-- #rw_rel(s, t0), #eq_rel(t0, t1);
+    //     });
+    // }
     
     // 2. Base rewrites: generate Ascent clauses with equational matching
     // Only for rules without a premise (congruences are handled separately)
@@ -1352,10 +1355,29 @@ fn generate_equation_rhs_simple(expr: &Expr, bindings: &HashMap<String, Ident>, 
                     .map(|r| &r.category)
                     .expect("Constructor category not found");
                 
+                // Check if there's a rest variable to merge in
+                let rest_merge = if let Some(rest_var) = rest {
+                    let rest_var_str = rest_var.to_string();
+                    if let Some(rest_ident) = bindings.get(&rest_var_str) {
+                        Some(quote! {
+                            for (elem, count) in #rest_ident.iter() {
+                                for _ in 0..count {
+                                    bag.insert(elem.clone());
+                                }
+                            }
+                        })
+                    } else {
+                        panic!("Rest variable {} not found in bindings", rest_var_str);
+                    }
+                } else {
+                    None
+                };
+                
                 quote! {
                     #category::#cons({
                         let mut bag = mettail_runtime::HashBag::new();
                         #(#elem_inserts)*
+                        #rest_merge
                         bag
                     })
                 }
@@ -1399,12 +1421,19 @@ fn generate_equation_clause(equation: &Equation, theory: &TheoryDef) -> Option<T
     // Generate freshness checks if any
     let freshness_checks = generate_equation_freshness(&equation.conditions, &bindings);
     
+    // Only call normalize() if the category has collection constructors
+    let rhs_with_normalize = if category_has_collections(&category, theory) {
+        quote! { (#rhs_construction).normalize() }
+    } else {
+        rhs_construction
+    };
+    
     Some(quote! {
         #eq_rel(p0, p1) <--
             #cat_lower(p0),
             #(#lhs_clauses,)*
             #(#freshness_checks,)*
-            let p1 = (#rhs_construction).normalize();
+            let p1 = #rhs_with_normalize;
     })
 }
 
@@ -1460,6 +1489,16 @@ fn extract_category_from_expr(expr: &Expr, theory: &TheoryDef) -> Option<Ident> 
 /// Check if an identifier is a constructor in the theory
 fn is_constructor(ident: &Ident, theory: &TheoryDef) -> bool {
     theory.terms.iter().any(|rule| rule.label == *ident)
+}
+
+/// Check if a category has any collection constructors
+fn category_has_collections(category: &Ident, theory: &TheoryDef) -> bool {
+    use crate::ast::GrammarItem;
+    
+    theory.terms.iter().any(|rule| {
+        rule.category == *category && 
+        rule.items.iter().any(|item| matches!(item, GrammarItem::Collection { .. }))
+    })
 }
 
 /// Check if a constructor is nullary (has no non-terminal arguments)

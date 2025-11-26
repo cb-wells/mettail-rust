@@ -26,11 +26,11 @@ theory! {
         NVar . Name ::= Var ;
     },
     equations {
-        if x # C then (PPar {P, (PNew x C)}) == (PNew x (PPar {P, C}));
-        if x # N then (PNew x (PPar {P, (PIn N Q)})) == (PPar {P, (PIn N (PNew x Q))});
-        if x # N then (PNew x (PPar {P, (POut N Q)})) == (PPar {P, (POut N (PNew x Q))});
-        if x # N then (PNew x (PPar {P, (POpen N Q)})) == (PPar {P, (POpen N (PNew x Q))});
-        if x # N then (PNew x (PPar {P, (PAmb N Q)})) == (PPar {P, (PAmb N (PNew x Q))});
+        if x # P then (PPar {(PNew x P), ...rest}) == (PNew x (PPar {P, ...rest}));
+        if x # P then (PIn N (PNew x P)) == (PNew x (PIn N P));
+        if x # P then (POut N (PNew x P)) == (PNew x (POut N P));
+        if x # P then (POpen N (PNew x P)) == (PNew x (POpen N P));
+        if x # P then (PAmb N (PNew x P)) == (PNew x (PAmb N P));
         // (PNew x (PNew y P)) == (PNew y (PNew x P));
     },
     rewrites {
@@ -82,6 +82,10 @@ fn run_test(test: &TestCase) -> Result<(), String> {
     let prog = ascent_run! {
         include_source!(ambient_source);
         proc(p) <-- for p in [input_term.clone()];
+
+        relation redex_eq(Proc);
+        redex_eq(q.clone()) <-- eq_proc(input_term.clone(), q);
+        proc(q) <-- redex_eq(q);
 
         relation path(Proc, Proc);
         path(p1, p2) <-- rw_proc(p1,p2);
@@ -328,7 +332,7 @@ fn main() {
         TestCase {
             name: "equation_then_rewrite_extrusion_in",
             input: "{n[{in(m,{})}], new(x,m[{}])}",
-            expected_output: Some("new(x, {m[{n[{}],{}}]})"),
+            expected_output: Some("new(x, {m[{n[{}]}]})"),
             should_normalize: true,
             min_rewrites: 1,
             description: "Extrusion equation allows in-capability rewrite: {n[{in(m,{})}], new(x,m[{}])} =eq= new(x,{n[{in(m,{})}], m[{}]}) =>rw new(x,{m[{n[{}],{}}]})",
@@ -364,7 +368,7 @@ fn main() {
         TestCase {
             name: "parallel_with_extrusion",
             input: "{new(x, {p, n[{in(m, q)}]}), m[r]}",
-            expected_output: Some("{new(x, {p, m[{n[{q}], r}]})}"), // Equation then rewrite
+            expected_output: Some("new(x,{m[{n[{q}], r}], p})"), // Equation then rewrite
             should_normalize: true,
             min_rewrites: 1,
             description: "Extrusion equation enables parallel in-capability: {new(x,{p,n[{in(m,q)}]}), m[r]} =eq= {p, n[{in(m, new(x,q))}], m[r]} =>rw {p, m[{n[{r, new(x,q)}]}]}",

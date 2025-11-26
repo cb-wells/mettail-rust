@@ -32,6 +32,7 @@ fn generate_context_struct(theory: &TheoryDef) -> TokenStream {
             vars: Vec<String>,
             initial_var_count: usize,  // Track how many vars were in initial pool
             max_depth: usize,
+            max_collection_width: usize,
             #(#category_fields),*
         }
     }
@@ -59,12 +60,28 @@ fn generate_context_impl(theory: &TheoryDef) -> TokenStream {
     
     quote! {
         impl GenerationContext {
-            fn new(vars: Vec<String>, max_depth: usize) -> Self {
+            fn new(vars: Vec<String>, max_depth: usize, max_collection_width: usize) -> Self {
                 let initial_var_count = vars.len();
                 Self {
                     vars,
                     initial_var_count,
                     max_depth,
+                    max_collection_width,
+                    #(#new_fields),*
+                }
+            }
+            
+            fn new_with_extended_vars(
+                vars: Vec<String>,
+                initial_var_count: usize,
+                max_depth: usize,
+                max_collection_width: usize
+            ) -> Self {
+                Self {
+                    vars,
+                    initial_var_count,
+                    max_depth,
+                    max_collection_width,
                     #(#new_fields),*
                 }
             }
@@ -162,28 +179,30 @@ fn generate_depth_d_cases(cat_name: &Ident, rules: &[&GrammarRule], theory: &The
     let mut cases = Vec::new();
     
     for rule in rules {
+        // Check if this rule has collections
+        let has_collection = rule.items.iter().any(|item| matches!(item, GrammarItem::Collection { .. }));
+        
+        if has_collection {
+            // Handle collection constructors
+            cases.push(generate_collection_constructor_case(cat_name, rule, theory));
+            continue;
+        }
+        
         // Skip nullary and var constructors (handled at depth 0)
         let non_terminals: Vec<_> = rule.items.iter()
             .filter_map(|item| match item {
                 GrammarItem::NonTerminal(nt) => Some(nt.clone()),
                 GrammarItem::Binder { category } => Some(category.clone()),
-                GrammarItem::Collection { .. } => None, // Skip collections - can't exhaustively generate
                 _ => None,
             })
             .collect();
         
         if non_terminals.is_empty() {
-            continue; // Nullary or collection-only
+            continue; // Nullary
         }
         
         if non_terminals.len() == 1 && non_terminals[0].to_string() == "Var" {
             continue; // Var constructor
-        }
-        
-        // Check if this rule has collections - skip if so
-        let has_collection = rule.items.iter().any(|item| matches!(item, GrammarItem::Collection { .. }));
-        if has_collection {
-            continue; // Can't exhaustively generate collections
         }
         
         // Generate recursive case
@@ -415,7 +434,12 @@ fn generate_simple_binder_case(
         extended_vars.push(binder_name.clone());
         
         // Create temporary context for generating bodies that can use the binder
-        let mut temp_ctx = GenerationContext::new(extended_vars, depth - 1);
+        let mut temp_ctx = GenerationContext::new_with_extended_vars(
+            extended_vars,
+            self.initial_var_count,
+            depth - 1,
+            self.max_collection_width
+        );
         temp_ctx = temp_ctx.generate_all();
         
         // Get all bodies from temp context (up to depth-1)
@@ -458,7 +482,12 @@ fn generate_binder_with_one_arg(
         let mut extended_vars = self.vars.clone();
         extended_vars.push(binder_name.clone());
         
-        let mut temp_ctx = GenerationContext::new(extended_vars, depth - 1);
+        let mut temp_ctx = GenerationContext::new_with_extended_vars(
+            extended_vars,
+            self.initial_var_count,
+            depth - 1,
+            self.max_collection_width
+        );
         temp_ctx = temp_ctx.generate_all();
         
         // Collect all bodies from temp context
@@ -543,7 +572,12 @@ fn generate_binder_with_multiple_args(
             let mut extended_vars = self.vars.clone();
             extended_vars.push(binder_name.clone());
             
-            let mut temp_ctx = GenerationContext::new(extended_vars, d);
+            let mut temp_ctx = GenerationContext::new_with_extended_vars(
+                extended_vars,
+                self.initial_var_count,
+                d,
+                self.max_collection_width
+            );
             temp_ctx = temp_ctx.generate_all();
             
             let mut bodies_with_binder = Vec::new();
@@ -570,6 +604,124 @@ fn generate_binder_with_multiple_args(
     }
 }
 
+/// Generate case for constructor with collections
+/// Example: PPar(HashBag<Proc>) generates bags of various sizes
+fn generate_collection_constructor_case(cat_name: &Ident, rule: &GrammarRule, theory: &TheoryDef) -> TokenStream {
+    let label = &rule.label;
+    
+    // Find the collection field
+    let (collection_idx, element_cat) = rule.items.iter().enumerate()
+        .find_map(|(i, item)| match item {
+            GrammarItem::Collection { element_type, .. } => Some((i, element_type.clone())),
+            _ => None,
+        })
+        .expect("Collection constructor must have a collection field");
+    
+    // Check if there are other (non-collection) fields
+    let other_fields: Vec<(usize, Ident)> = rule.items.iter().enumerate()
+        .filter_map(|(i, item)| {
+            if i == collection_idx {
+                return None;
+            }
+            match item {
+                GrammarItem::NonTerminal(cat) => Some((i, cat.clone())),
+                _ => None,
+            }
+        })
+        .collect();
+    
+    if other_fields.is_empty() {
+        // Pure collection constructor (e.g., PPar(HashBag<Proc>))
+        generate_pure_collection_case(cat_name, label, &element_cat, theory)
+    } else {
+        // Mixed constructor (e.g., PAmb(Name, Proc) where Proc is a collection)
+        // For now, skip these as they're more complex
+        quote! {}
+    }
+}
+
+/// Generate a pure collection constructor (only one field, which is a collection)
+fn generate_pure_collection_case(
+    cat_name: &Ident,
+    label: &Ident,
+    element_cat: &Ident,
+    theory: &TheoryDef
+) -> TokenStream {
+    if !is_exported(element_cat, theory) {
+        return quote! {};
+    }
+    
+    let field_name = category_to_field_name(element_cat);
+    
+    quote! {
+        // Generate collections of size 0 to max_collection_width
+        for size in 0..=self.max_collection_width {
+            if size == 0 {
+                // Empty collection
+                let bag = mettail_runtime::HashBag::new();
+                terms.push(#cat_name::#label(bag));
+            } else if size == 1 {
+                // Single element bags
+                for d in 0..depth {
+                    if let Some(elems) = self.#field_name.get(&d) {
+                        for elem in elems {
+                            let mut bag = mettail_runtime::HashBag::new();
+                            bag.insert(elem.clone());
+                            terms.push(#cat_name::#label(bag));
+                        }
+                    }
+                }
+            } else if size == 2 {
+                // Two-element bags (most common case, optimized)
+                for d1 in 0..depth {
+                    for d2 in 0..depth {
+                        if let Some(elems1) = self.#field_name.get(&d1) {
+                            if let Some(elems2) = self.#field_name.get(&d2) {
+                                for elem1 in elems1 {
+                                    for elem2 in elems2 {
+                                        let mut bag = mettail_runtime::HashBag::new();
+                                        bag.insert(elem1.clone());
+                                        bag.insert(elem2.clone());
+                                        terms.push(#cat_name::#label(bag));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            } else if size == 3 {
+                // Three-element bags
+                for d1 in 0..depth {
+                    for d2 in 0..depth {
+                        for d3 in 0..depth {
+                            if let Some(elems1) = self.#field_name.get(&d1) {
+                                if let Some(elems2) = self.#field_name.get(&d2) {
+                                    if let Some(elems3) = self.#field_name.get(&d3) {
+                                        for elem1 in elems1 {
+                                            for elem2 in elems2 {
+                                                for elem3 in elems3 {
+                                                    let mut bag = mettail_runtime::HashBag::new();
+                                                    bag.insert(elem1.clone());
+                                                    bag.insert(elem2.clone());
+                                                    bag.insert(elem3.clone());
+                                                    terms.push(#cat_name::#label(bag));
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            } else {
+                // For size > 3, we skip to avoid explosion
+                // Users should use random generation for larger collections
+            }
+        }
+    }
+}
+
 /// Generate public API methods for each category
 fn generate_public_apis(theory: &TheoryDef) -> TokenStream {
     let impls: Vec<TokenStream> = theory.exports.iter().map(|export| {
@@ -583,15 +735,16 @@ fn generate_public_apis(theory: &TheoryDef) -> TokenStream {
                 /// # Arguments
                 /// * `vars` - Pool of variable names for free variables
                 /// * `max_depth` - Maximum operator nesting level
+                /// * `max_collection_width` - Maximum number of elements in any collection
                 /// 
                 /// # Returns
                 /// Sorted, deduplicated vector of terms
                 /// 
                 /// # Warning
-                /// Number of terms grows exponentially with depth!
-                /// Recommend max_depth <= 3 for most use cases.
-                pub fn generate_terms(vars: &[String], max_depth: usize) -> Vec<#cat_name> {
-                    let ctx = GenerationContext::new(vars.to_vec(), max_depth);
+                /// Number of terms grows exponentially with depth and collection width!
+                /// Recommend max_depth <= 3 and max_collection_width <= 2 for exhaustive generation.
+                pub fn generate_terms(vars: &[String], max_depth: usize, max_collection_width: usize) -> Vec<#cat_name> {
+                    let ctx = GenerationContext::new(vars.to_vec(), max_depth, max_collection_width);
                     let ctx = ctx.generate_all();
                     
                     let mut all_terms = Vec::new();

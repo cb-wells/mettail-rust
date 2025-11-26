@@ -30,15 +30,16 @@ fn generate_random_for_category(cat_name: &Ident, theory: &TheoryDef) -> TokenSt
             /// # Arguments
             /// * `vars` - Pool of variable names for free variables
             /// * `depth` - Target depth (operator nesting level)
+            /// * `max_collection_width` - Maximum number of elements in any collection
             /// 
             /// # Example
             /// ```ignore
-            /// let term = Proc::generate_random_at_depth(&["a".into(), "b".into()], 25);
+            /// let term = Proc::generate_random_at_depth(&["a".into(), "b".into()], 25, 3);
             /// ```
-            pub fn generate_random_at_depth(vars: &[String], depth: usize) -> Self {
+            pub fn generate_random_at_depth(vars: &[String], depth: usize, max_collection_width: usize) -> Self {
                 use rand::Rng;
                 let mut rng = rand::thread_rng();
-                Self::generate_random_at_depth_internal(vars, depth, &mut rng, 0)
+                Self::generate_random_at_depth_internal(vars, depth, max_collection_width, &mut rng, 0)
             }
             
             /// Generate a random term at exactly the given depth with a seed
@@ -48,20 +49,23 @@ fn generate_random_for_category(cat_name: &Ident, theory: &TheoryDef) -> TokenSt
             /// # Arguments
             /// * `vars` - Pool of variable names for free variables
             /// * `depth` - Target depth (operator nesting level)
+            /// * `max_collection_width` - Maximum number of elements in any collection
             /// * `seed` - Random seed for reproducibility
             pub fn generate_random_at_depth_with_seed(
                 vars: &[String], 
-                depth: usize, 
+                depth: usize,
+                max_collection_width: usize,
                 seed: u64
             ) -> Self {
                 use rand::{SeedableRng, Rng};
                 let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
-                Self::generate_random_at_depth_internal(vars, depth, &mut rng, 0)
+                Self::generate_random_at_depth_internal(vars, depth, max_collection_width, &mut rng, 0)
             }
             
             fn generate_random_at_depth_internal<R: rand::Rng>(
                 vars: &[String],
                 depth: usize,
+                max_collection_width: usize,
                 rng: &mut R,
                 binding_depth: usize,
             ) -> Self {
@@ -88,6 +92,12 @@ fn generate_random_depth_0(cat_name: &Ident, rules: &[&GrammarRule]) -> TokenStr
         });
         
         if has_collections {
+            continue;
+        }
+        
+        // Skip binder constructors at depth 0
+        // Binders should only be generated at depth > 0 with correct binding_depth
+        if !rule.bindings.is_empty() {
             continue;
         }
         
@@ -164,12 +174,14 @@ fn generate_random_depth_d(cat_name: &Ident, rules: &[&GrammarRule], theory: &Th
     let mut constructor_cases = Vec::new();
     
     for rule in rules {
-        // Skip collection constructors
+        // Check if this has collections
         let has_collections = rule.items.iter().any(|item| {
             matches!(item, GrammarItem::Collection { .. })
         });
         
         if has_collections {
+            // Handle collection constructors
+            constructor_cases.push(generate_random_collection_constructor(cat_name, rule, theory));
             continue;
         }
         
@@ -257,7 +269,7 @@ fn generate_random_unary(
     }
     
     quote! {
-        let arg = #arg_cat::generate_random_at_depth_internal(vars, depth - 1, rng, binding_depth);
+        let arg = #arg_cat::generate_random_at_depth_internal(vars, depth - 1, max_collection_width, rng, binding_depth);
         #cat_name::#label(Box::new(arg))
     }
 }
@@ -281,8 +293,8 @@ fn generate_random_binary(
             depth - 1
         };
         
-        let arg1 = #arg1_cat::generate_random_at_depth_internal(vars, d1, rng, binding_depth);
-        let arg2 = #arg2_cat::generate_random_at_depth_internal(vars, d2, rng, binding_depth);
+        let arg1 = #arg1_cat::generate_random_at_depth_internal(vars, d1, max_collection_width, rng, binding_depth);
+        let arg2 = #arg2_cat::generate_random_at_depth_internal(vars, d2, max_collection_width, rng, binding_depth);
         #cat_name::#label(Box::new(arg1), Box::new(arg2))
     }
 }
@@ -299,7 +311,7 @@ fn generate_random_nary(
             return quote! { panic!("Non-exported category") };
         }
         quote! {
-            Box::new(#cat::generate_random_at_depth_internal(vars, depth - 1, rng, binding_depth))
+            Box::new(#cat::generate_random_at_depth_internal(vars, depth - 1, max_collection_width, rng, binding_depth))
         }
     }).collect();
     
@@ -369,7 +381,8 @@ fn generate_random_simple_binder(
         
         let body = #body_cat::generate_random_at_depth_internal(
             &extended_vars, 
-            depth - 1, 
+            depth - 1,
+            max_collection_width,
             rng,
             binding_depth + 1
         );
@@ -401,14 +414,15 @@ fn generate_random_binder_with_one_arg(
             depth - 1
         };
         
-        let arg1 = #arg_cat::generate_random_at_depth_internal(vars, d1, rng, binding_depth);
+        let arg1 = #arg_cat::generate_random_at_depth_internal(vars, d1, max_collection_width, rng, binding_depth);
         
         let binder_name = format!("x{}", binding_depth);
         let mut extended_vars = vars.to_vec();
         extended_vars.push(binder_name.clone());
         let body = #body_cat::generate_random_at_depth_internal(
             &extended_vars, 
-            d2, 
+            d2,
+            max_collection_width,
             rng,
             binding_depth + 1
         );
@@ -437,7 +451,7 @@ fn generate_random_binder_with_multiple_args(
             return quote! { panic!("Non-exported category") };
         }
         quote! {
-            Box::new(#cat::generate_random_at_depth_internal(vars, depth - 1, rng, binding_depth))
+            Box::new(#cat::generate_random_at_depth_internal(vars, depth - 1, max_collection_width, rng, binding_depth))
         }
     }).collect();
     
@@ -447,7 +461,8 @@ fn generate_random_binder_with_multiple_args(
         extended_vars.push(binder_name.clone());
         let body = #body_cat::generate_random_at_depth_internal(
             &extended_vars, 
-            depth - 1, 
+            depth - 1,
+            max_collection_width,
             rng,
             binding_depth + 1
         );
@@ -457,6 +472,50 @@ fn generate_random_binder_with_multiple_args(
         let scope = mettail_runtime::Scope::new(binder, Box::new(body));
         
         #cat_name::#label(#(#arg_generations,)* scope)
+    }
+}
+
+/// Generate random collection constructor
+fn generate_random_collection_constructor(
+    cat_name: &Ident,
+    rule: &GrammarRule,
+    theory: &TheoryDef
+) -> TokenStream {
+    let label = &rule.label;
+    
+    // Find the collection field
+    let element_cat = rule.items.iter()
+        .find_map(|item| match item {
+            GrammarItem::Collection { element_type, .. } => Some(element_type.clone()),
+            _ => None,
+        })
+        .expect("Collection constructor must have a collection field");
+    
+    if !is_exported(&element_cat, theory) {
+        return quote! { panic!("Non-exported collection element category") };
+    }
+    
+    quote! {
+        {
+            // Choose a random collection size (0 to max_collection_width)
+            let size = rng.gen_range(0..=max_collection_width);
+            let mut bag = mettail_runtime::HashBag::new();
+            
+            for _ in 0..size {
+                // Generate element at random depth < current depth
+                let elem_depth = if depth > 0 { rng.gen_range(0..depth) } else { 0 };
+                let elem = #element_cat::generate_random_at_depth_internal(
+                    vars,
+                    elem_depth,
+                    max_collection_width,
+                    rng,
+                    binding_depth
+                );
+                bag.insert(elem);
+            }
+            
+            #cat_name::#label(bag)
+        }
     }
 }
 
