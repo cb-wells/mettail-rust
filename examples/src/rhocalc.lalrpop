@@ -12,7 +12,7 @@ Ident: String = {
 
 pub Proc: Proc = {
     "0" => Proc::PZero,
-    "*" <f0:Name> => Proc::PDrop(Box::new(f0)),
+    "*" "(" <f0:Name> ")" => Proc::PDrop(Box::new(f0)),
     <f0:Name> "!" "(" <f1:Proc> ")" => Proc::POutput(Box::new(f0), Box::new(f1)),
     "for" "(" <f0:Name> "->" <x_1:Ident> ")" "{" <body_2:Proc> "}" => {
         use mettail_runtime::BoundTerm;
@@ -34,7 +34,8 @@ pub Proc: Proc = {
             coll.insert(e);
         }
         Proc::PPar(coll)
-    }
+    },
+    <v:Ident> => Proc::PVar(mettail_runtime::OrdVar(Var::Free(mettail_runtime::get_or_create_var(v))))
 };
 
 pub Name: Name = {

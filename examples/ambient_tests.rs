@@ -281,7 +281,7 @@ fn main() {
         TestCase {
             name: "open_after_entry",
             input: "{agent[{in(container, {})}], container[{open(agent, result)}]}",
-            expected_output: None, // Multi-step
+            expected_output: Some("container[{result}]"), // Multi-step
             should_normalize: true,
             min_rewrites: 2, // Entry then open
             description: "Agent enters container, then is opened",

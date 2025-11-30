@@ -16,12 +16,12 @@ name = "ambient_tests"
 path = "ambient_tests.rs"
 
 [[bin]]
-name = "congruence_tests"
-path = "congruence_tests.rs"
-
-[[bin]]
 name = "equation_tests"
 path = "equation_tests.rs"
+
+[[bin]]
+name = "rhocalc_tests"
+path = "rhocalc_tests.rs"
 
 [dependencies]
 mettail-macros = { path = "../mettail-macros" }

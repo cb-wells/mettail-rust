@@ -1806,6 +1806,7 @@ fn generate_new_collection_congruence_clauses(
                 parent_cat,
                 constructor,
                 &insert_helper,
+                theory,
             );
             clauses.push(clause);
         }
@@ -1829,21 +1830,25 @@ fn generate_joined_base_rewrite_clause(
     insert_helper: &Ident,
     theory: &TheoryDef,
 ) -> TokenStream {
-    use std::collections::{HashMap, HashSet};
+    use std::collections::HashMap;
     
-    // First pass: identify shared variables (appear in multiple patterns)
-    let mut var_pattern_counts: HashMap<String, Vec<usize>> = HashMap::new();
+    // First pass: identify shared variables (appear in multiple patterns) and track their categories
+    let mut var_pattern_counts: HashMap<String, Vec<(usize, Ident)>> = HashMap::new();
     for (pat_idx, pattern) in patterns.iter().enumerate() {
         for capture in &pattern.captures {
             var_pattern_counts.entry(capture.var_name.clone())
                 .or_insert_with(Vec::new)
-                .push(pat_idx);
+                .push((pat_idx, capture.category.clone()));
         }
     }
     
-    let shared_vars: HashSet<String> = var_pattern_counts.iter()
-        .filter(|(_, patterns)| patterns.len() > 1)
-        .map(|(name, _)| name.clone())
+    let shared_vars: HashMap<String, (Vec<usize>, Ident)> = var_pattern_counts.iter()
+        .filter(|(_, pattern_cats)| pattern_cats.len() > 1)
+        .map(|(name, pattern_cats)| {
+            let pattern_idxs: Vec<_> = pattern_cats.iter().map(|(idx, _)| *idx).collect();
+            let category = pattern_cats[0].1.clone(); // All should have the same category
+            (name.clone(), (pattern_idxs, category))
+        })
         .collect();
     
     // Generate projection joins for all patterns
@@ -1870,13 +1875,9 @@ fn generate_joined_base_rewrite_clause(
             // Check if this is a rest variable (marked by field_idx == usize::MAX)
             let is_rest = capture.field_idx == usize::MAX;
             
-            // For shared variables, use the same name across all patterns (for join)
-            // For non-shared variables, use pattern-specific names
-            let cap_name = if shared_vars.contains(&capture.var_name) {
-                format_ident!("cap_{}", capture.var_name.to_lowercase())
-            } else {
-                format_ident!("cap_{}_p{}", capture.var_name.to_lowercase(), pat_idx)
-            };
+            // ALWAYS use pattern-specific names for all variables
+            // We'll add eq_* checks for shared variables separately
+            let cap_name = format_ident!("cap_{}_p{}", capture.var_name.to_lowercase(), pat_idx);
             proj_args.push(quote! { #cap_name });
             
             // Only add to capture_vars if it's not a rest variable
@@ -1912,6 +1913,27 @@ fn generate_joined_base_rewrite_clause(
         });
     }
     
+    // Generate equational checks for shared variables
+    // For each shared variable, check equality between all its occurrences using eq_* relation
+    let mut equational_checks = Vec::new();
+    for (var_name, (pattern_idxs, category)) in &shared_vars {
+        let eq_rel = format_ident!("eq_{}", category.to_string().to_lowercase());
+        
+        // For each pair of occurrences, add eq_category(cap_var_p0, cap_var_p1)
+        // We only need to check the first occurrence against all others (transitivity handled by eqrel)
+        if pattern_idxs.len() > 1 {
+            let first_idx = pattern_idxs[0];
+            let first_var = format_ident!("cap_{}_p{}", var_name.to_lowercase(), first_idx);
+            
+            for &other_idx in &pattern_idxs[1..] {
+                let other_var = format_ident!("cap_{}_p{}", var_name.to_lowercase(), other_idx);
+                equational_checks.push(quote! {
+                    #eq_rel(#first_var.clone(), #other_var.clone())
+                });
+            }
+        }
+    }
+    
     // For nested patterns, we now extract ALL captures via projection (using full pattern matching)
     // So we can use direct RHS reconstruction for all cases
     let rhs_term = generate_rhs_reconstruction(rhs, &all_capture_vars, &rest_vars, theory);
@@ -1940,18 +1962,37 @@ fn generate_joined_base_rewrite_clause(
         }
     };
     
-    quote! {
-        #rw_rel(parent, result) <--
-            #(#projection_calls),*,
-            #rhs_generation,
-            if let #parent_cat::#constructor(ref bag) = parent,
-            #elem_removal,
-            let result = #parent_cat::#constructor({
-                let mut bag_result = remaining;
-                #parent_cat::#insert_helper(&mut bag_result, rhs_term);
-                bag_result
-            }).normalize();
-    }
+    // Build the clause body, conditionally including equational checks
+    let clause_body = if equational_checks.is_empty() {
+        quote! {
+            #rw_rel(parent, result) <--
+                #(#projection_calls),*,
+                #rhs_generation,
+                if let #parent_cat::#constructor(ref bag) = parent,
+                #elem_removal,
+                let result = #parent_cat::#constructor({
+                    let mut bag_result = remaining;
+                    #parent_cat::#insert_helper(&mut bag_result, rhs_term);
+                    bag_result
+                }).normalize();
+        }
+    } else {
+        quote! {
+            #rw_rel(parent, result) <--
+                #(#projection_calls),*,
+                #(#equational_checks),*,
+                #rhs_generation,
+                if let #parent_cat::#constructor(ref bag) = parent,
+                #elem_removal,
+                let result = #parent_cat::#constructor({
+                    let mut bag_result = remaining;
+                    #parent_cat::#insert_helper(&mut bag_result, rhs_term);
+                    bag_result
+                }).normalize();
+        }
+    };
+    
+    clause_body
 }
 
 /// Helper to generate RHS reconstruction from captured variables
@@ -1963,10 +2004,12 @@ fn generate_rhs_reconstruction(
     theory: &TheoryDef,
 ) -> TokenStream {
     // Build a bindings map for RHS generator
+    // For shared variables (appearing in multiple patterns), use only the FIRST occurrence
     let mut bindings = std::collections::HashMap::new();
     for (var_ident, capture_info) in captures {
-        // For rewrite RHS, bindings should just be the variable name
-        bindings.insert(capture_info.var_name.clone(), quote! { #var_ident.clone() });
+        // Only insert if not already present (to use first occurrence)
+        bindings.entry(capture_info.var_name.clone())
+            .or_insert_with(|| quote! { #var_ident.clone() });
     }
     
     // Add rest variables to bindings (as HashBag)
@@ -2031,6 +2074,7 @@ fn generate_regular_congruence_clause(
     parent_cat: &Ident,
     constructor: &Ident,
     insert_helper: &Ident,
+    theory: &TheoryDef,
 ) -> TokenStream {
     let rel_name = format_ident!(
         "{}_proj_c{}_r{}",
@@ -2052,10 +2096,36 @@ fn generate_regular_congruence_clause(
             let rewritten = #elem_cat::#elem_constructor(scope_tmp)
         }
     } else {
-        // For non-binding, we need to reconstruct with the rewritten field
-        // This is a simplification - in reality we'd need all fields
+        // For non-binding constructors, we need to extract all fields from elem,
+        // then reconstruct with the rewritten field replacing the original
+        let grammar_rule = theory.terms.iter()
+            .find(|r| r.label == *elem_constructor)
+            .expect("Constructor not found");
+        
+        let field_count = grammar_rule.items.iter()
+            .filter(|item| !matches!(item, crate::ast::GrammarItem::Terminal(_)))
+            .count();
+        
+        // Generate field patterns for destructuring
+        let mut field_pats = Vec::new();
+        for i in 0..field_count {
+            let field_name = format_ident!("elem_field_{}", i);
+            field_pats.push(field_name);
+        }
+        
+        // Generate reconstruction arguments, replacing the rewritten field
+        let recon_args: Vec<_> = (0..field_count).map(|i| {
+            if i == pattern.rewrite_field_idx {
+                quote! { Box::new(body_rewritten.clone()) }
+            } else {
+                let field_name = &field_pats[i];
+                quote! { #field_name.clone() }
+            }
+        }).collect();
+        
         quote! {
-            let rewritten = body_rewritten.clone()
+            if let #elem_cat::#elem_constructor(#(#field_pats),*) = elem,
+            let rewritten = #elem_cat::#elem_constructor(#(#recon_args),*)
         }
     };
     
