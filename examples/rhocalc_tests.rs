@@ -1,43 +1,6 @@
-use mettail_macros::theory;
-use lalrpop_util::lalrpop_mod;
 use ascent_byods_rels::*;
 use ascent::*;
-
-theory! {
-    name: RhoCalc,
-    
-    exports {
-        Proc
-        Name
-    },
-    
-    terms {
-        PZero . Proc ::= "0" ;
-        PDrop . Proc ::= "*" "(" Name ")" ;
-        POutput . Proc ::= Name "!" "(" Proc ")" ;
-        PInput . Proc ::= "for" "(" Name "->" <Name> ")" "{" Proc "}" ;
-
-        PPar . Proc ::= HashBag(Proc) sep "," delim "{" "}" ;
-
-        NQuote . Name ::= "@" "(" Proc ")" ;
-
-        PVar . Proc ::= Var;
-        NVar . Name ::= Var;
-    },
-    
-    equations {
-        (NQuote (PDrop N)) == N ;
-    },
-        
-    rewrites {
-        (PPar {(PInput chan x P), (POutput chan Q)})
-            => (PPar {(subst P x (NQuote Q))});
-        
-        (PDrop (NQuote P)) => P;
-
-        if S => T then (PPar {S, ...rest}) => (PPar {T, ...rest});
-    }
-}
+use mettail_theories::rhocalc::*;
 
 struct TestCase {
     name: &'static str,

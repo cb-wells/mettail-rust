@@ -1,59 +1,7 @@
-use mettail_macros::theory;
-use lalrpop_util::lalrpop_mod;
 use ascent_byods_rels::*;
 use ascent::*;
+use mettail_theories::ambient::*;
 
-// the language specification
-theory! {
-    name: Ambient,
-    exports {
-        Proc
-        Name
-    },
-    terms {
-        PZero . Proc ::= "0" ;
-        
-        PIn . Proc ::= "in(" Name "," Proc ")";
-        POut . Proc ::= "out(" Name "," Proc ")";
-        POpen . Proc ::= "open(" Name "," Proc ")";
-        
-        PAmb . Proc ::= Name "[" Proc "]";
-        PNew . Proc ::= "new(" <Name> "," Proc ")";
-
-        PPar . Proc ::= HashBag(Proc) sep "," delim "{" "}" ;
-
-        PVar . Proc ::= Var;
-        NVar . Name ::= Var ;
-    },
-    equations {
-        (PPar {P, PZero}) == P;
-        if x # C then (PPar {P, (PNew x C)}) == (PNew x (PPar {P, C}));
-        if x # N then (PNew x (PPar {P, (PIn N Q)})) == (PPar {P, (PIn N (PNew x Q))});
-        if x # N then (PNew x (PPar {P, (POut N Q)})) == (PPar {P, (POut N (PNew x Q))});
-        if x # N then (PNew x (PPar {P, (POpen N Q)})) == (PPar {P, (POpen N (PNew x Q))});
-        if x # N then (PNew x (PPar {P, (PAmb N Q)})) == (PPar {P, (PAmb N (PNew x Q))});
-        // (PNew x (PNew y P)) == (PNew y (PNew x P));
-    },
-    rewrites {
-
-        // {n[{in(m,p), ...q}], m[r]} => {m[{n[{p, ...q}], r}]}
-        (PPar {(PAmb N (PPar {(PIn M P) , ...rest})) , (PAmb M R)}) 
-            => (PPar {(PAmb M (PPar {(PAmb N (PPar {P , ...rest})), R}))});
-        
-        // m[{n[{out(m,p), ...q}], r}] => {n[{p, ...q}], m[r]}
-        (PAmb M (PPar {(PAmb N (PPar {(POut M P), ...rest})), R}))
-            => (PPar {(PAmb N (PPar {P, ...rest})), (PAmb M R)});
-
-        // {open(n,p), n[q]} => {p, q}
-        (PPar {(POpen N P), (PAmb N Q)})
-            => (PPar {P,Q});
-
-        if S => T then (PPar {S, ...rest}) => (PPar {T, ...rest});
-
-        if S => T then (PNew x S) => (PNew x T);
-        if S => T then (PAmb N S) => (PAmb N T);
-    }
-}
 
 fn test_equation(name: &str, lhs_str: &str, rhs_str: &str) {
     let parser = ambient::ProcParser::new();

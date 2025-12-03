@@ -1,0 +1,35 @@
+[package]
+name = "mettail-repl"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "mettail"
+path = "src/main.rs"
+
+[dependencies]
+# Core MeTTaIL
+mettail-runtime = { path = "../runtime" }
+mettail-theories = { path = "../theories" }
+mettail-macros = { path = "../macros" }
+
+moniker = {workspace = true}
+
+# CLI
+rustyline = "14.0"
+clap = { version = "4.5", features = ["derive"] }
+colored = "2.1"
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+rand = { workspace = true }
+
+# Ascent
+ascent = { workspace = true }
+ascent-byods-rels = { workspace = true }
+lalrpop-util = { version = "0.20", features = ["lexer"] }
+
+
+[dev-dependencies]

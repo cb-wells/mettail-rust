@@ -292,7 +292,7 @@ fn find_regular_congruences_for_category<'a>(
             }
             
             // Operates on the target category
-            extract_category_from_expr(&rule.left, theory)
+            extract_category(&rule.left, theory)
                 .map(|cat| cat == *category)
                 .unwrap_or(false)
         })

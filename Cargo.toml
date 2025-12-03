@@ -1,5 +1,5 @@
 [workspace]
-members = ["mettail-macros", "mettail-runtime", "examples", "mettail-repl"]
+members = ["macros", "runtime", "theories", "repl"]
 resolver = "2"
 
 [workspace.package]
@@ -7,8 +7,8 @@ version = "0.1.0"
 edition = "2021"
 authors = ["MeTTaIL Contributors"]
 license = "MIT"
-repository = "https://github.com/your-username/mettail-rust"
-homepage = "https://github.com/your-username/mettail-rust"
+repository = "https://github.com/cb-wells/mettail-rust"
+homepage = "https://github.com/cb-wells/mettail-rust"
 
 [workspace.dependencies]
 proc-macro2 = "1.0"

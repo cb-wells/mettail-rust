@@ -1,59 +1,6 @@
-use mettail_macros::theory;
-use lalrpop_util::lalrpop_mod;
 use ascent_byods_rels::*;
 use ascent::*;
-
-// the language specification
-theory! {
-    name: Ambient,
-    exports {
-        Proc
-        Name
-    },
-    terms {
-        PZero . Proc ::= "0" ;
-        
-        PIn . Proc ::= "in(" Name "," Proc ")";
-        POut . Proc ::= "out(" Name "," Proc ")";
-        POpen . Proc ::= "open(" Name "," Proc ")";
-        
-        PAmb . Proc ::= Name "[" Proc "]";
-        PNew . Proc ::= "new(" <Name> "," Proc ")";
-
-        PPar . Proc ::= HashBag(Proc) sep "," delim "{" "}" ;
-
-        PVar . Proc ::= Var;
-        NVar . Name ::= Var ;
-    },
-    equations {
-        if x # P then (PPar {(PNew x P), ...rest}) == (PNew x (PPar {P, ...rest}));
-        if x # P then (PIn N (PNew x P)) == (PNew x (PIn N P));
-        if x # P then (POut N (PNew x P)) == (PNew x (POut N P));
-        if x # P then (POpen N (PNew x P)) == (PNew x (POpen N P));
-        if x # P then (PAmb N (PNew x P)) == (PNew x (PAmb N P));
-        // (PNew x (PNew y P)) == (PNew y (PNew x P));
-    },
-    rewrites {
-
-        // {n[{in(m,p), ...q}], m[r]} => {m[{n[{p, ...q}], r}]}
-        (PPar {(PAmb N (PPar {(PIn M P) , ...rest})) , (PAmb M R)}) 
-            => (PPar {(PAmb M (PPar {(PAmb N (PPar {P , ...rest})), R}))});
-        
-        // m[{n[{out(m,p), ...q}], r}] => {n[{p, ...q}], m[r]}
-        (PAmb M (PPar {(PAmb N (PPar {(POut M P), ...rest})), R}))
-            => (PPar {(PAmb N (PPar {P, ...rest})), (PAmb M R)});
-
-        // {open(n,p), n[q]} => {p, q}
-        (PPar {(POpen N P), (PAmb N Q)})
-            => (PPar {P,Q});
-
-        if S => T then (PPar {S, ...rest}) => (PPar {T, ...rest});
-
-        if S => T then (PNew x S) => (PNew x T);
-        if S => T then (PAmb N S) => (PAmb N T);
-    }
-}
-
+use mettail_theories::ambient::*;
 
 struct TestCase {
     name: &'static str,
@@ -166,8 +113,8 @@ fn main() {
         // Basic rest patterns - empty context
         TestCase {
             name: "enter_empty_rest",
-            input: "{n[{in(m,p)}], m[r]}",
-            expected_output: Some("m[{n[{p}], r}]"),
+            input: "{n[{in(m,p)}] | m[r]}",
+            expected_output: Some("m[{n[{p}] | r}]"),
             should_normalize: true,
             min_rewrites: 1,
             description: "Basic entry with empty rest pattern: n enters m",
@@ -175,8 +122,8 @@ fn main() {
         
         TestCase {
             name: "exit_empty_rest",
-            input: "m[{n[{out(m,p)}], r}]",
-            expected_output: Some("{n[{p}], m[r]}"),
+            input: "m[{n[{out(m,p)}] | r}]",
+            expected_output: Some("{n[{p}] | m[r]}"),
             should_normalize: true,
             min_rewrites: 1,
             description: "Basic exit with empty rest pattern: n exits m",
@@ -184,8 +131,8 @@ fn main() {
         
         TestCase {
             name: "open_basic",
-            input: "{open(n,p), n[q]}",
-            expected_output: Some("{p, q}"),
+            input: "{open(n,p) | n[q]}",
+            expected_output: Some("{p | q}"),
             should_normalize: true,
             min_rewrites: 1,
             description: "Basic open capability",
@@ -194,8 +141,8 @@ fn main() {
         // Rest patterns - non-empty context
         TestCase {
             name: "enter_nonempty_rest",
-            input: "{n[{in(m,p), q}], m[r]}",
-            expected_output: Some("m[{n[{p, q}], r}]"),
+            input: "{n[{in(m,p) | q}] | m[r]}",
+            expected_output: Some("m[{n[{p | q}] | r}]"),
             should_normalize: true,
             min_rewrites: 1,
             description: "Entry with non-empty rest: preserves q during move",
@@ -203,8 +150,8 @@ fn main() {
         
         TestCase {
             name: "enter_multiple_rest",
-            input: "{n[{in(m,p), q, s}], m[r]}",
-            expected_output: Some("m[{n[{p, q, s}], r}]"),
+            input: "{n[{in(m,p) | q | s}] | m[r]}",
+            expected_output: Some("m[{n[{p | q | s}] | r}]"),
             should_normalize: true,
             min_rewrites: 1,
             description: "Entry with multiple items in rest",
@@ -212,8 +159,8 @@ fn main() {
         
         TestCase {
             name: "exit_nonempty_rest",
-            input: "m[{n[{out(m,p), q}], r}]",
-            expected_output: Some("{n[{p, q}], m[r]}"),
+            input: "m[{n[{out(m,p) | q}] | r}]",
+            expected_output: Some("{n[{p | q}] | m[r]}"),
             should_normalize: true,
             min_rewrites: 1,
             description: "Exit with non-empty rest: preserves q during exit",
@@ -221,8 +168,8 @@ fn main() {
         
         TestCase {
             name: "exit_multiple_rest",
-            input: "m[{n[{out(m,p), q, s, t}], r}]",
-            expected_output: Some("{n[{p, q, s, t}], m[r]}"),
+            input: "m[{n[{out(m,p) | q | s | t}] | r}]",
+            expected_output: Some("{n[{p | q | s | t}] | m[r]}"),
             should_normalize: true,
             min_rewrites: 1,
             description: "Exit with multiple items in rest",
@@ -231,8 +178,8 @@ fn main() {
         // Context preservation
         TestCase {
             name: "context_preservation",
-            input: "{n[{in(m,p), state1, state2}], m[{r, local}]}",
-            expected_output: Some("m[{n[{p, state1, state2}], r, local}]"),
+            input: "{n[{in(m,p) | state1 | state2}] | m[{r | local}]}",
+            expected_output: Some("m[{n[{p | state1 | state2}] | r | local}]"),
             should_normalize: true,
             min_rewrites: 1,
             description: "Both ambients preserve their local state",
@@ -241,7 +188,7 @@ fn main() {
         // Parallel operations
         TestCase {
             name: "parallel_entry",
-            input: "{a[{in(parent,x)}], b[{in(parent,y)}], parent[z]}",
+            input: "{a[{in(parent,x)}] | b[{in(parent,y)}] | parent[z]}",
             expected_output: None, // Multiple possible outcomes
             should_normalize: false, // May have multiple normal forms
             min_rewrites: 2, // At least two rewrites (one for each entry)
@@ -251,7 +198,7 @@ fn main() {
         // Sequential operations
         TestCase {
             name: "sequential_mobility",
-            input: "{agent[{in(loc1, in(loc2, {}))}], loc1[{}], loc2[{}]}",
+            input: "{agent[{in(loc1, in(loc2, {}))}] | loc1[{}] | loc2[{}]}",
             expected_output: None, // Complex chain
             should_normalize: false,
             min_rewrites: 1, // At least the first move
@@ -261,7 +208,7 @@ fn main() {
         // Nested mobility
         TestCase {
             name: "nested_mobility",
-            input: "{parent[{in(grandparent,{}), child[{}]}], grandparent[{}]}",
+            input: "{parent[{in(grandparent,{}) | child[{}]}] | grandparent[{}]}",
             expected_output: Some("grandparent[{parent[{child[{}]}]}]"),
             should_normalize: true,
             min_rewrites: 1,
@@ -271,7 +218,7 @@ fn main() {
         // Complex interactions
         TestCase {
             name: "entry_then_exit",
-            input: "{n[{in(m, out(m, p))}], m[r]}",
+            input: "{n[{in(m, out(m, p))}] | m[r]}",
             expected_output: None, // Chain of rewrites
             should_normalize: true,
             min_rewrites: 2, // Enter, then exit
@@ -280,7 +227,7 @@ fn main() {
         
         TestCase {
             name: "open_after_entry",
-            input: "{agent[{in(container, {})}], container[{open(agent, result)}]}",
+            input: "{agent[{in(container, {})}] | container[{open(agent, result)}]}",
             expected_output: Some("container[{result}]"), // Multi-step
             should_normalize: true,
             min_rewrites: 2, // Entry then open
@@ -290,8 +237,8 @@ fn main() {
         // Edge cases
         TestCase {
             name: "zero_in_context",
-            input: "{n[{in(m,p), {}}], m[r]}",
-            expected_output: Some("m[{n[{p, {}}], r}]"),
+            input: "{n[{in(m,p) | {}}] | m[r]}",
+            expected_output: Some("m[{n[{p | {}}] | r}]"),
             should_normalize: true,
             min_rewrites: 1,
             description: "Zero explicitly in rest pattern",
@@ -299,8 +246,8 @@ fn main() {
         
         TestCase {
             name: "nested_ambients_in_rest",
-            input: "{n[{in(m,p), inner[data]}], m[r]}",
-            expected_output: Some("m[{n[{p, inner[data]}], r}]"),
+            input: "{n[{in(m,p) | inner[data]}] | m[r]}",
+            expected_output: Some("m[{n[{p | inner[data]}] | r}]"),
             should_normalize: true,
             min_rewrites: 1,
             description: "Nested ambient preserved in rest during move",
@@ -309,7 +256,7 @@ fn main() {
         // Congruence closure tests
         TestCase {
             name: "congruence_in_ambient",
-            input: "outer[{n[{in(m,p)}], m[r]}]",
+            input: "outer[{n[{in(m,p)}] | m[r]}]",
             expected_output: None, // Rewrites under ambient
             should_normalize: false,
             min_rewrites: 1,
@@ -318,7 +265,7 @@ fn main() {
         
         TestCase {
             name: "congruence_in_parallel",
-            input: "{{n[{in(m,p)}], m[r]}, observer}",
+            input: "{n[{in(m,p)}] | m[r] | observer}",
             expected_output: None, // Rewrites in parallel context
             should_normalize: false,
             min_rewrites: 1,
@@ -331,7 +278,7 @@ fn main() {
         
         TestCase {
             name: "equation_then_rewrite_extrusion_in",
-            input: "{n[{in(m,{})}], new(x,m[{}])}",
+            input: "{n[{in(m,{})}] | new(x,m[{}])}",
             expected_output: Some("new(x, {m[{n[{}]}]})"),
             should_normalize: true,
             min_rewrites: 1,
@@ -340,7 +287,7 @@ fn main() {
         
         TestCase {
             name: "equation_zero_then_rewrite",
-            input: "{n[{in(m,p)}], m[{}], {}}",
+            input: "{n[{in(m,p)}] | m[{}] | {}}",
             expected_output: Some("{m[{n[{p}]}]}"),
             should_normalize: true,
             min_rewrites: 1,
@@ -349,8 +296,8 @@ fn main() {
         
         TestCase {
             name: "nested_extrusion_in",
-            input: "new(x, new(y, {p, in(n, q)}))",
-            expected_output: Some("new(x, new(y, {p, in(n, q)}))"), // Doesn't reduce, but equations apply
+            input: "new(x, new(y, {p | in(n, q)}))",
+            expected_output: Some("new(x, new(y, {p | in(n, q)}))"), // Doesn't reduce, but equations apply
             should_normalize: false,
             min_rewrites: 0,
             description: "Nested binders with capability - tests equation application",
@@ -358,7 +305,7 @@ fn main() {
         
         TestCase {
             name: "extrusion_enables_out",
-            input: "{open(n, p), new(x, n[{out(m, q)}])}",
+            input: "{open(n, p) | new(x, n[{out(m, q)}])}",
             expected_output: None, // Complex multi-step
             should_normalize: false,
             min_rewrites: 1,
@@ -367,8 +314,8 @@ fn main() {
         
         TestCase {
             name: "parallel_with_extrusion",
-            input: "{new(x, {p, n[{in(m, q)}]}), m[r]}",
-            expected_output: Some("new(x,{m[{n[{q}], r}], p})"), // Equation then rewrite
+            input: "{new(x, {p | n[{in(m, q)}]}) | m[r]}",
+            expected_output: Some("new(x,{m[{n[{q}] | r}] | p})"), // Equation then rewrite
             should_normalize: true,
             min_rewrites: 1,
             description: "Extrusion equation enables parallel in-capability: {new(x,{p,n[{in(m,q)}]}), m[r]} =eq= {p, n[{in(m, new(x,q))}], m[r]} =>rw {p, m[{n[{r, new(x,q)}]}]}",
@@ -376,8 +323,8 @@ fn main() {
         
         TestCase {
             name: "zero_in_multiple_contexts",
-            input: "{{}, p, {{}, q}}",
-            expected_output: Some("{p, q}"),
+            input: "{{} | p | {{} | q}}",
+            expected_output: Some("{p | q}"),
             should_normalize: true,
             min_rewrites: 0, // Only equations
             description: "Multiple zero eliminations through equations",
@@ -385,7 +332,7 @@ fn main() {
         
         TestCase {
             name: "extrusion_amb_then_open",
-            input: "{open(n, p), new(x, {q, n[r]})}",
+            input: "{open(n, p) | new(x, {q | n[r]})}",
             expected_output: None, // Multi-step
             should_normalize: false,
             min_rewrites: 1,
@@ -394,7 +341,7 @@ fn main() {
         
         TestCase {
             name: "complex_mobility_with_binding",
-            input: "new(x, {n[{in(m, x)}], m[{}]})",
+            input: "new(x, {n[{in(m, x)}] | m[{}]})",
             expected_output: Some("new(x, {m[{n[{x}]}]})"),
             should_normalize: true,
             min_rewrites: 1,
@@ -403,8 +350,8 @@ fn main() {
         
         TestCase {
             name: "sequential_extrusions",
-            input: "new(x, new(y, {p, in(n, q)}))",
-            expected_output: Some("new(x, new(y, {p, in(n, q)}))"), // Equations apply but no rewrites
+            input: "new(x, new(y, {p | in(n, q)}))",
+            expected_output: Some("new(x, new(y, {p | in(n, q)}))"), // Equations apply but no rewrites
             should_normalize: false,
             min_rewrites: 0,
             description: "Multiple nested binders with capability",
@@ -412,7 +359,7 @@ fn main() {
         
         TestCase {
             name: "zero_elimination_cascade",
-            input: "{{}, {}, {}, {}}",
+            input: "{{} | {} | {} | {}}",
             expected_output: Some("{}"),
             should_normalize: true,
             min_rewrites: 0,
@@ -421,8 +368,8 @@ fn main() {
         
         TestCase {
             name: "extrusion_with_out_and_in",
-            input: "new(x, {n[{in(m, p), out(k, q)}], m[r]})",
-            expected_output: Some("new(x, {m[{n[{p, out(k, q)}], r}]})"),
+            input: "new(x, {n[{in(m, p) | out(k, q)}] | m[r]})",
+            expected_output: Some("new(x, {m[{n[{p | out(k, q)}] | r}]})"),
             should_normalize: true,
             min_rewrites: 1,
             description: "Extrusion doesn't interfere with mixed capabilities",
@@ -430,7 +377,7 @@ fn main() {
         
         TestCase {
             name: "open_after_amb_extrusion",
-            input: "{open(n, p), new(x, {q, n[r]})}",
+            input: "{open(n, p) | new(x, {q | n[r]})}",
             expected_output: None, // Requires equation then multiple rewrites
             should_normalize: false,
             min_rewrites: 1,
@@ -439,8 +386,8 @@ fn main() {
         
         TestCase {
             name: "in_with_zero_elimination",
-            input: "{n[{in(m, {p, {}})}], m[q]}",
-            expected_output: Some("{m[{n[{p}], q}]}"),
+            input: "{n[{in(m, {p | {}})}] | m[q]}",
+            expected_output: Some("{m[{n[{p}] | q}]}"),
             should_normalize: true,
             min_rewrites: 1,
             description: "Zero elimination in capability before mobility",
