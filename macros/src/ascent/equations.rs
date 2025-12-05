@@ -1,4 +1,4 @@
-use crate::ast::{TheoryDef, Equation, Expr, FreshnessCondition, GrammarItem};
+use crate::ast::{TheoryDef, Equation, Expr};
 use proc_macro2::TokenStream;
 use quote::{quote, format_ident};
 use syn::Ident;

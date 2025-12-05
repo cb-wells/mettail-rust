@@ -1,17 +1,11 @@
 use crate::ast::{TheoryDef, RewriteRule, Expr};
 use super::{generate_ascent_pattern};
-use super::rhs::{generate_ascent_rhs, generate_rhs_construction};
-use crate::ascent::congruence::{
-    find_collection_congruence_element_categories,
-    extract_collection_congruence_info,
-    extract_category,
-    contains_collection_pattern,
-    CollectionCongruenceInfo,
-};
+use super::rhs::generate_ascent_rhs;
+use crate::ascent::congruence::extract_category;
 use proc_macro2::TokenStream;
-use quote::{quote, format_ident};
+use quote::quote;
 use syn::Ident;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 /// Generate Ascent clauses for rewrite rules (for equational matching)
 /// This is the new approach that allows duplicate variables to use eq_cat() relations

@@ -1,8 +1,6 @@
 use crate::ast::{TheoryDef, RewriteRule, Expr, GrammarItem, GrammarRule};
 use syn::Ident;
 use std::collections::{HashSet, HashMap};
-use proc_macro2::TokenStream;
-use quote::{quote, format_ident};
 
 /// Information about a collection congruence rule
 #[derive(Debug, Clone)]
@@ -56,7 +54,7 @@ pub fn parse_congruence_lhs(expr: &Expr, source_var: &Ident, theory: &TheoryDef)
         Expr::Apply { constructor, args } => {
             // Check if any arg is a CollectionPattern
             for (i, arg) in args.iter().enumerate() {
-                if let Expr::CollectionPattern { elements, rest, .. } = arg {
+                if let Expr::CollectionPattern { elements,  .. } = arg {
                     // Collection pattern case
                     // Check if source_var appears in the elements
                     for elem in elements {

@@ -17,7 +17,6 @@ pub mod rhs;
 // Re-export key functions
 pub use patterns::generate_ascent_pattern;
 pub use clauses::generate_rewrite_clauses;
-pub use rhs::{generate_ascent_rhs, generate_rhs_construction};
 
 /// Generate freshness checking functions
 pub fn generate_freshness_functions(_theory: &TheoryDef) -> TokenStream {

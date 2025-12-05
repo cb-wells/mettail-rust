@@ -8,7 +8,6 @@
 
 use crate::ast::{TheoryDef, RewriteRule, Expr};
 use proc_macro2::TokenStream;
-use syn::Ident;
 
 mod analysis;
 mod collection;
@@ -18,14 +17,7 @@ mod projections;
 
 // Re-export key types and functions from analysis
 pub use analysis::{
-    CollectionCongruenceInfo,
-    RegularCongruencePattern,
-    CaptureInfo,
-    ElementPatternInfo,
     parse_congruence_lhs,
-    find_base_rewrites_for_category,
-    extract_element_patterns_from_base_rewrite,
-    is_collection_congruence,
     contains_collection_pattern,
     extract_collection_congruence_info,
     extract_category,
@@ -34,31 +26,15 @@ pub use analysis::{
 };
 
 // Re-export from collection
-pub use collection::{
-    generate_collection_congruence,
-    generate_new_collection_congruence_clauses,
-};
+pub use collection::generate_new_collection_congruence_clauses;
 
 // Re-export from regular
-pub use regular::{
-    generate_regular_congruence,
-    generate_regular_congruence_clause,
-    extract_regular_congruence_pattern,
-    find_regular_congruences_for_category,
-};
 
 // Re-export from binding
-pub use binding::{
-    generate_binding_congruence,
-    generate_projection_based_binding_congruence,
-};
+pub use binding::generate_projection_based_binding_congruence;
 
 // Re-export from projections
-pub use projections::{
-    generate_congruence_projections,
-    generate_binding_proj_declaration,
-    generate_binding_proj_population,
-};
+pub use projections::generate_congruence_projections;
 
 /// Dispatch function: Route to appropriate congruence handler
 pub fn generate_congruence_rewrite(

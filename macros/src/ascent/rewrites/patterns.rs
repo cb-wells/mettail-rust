@@ -1,8 +1,8 @@
-use crate::ast::{TheoryDef, Expr, GrammarItem};
+use crate::ast::{TheoryDef, Expr};
 use proc_macro2::TokenStream;
-use quote::{quote, format_ident};
+use quote::quote;
 use syn::Ident;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use crate::ascent::congruence;
 
 /// Generate Ascent pattern matching clauses for LHS

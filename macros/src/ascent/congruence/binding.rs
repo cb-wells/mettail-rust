@@ -1,4 +1,4 @@
-use crate::ast::{TheoryDef, GrammarRule};
+use crate::ast::TheoryDef;
 use super::projections::{generate_binding_proj_declaration, generate_binding_proj_population};
 use proc_macro2::TokenStream;
 use quote::{quote, format_ident};

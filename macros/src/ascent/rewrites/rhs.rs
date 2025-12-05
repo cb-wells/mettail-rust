@@ -1,6 +1,6 @@
 use crate::ast::{TheoryDef, Expr};
 use proc_macro2::TokenStream;
-use quote::{quote, format_ident};
+use quote::quote;
 use std::collections::HashMap;
 use crate::ascent::congruence;
 

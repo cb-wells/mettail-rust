@@ -5,7 +5,6 @@ use crate::ascent::rewrites::rhs::generate_rhs_construction;
 use proc_macro2::TokenStream;
 use quote::{quote, format_ident};
 use syn::Ident;
-use std::collections::HashMap;
 
 /// Generate congruence for collection constructors
 /// Example: if S => T then (PPar {S, ...rest}) => (PPar {T, ...rest})

@@ -3,7 +3,6 @@
 
 use std::fs;
 use std::path::Path;
-use super::generate_lalrpop_grammar;
 use crate::ast::TheoryDef;
 
 /// Write a LALRPOP grammar file for a theory
