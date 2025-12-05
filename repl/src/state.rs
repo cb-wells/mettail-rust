@@ -1,4 +1,4 @@
-use crate::theory::{AscentResults, Term, Theory};
+use crate::theory::{AscentResults, Term};
 use crate::examples::TheoryName;
 use anyhow::Result;
 
