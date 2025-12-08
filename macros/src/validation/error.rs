@@ -1,6 +1,5 @@
 use proc_macro2::{Span, TokenStream};
 use quote::quote_spanned;
-use syn::spanned::Spanned;
 
 /// Validation error with span information for better compile-time diagnostics
 #[derive(Debug, Clone)]

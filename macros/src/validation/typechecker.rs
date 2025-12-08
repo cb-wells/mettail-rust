@@ -1,7 +1,6 @@
 use crate::ast::{TheoryDef, GrammarRule, GrammarItem, Expr, Equation, RewriteRule};
 use super::ValidationError;
 use std::collections::HashMap;
-use syn::spanned::Spanned;
 use proc_macro2::Span;
 
 /// Type checker for MeTTaIL theories
