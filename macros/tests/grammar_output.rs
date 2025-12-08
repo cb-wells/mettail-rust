@@ -3,9 +3,6 @@
 
 #[cfg(test)]
 mod grammar_output_tests {
-    use std::fs;
-    use std::path::PathBuf;
-    
     // Since we can't directly access internal modules from integration tests,
     // we need to make these public or use a different approach
     // For now, this demonstrates what we want to test
