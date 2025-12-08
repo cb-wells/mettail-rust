@@ -17,18 +17,21 @@ pub struct TypeChecker {
 /// Information about a constructor
 #[derive(Debug, Clone)]
 pub struct ConstructorType {
+    #[allow(dead_code)]
     pub name: String,
     pub result_category: String,
     pub arg_categories: Vec<String>,
 }
 
 /// Information about a category
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct CategoryInfo {
     pub name: String,
     pub exported: bool,
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub enum TypeError {
     UnknownConstructor(String),
@@ -120,6 +123,7 @@ impl TypeChecker {
     }
     
     /// Infer the type/category of an expression with a variable context
+    #[allow(dead_code)]
     pub fn infer_type_with_context(
         &self,
         expr: &Expr,
@@ -257,6 +261,7 @@ impl TypeChecker {
     }
     
     /// Infer the type/category of an expression (legacy method - uses context internally)
+    #[allow(dead_code)]
     pub fn infer_type(&self, expr: &Expr) -> Result<String, ValidationError> {
         let mut context = HashMap::new();
         self.infer_type_with_context(expr, &mut context)
@@ -337,11 +342,13 @@ impl TypeChecker {
     }
     
     /// Get information about a constructor
+    #[allow(dead_code)]
     pub fn get_constructor(&self, name: &str) -> Option<&ConstructorType> {
         self.constructors.get(name)
     }
     
     /// Check if a category exists
+    #[allow(dead_code)]
     pub fn has_category(&self, name: &str) -> bool {
         self.categories.contains_key(name)
     }

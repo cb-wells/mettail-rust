@@ -23,12 +23,12 @@ use syn::Ident;
 /// ```
 pub fn generate_collection_congruence(
     category: &Ident,
-    cat_lower: &Ident,
+    _cat_lower: &Ident,
     rw_rel: &Ident,
     constructor: &Ident,
-    source_var: &Ident,
-    target_var: &Ident,
-    rest_var: Option<&Ident>,
+    _source_var: &Ident,
+    _target_var: &Ident,
+    _rest_var: Option<&Ident>,
     theory: &TheoryDef,
 ) -> Option<TokenStream> {
     // Get the element category by finding this constructor's collection field
@@ -154,7 +154,7 @@ pub fn generate_new_collection_congruence_clauses(
 fn generate_joined_base_rewrite_clause(
     cong_idx: usize,
     base_idx: usize,
-    cong_info: &CollectionCongruenceInfo,
+    _cong_info: &CollectionCongruenceInfo,
     patterns: &[ElementPatternInfo],
     rhs: &Expr,
     rw_rel: &Ident,
@@ -352,7 +352,7 @@ fn generate_rhs_reconstruction(
     
     // Special case: if RHS is a collection constructor with collection pattern inside,
     // extract just the elements (since insert_into_X will add them to the collection)
-    if let Expr::Apply { constructor, args } = rhs {
+    if let Expr::Apply { constructor: _, args } = rhs {
         // Check if this has a collection argument
         for arg in args {
             if let Expr::CollectionPattern { elements, rest, .. } = arg {

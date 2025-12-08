@@ -14,6 +14,7 @@ use syn::Ident;
 ///     rw_proc(*body, t0),
 ///     let new_scope = mettail_runtime::Scope::new(x.clone(), Box::new(t0.clone())),
 ///     let t = Proc::PNew(new_scope);
+#[allow(dead_code)]
 pub fn generate_binding_congruence(
     category: &Ident,
     cat_lower: &Ident,
@@ -28,7 +29,7 @@ pub fn generate_binding_congruence(
     
     // Determine which fields are binders and which are being rewritten
     let binder_vars: Vec<_> = rule.bindings.iter().enumerate().map(|(idx, (binder_idx, _))| {
-        let var_name = bindings.get(*binder_idx)?;
+        let _var_name = bindings.get(*binder_idx)?;
         // Use a unique name to avoid shadowing the input parameter 's'
         Some(format_ident!("binder_{}", idx))
     }).collect::<Option<Vec<_>>>()?;

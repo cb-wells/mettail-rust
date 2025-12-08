@@ -61,7 +61,7 @@ pub fn generate_regular_congruence(
 pub fn generate_regular_congruence_clause(
     cong_idx: usize,
     reg_idx: usize,
-    cong_info: &CollectionCongruenceInfo,
+    _cong_info: &CollectionCongruenceInfo,
     pattern: &RegularCongruencePattern,
     rw_rel: &Ident,
     parent_cat: &Ident,

@@ -1,3 +1,5 @@
+#![allow(non_local_definitions)]
+
 use mettail_macros::theory;
 
 // Ambient Calculus Theory Definition

@@ -53,7 +53,7 @@ fn generate_congruence_rules(theory: &TheoryDef) -> Vec<TokenStream> {
     for grammar_rule in &theory.terms {
         let category = &grammar_rule.category;
         let eq_rel = format_ident!("eq_{}", category.to_string().to_lowercase());
-        let cat_lower = format_ident!("{}", category.to_string().to_lowercase());
+        let _cat_lower = format_ident!("{}", category.to_string().to_lowercase());
         
         // Check if this constructor has binders
         let has_binders = !grammar_rule.bindings.is_empty();
@@ -476,6 +476,7 @@ fn to_snake_case(name: &str) -> String {
 
 /// Generate RHS construction code for collection pattern equations
 /// Collection variables are bound as T (cloned from iterator), not &Box<T>
+#[allow(dead_code)]
 fn generate_collection_equation_rhs(expr: &Expr, bindings: &HashMap<String, Ident>, theory: &TheoryDef) -> TokenStream {
     match expr {
         Expr::Var(var) => {
@@ -508,6 +509,7 @@ fn generate_collection_equation_rhs(expr: &Expr, bindings: &HashMap<String, Iden
 
 /// Generate RHS construction code
 /// `in_constructor` flag indicates if we're inside a constructor argument (affects Box wrapping)
+#[allow(dead_code)]
 fn generate_equation_rhs(expr: &Expr, bindings: &HashMap<String, Ident>, theory: &TheoryDef, in_constructor: bool) -> TokenStream {
     match expr {
         Expr::Var(var) => {
@@ -671,6 +673,7 @@ fn category_has_collections(category: &Ident, theory: &TheoryDef) -> bool {
 }
 
 /// Check if a constructor is nullary (has no non-terminal arguments)
+#[allow(dead_code)]
 fn is_nullary_constructor(ident: &Ident, theory: &TheoryDef) -> bool {
     theory.terms.iter()
         .find(|rule| rule.label == *ident)

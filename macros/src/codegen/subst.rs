@@ -410,7 +410,7 @@ fn generate_regular_substitution_arm(category: &Ident, rule: &GrammarRule, repla
             // Same category - use moniker's built-in substitution
             return quote! {
                 #category::#label(var_field) => {
-                    use mettail_runtime::{Var, FreeVar};
+                    use mettail_runtime::Var;
                     match var_field {
                         Var::Bound(b) => #category::#label(Var::Bound(b.clone())),
                         Var::Free(ref fv) => {

@@ -11,6 +11,7 @@ use syn::Ident;
 /// 
 /// For each exported category, generates a parser function that can
 /// parse terms of that category from strings.
+#[allow(dead_code)]
 pub fn generate_parsers(theory: &TheoryDef) -> TokenStream {
     let theory_name = &theory.name;
     
@@ -39,6 +40,7 @@ pub fn generate_parsers(theory: &TheoryDef) -> TokenStream {
 }
 
 /// Generate a parser function for a specific category
+#[allow(dead_code)]
 fn generate_category_parser(category: &Ident, rules: &[&GrammarRule]) -> TokenStream {
     let fn_name = quote::format_ident!("parse_{}", category.to_string().to_lowercase());
     
@@ -63,6 +65,7 @@ fn generate_category_parser(category: &Ident, rules: &[&GrammarRule]) -> TokenSt
 }
 
 /// Generate parser code for a single grammar rule
+#[allow(dead_code)]
 fn generate_rule_parser(rule: &GrammarRule) -> TokenStream {
     let label = &rule.label;
     let category = &rule.category;
@@ -113,7 +116,8 @@ fn generate_rule_parser(rule: &GrammarRule) -> TokenStream {
 /// Generate parser for a rule with binders
 /// Example: ELam . Expr ::= "\\" <Var> "." Expr ;
 /// Should generate code that creates: Expr::ELam(Scope::new(Binder(var), body))
-fn generate_binder_rule_parser(rule: &GrammarRule) -> TokenStream {
+#[allow(dead_code)]
+fn generate_binder_rule_parser(_rule: &GrammarRule) -> TokenStream {
     // For now, we don't generate parsers for rules with binders
     // This is a placeholder that will be implemented later
     // We generate an empty token stream so the parser function compiles
@@ -124,6 +128,7 @@ fn generate_binder_rule_parser(rule: &GrammarRule) -> TokenStream {
 }
 
 /// Build pattern matching and field parsing code for a rule WITHOUT bindings
+#[allow(dead_code)]
 fn build_rule_pattern(rule: &GrammarRule) -> (Vec<TokenStream>, Vec<TokenStream>, Vec<Ident>) {
     let mut pattern_checks = Vec::new();
     let mut field_parsers = Vec::new();

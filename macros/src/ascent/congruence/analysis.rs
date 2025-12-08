@@ -3,6 +3,7 @@ use syn::Ident;
 use std::collections::{HashSet, HashMap};
 
 /// Information about a collection congruence rule
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct CollectionCongruenceInfo {
     pub constructor: Ident,           // PPar
@@ -14,6 +15,7 @@ pub struct CollectionCongruenceInfo {
 }
 
 /// Information about a regular (non-collection) congruence rule
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct RegularCongruencePattern {
     pub constructor: Ident,           // PNew
@@ -49,11 +51,11 @@ pub struct CaptureInfo {
 /// 
 /// For collection congruences, returns a sentinel field_idx of 0.
 /// For regular congruences, returns the actual field index where source_var appears.
-pub fn parse_congruence_lhs(expr: &Expr, source_var: &Ident, theory: &TheoryDef) -> Option<(Ident, usize, Vec<Ident>)> {
+pub fn parse_congruence_lhs(expr: &Expr, source_var: &Ident, _theory: &TheoryDef) -> Option<(Ident, usize, Vec<Ident>)> {
     match expr {
         Expr::Apply { constructor, args } => {
             // Check if any arg is a CollectionPattern
-            for (i, arg) in args.iter().enumerate() {
+            for (_i, arg) in args.iter().enumerate() {
                 if let Expr::CollectionPattern { elements,  .. } = arg {
                     // Collection pattern case
                     // Check if source_var appears in the elements

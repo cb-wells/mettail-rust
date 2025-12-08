@@ -4,6 +4,7 @@ use syn::{Ident, Token, parse::{Parse, ParseStream}, Result as SynResult, Type};
 /// theory! { name: Foo, params: ..., exports { ... }, terms { ... }, equations { ... }, rewrites { ... } }
 pub struct TheoryDef {
     pub name: Ident,
+    #[allow(dead_code)]
     pub params: Vec<TheoryParam>,
     pub exports: Vec<Export>,
     pub terms: Vec<GrammarRule>,
@@ -13,6 +14,7 @@ pub struct TheoryDef {
 
 /// Theory parameter (for generic theories)
 /// params: (cm: CommutativeMonoid)
+#[allow(dead_code)]
 pub struct TheoryParam {
     pub name: Ident,
     pub ty: Type,
