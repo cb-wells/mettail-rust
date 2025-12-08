@@ -1,3 +1,5 @@
+#![allow(clippy::cmp_owned, clippy::single_match)]
+
 use super::{display, subst, termgen};
 use crate::ast::{GrammarItem, GrammarRule, TheoryDef};
 use proc_macro2::TokenStream;
@@ -118,7 +120,8 @@ fn generate_variant(rule: &GrammarRule) -> TokenStream {
         // Unit variant
         quote! { #label }
     } else if fields.len() == 1 {
-        match &fields[0] {
+            #[allow(clippy::cmp_owned)]
+                    match &fields[0] {
             FieldType::NonTerminal(ident) if ident.to_string() == "Var" => {
                 // Special case: Var field -> generate OrdVar directly (not boxed)
                 quote! { #label(mettail_runtime::OrdVar) }

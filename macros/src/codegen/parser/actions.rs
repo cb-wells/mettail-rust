@@ -1,3 +1,5 @@
+#![allow(clippy::cmp_owned)]
+
 //! Parser generation for MeTTaIL theories
 //!
 //! Generates parser combinator code from grammar rules

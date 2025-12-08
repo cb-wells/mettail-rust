@@ -1,7 +1,6 @@
 /// Pretty-printing utilities for terms
 ///
 /// Provides indented multi-line formatting for complex terms.
-
 /// Trait for pretty-printing with indentation
 pub trait PrettyPrint {
     fn pretty_print(&self) -> String {

@@ -1,3 +1,5 @@
+#![allow(clippy::cmp_owned)]
+
 //! Category exploration and deconstruction rules
 //!
 //! Generates Ascent rules for:

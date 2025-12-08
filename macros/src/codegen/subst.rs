@@ -4,6 +4,8 @@
 //! For each exported category, we generate a `substitute` method that performs
 //! capture-avoiding substitution of variables.
 
+#![allow(clippy::cmp_owned)]
+
 use crate::ast::{GrammarItem, GrammarRule, TheoryDef};
 use proc_macro2::TokenStream;
 use quote::quote;

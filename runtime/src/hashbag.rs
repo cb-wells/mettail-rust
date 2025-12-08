@@ -72,6 +72,7 @@ impl<T: Clone + Hash + Eq> HashBag<T> {
     /// assert_eq!(bag.count(&"a"), 2);
     /// assert_eq!(bag.len(), 3);
     /// ```
+    #[allow(clippy::should_implement_trait)]
     pub fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
         let mut bag = Self::new();
         for item in iter {
@@ -246,7 +247,7 @@ impl<T: Clone + Hash + Eq> HashBag<T> {
     pub fn iter_elements(&self) -> impl Iterator<Item = &T> {
         self.counts
             .iter()
-            .flat_map(|(k, &count)| std::iter::repeat(k).take(count))
+            .flat_map(|(k, &count)| std::iter::repeat_n(k, count))
     }
 }
 
@@ -376,6 +377,33 @@ where
             elem.visit_mut_vars(on_var);
             self.counts.insert(elem, count);
         }
+    }
+}
+
+/// Display implementation for HashBag
+///
+/// Formats as `{elem1, elem1, elem2}` with elements repeated according to their count.
+/// Elements are sorted for deterministic output.
+impl<T: Clone + Hash + Eq + Ord + fmt::Display> fmt::Display for HashBag<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{{")?;
+
+        // Collect and sort elements for deterministic output
+        let mut items: Vec<(&T, &usize)> = self.counts.iter().collect();
+        items.sort_by(|a, b| a.0.cmp(b.0));
+
+        let mut first = true;
+        for (elem, &count) in items {
+            for _ in 0..count {
+                if !first {
+                    write!(f, ", ")?;
+                }
+                write!(f, "{}", elem)?;
+                first = false;
+            }
+        }
+
+        write!(f, "}}")
     }
 }
 
@@ -542,32 +570,5 @@ mod tests {
         bag3.insert(0);
 
         assert!(bag3 < bag1); // Same count, but bag3 has smaller element
-    }
-}
-
-/// Display implementation for HashBag
-///
-/// Formats as `{elem1, elem1, elem2}` with elements repeated according to their count.
-/// Elements are sorted for deterministic output.
-impl<T: Clone + Hash + Eq + Ord + fmt::Display> fmt::Display for HashBag<T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{{")?;
-
-        // Collect and sort elements for deterministic output
-        let mut items: Vec<(&T, &usize)> = self.counts.iter().collect();
-        items.sort_by(|a, b| a.0.cmp(b.0));
-
-        let mut first = true;
-        for (elem, &count) in items {
-            for _ in 0..count {
-                if !first {
-                    write!(f, ", ")?;
-                }
-                write!(f, "{}", elem)?;
-                first = false;
-            }
-        }
-
-        write!(f, "}}")
     }
 }

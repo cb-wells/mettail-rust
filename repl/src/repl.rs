@@ -112,9 +112,8 @@ impl Repl {
             },
             _ => {
                 // Check if it's a term input
-                if line.starts_with("term:") {
-                    let term_str = line["term:".len()..].trim();
-                    self.cmd_parse_term(term_str)
+                if let Some(term_str) = line.strip_prefix("term:") {
+                    self.cmd_parse_term(term_str.trim())
                 } else {
                     anyhow::bail!(
                         "Unknown command: '{}'. Type 'help' for available commands.",

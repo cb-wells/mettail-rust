@@ -1,3 +1,5 @@
+#![allow(clippy::cmp_owned)]
+
 use crate::ast::{Expr, GrammarItem, GrammarRule, RewriteRule, TheoryDef};
 use std::collections::{HashMap, HashSet};
 use syn::Ident;
@@ -59,7 +61,7 @@ pub fn parse_congruence_lhs(
     match expr {
         Expr::Apply { constructor, args } => {
             // Check if any arg is a CollectionPattern
-            for (_i, arg) in args.iter().enumerate() {
+            for arg in args.iter() {
                 if let Expr::CollectionPattern { elements, .. } = arg {
                     // Collection pattern case
                     // Check if source_var appears in the elements

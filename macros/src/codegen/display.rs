@@ -3,6 +3,8 @@
 // This module generates Display trait implementations for AST types,
 // allowing them to be pretty-printed back to source syntax.
 
+#![allow(clippy::cmp_owned)]
+
 use crate::ast::{GrammarItem, GrammarRule, TheoryDef};
 use proc_macro2::TokenStream;
 use quote::quote;
