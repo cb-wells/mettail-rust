@@ -3,6 +3,7 @@
 // This example shows the Ambient Calculus with capabilities:
 // in, out, and open operations on nested ambients.
 
+use ascent_byods_rels::*;
 use mettail_theories::ambient::*;
 use ascent::*;
 use std::time::Instant;
@@ -42,9 +43,9 @@ fn demonstrate_rewrite(input: &str) {
         std::process::exit(1);
     });
     
-    // Run Ascent
+    // Run Ascent - use module path to locate the macro
     let prog = ascent_run! {
-        include_source!(ambient_source);
+        include_source!(mettail_theories::ambient::ambient_source);
         proc(term.clone());
     };
     

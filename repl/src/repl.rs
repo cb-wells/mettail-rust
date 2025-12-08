@@ -2,7 +2,6 @@ use crate::registry::TheoryRegistry;
 use crate::state::ReplState;
 use crate::examples::{Example, ExampleCategory, TheoryName};
 use crate::pretty::format_term_pretty;
-use crate::theory::Theory;
 use anyhow::Result;
 use std::time::Instant;
 use colored::Colorize;
