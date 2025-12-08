@@ -234,7 +234,7 @@ fn generate_binder_variant(rule: &GrammarRule) -> TokenStream {
 /// that automatically flattens nested collections of the same type.
 /// 
 /// Example generated code:
-/// ```
+/// ```ignore
 /// impl Proc {
 ///     fn insert_into_ppar(bag: &mut mettail_runtime::HashBag<Proc>, elem: Proc) {
 ///         match elem {

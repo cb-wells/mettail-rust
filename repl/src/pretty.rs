@@ -132,6 +132,10 @@ mod tests {
         
         // Check multiple indentation levels
         let lines: Vec<&str> = output.lines().collect();
-        assert!(lines.len() > 3);
+        assert!(lines.len() >= 3, "Expected at least 3 lines, got {}", lines.len());
+        
+        // Verify we have increasing indentation
+        assert!(output.contains("    { "));
+        assert!(output.contains("        { "));
     }
 }

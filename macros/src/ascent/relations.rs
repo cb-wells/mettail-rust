@@ -57,7 +57,7 @@ pub fn generate_relations(theory: &TheoryDef) -> TokenStream {
 /// that relates the parent term to each element in the collection.
 /// 
 /// Example: For PPar(HashBag<Proc>), generates:
-/// ```
+/// ```text
 /// relation ppar_contains(Proc, Proc);
 /// ```
 /// 

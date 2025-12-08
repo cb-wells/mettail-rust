@@ -9,7 +9,7 @@ use syn::Ident;
 /// Generate congruence for collection constructors
 /// Example: if S => T then (PPar {S, ...rest}) => (PPar {T, ...rest})
 /// Generates:
-/// ```
+/// ```text
 /// rw_proc(parent, result) <--
 ///     ppar_contains(parent, elem),
 ///     rw_proc(elem, elem_rewritten),

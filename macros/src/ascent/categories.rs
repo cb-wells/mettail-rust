@@ -136,7 +136,7 @@ fn generate_collection_deconstruction(
 /// the corresponding "contains" relation.
 /// 
 /// Example: For PPar(HashBag<Proc>), generates:
-/// ```
+/// ```text
 /// ppar_contains(parent.clone(), elem.clone()) <--
 ///     proc(parent),
 ///     if let Proc::PPar(ref bag_field) = parent,
@@ -189,7 +189,7 @@ fn generate_collection_projection_population(category: &Ident, theory: &TheoryDe
 /// 
 /// Example: For PPar(HashBag<Proc>) with projection relation ppar_contains(Proc, Proc),
 /// generates:
-/// ```
+/// ```text
 /// proc(elem) <-- ppar_contains(_parent, elem);
 /// ```
 /// 
