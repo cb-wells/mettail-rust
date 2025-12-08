@@ -1,4 +1,8 @@
-#![allow(non_local_definitions, clippy::crate_in_macro_def, clippy::empty_line_after_outer_attr)]
+#![allow(
+    non_local_definitions,
+    clippy::crate_in_macro_def,
+    clippy::empty_line_after_outer_attr
+)]
 
 use mettail_macros::theory;
 

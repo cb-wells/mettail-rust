@@ -1,4 +1,15 @@
-#![allow(clippy::cmp_owned, clippy::too_many_arguments, clippy::needless_borrow, clippy::for_kv_map, clippy::let_and_return, clippy::unused_enumerate_index, clippy::expect_fun_call, clippy::collapsible_match, clippy::unwrap_or_default, clippy::unnecessary_filter_map)]
+#![allow(
+    clippy::cmp_owned,
+    clippy::too_many_arguments,
+    clippy::needless_borrow,
+    clippy::for_kv_map,
+    clippy::let_and_return,
+    clippy::unused_enumerate_index,
+    clippy::expect_fun_call,
+    clippy::collapsible_match,
+    clippy::unwrap_or_default,
+    clippy::unnecessary_filter_map
+)]
 
 use super::TypeChecker;
 use super::ValidationError;
