@@ -1,7 +1,7 @@
 # Session Summary: Phase 2 Parsing Complete
 
-**Date:** October 26, 2025  
-**Session Duration:** ~2 hours  
+**Date:** October 26, 2025
+**Session Duration:** ~2 hours
 **Status:** ✅ Phase 2 Core Complete
 
 ---
@@ -23,7 +23,7 @@
 - `generate_infix_alternative()` - Left-associative patterns
 
 ### 2. Syntax Correction for Rho Calculus
-**Fixed:** `NQuote . Name ::= "@" "(" Proc ")"`  
+**Fixed:** `NQuote . Name ::= "@" "(" Proc ")"`
 **Reason:** Prevents ambiguity when `Proc` contains infix operators
 
 **Example:**
@@ -31,7 +31,7 @@
 - After: `@(a | b)` - unambiguous ✅
 
 ### 3. Full Parsing Tests
-**Target Expression:** `a!(0) | b!(c!(0)) | for(a x){*x}`  
+**Target Expression:** `a!(0) | b!(c!(0)) | for(a x){*x}`
 **Result:** ✅ **ALL 11 TESTS PASSING**
 
 ```
@@ -49,7 +49,7 @@
 ```
 
 ### 4. Correct Import Generation
-**Fixed:** Grammar now generates `use super::{Proc, Name};`  
+**Fixed:** Grammar now generates `use super::{Proc, Name};`
 **Instead of:** `use std::str::FromStr;`
 
 This allows the generated parser to work in any context (tests, libraries, etc.)
@@ -135,15 +135,15 @@ if !type_names.is_empty() {
 ## 🎓 Key Learnings
 
 ### 1. Ambiguity Prevention
-**Lesson:** Quote-like constructs need careful handling with infix operators  
+**Lesson:** Quote-like constructs need careful handling with infix operators
 **Solution:** Require parentheses: `@(P)` not `@P`
 
 ### 2. LALRPOP Import Paths
-**Lesson:** Generated parsers need to import AST types  
+**Lesson:** Generated parsers need to import AST types
 **Solution:** Use `super::{...}` for flexibility across contexts
 
 ### 3. Precedence with Binders
-**Lesson:** Binder syntax can coexist with infix operators  
+**Lesson:** Binder syntax can coexist with infix operators
 **Solution:** Put binders in `Atom` tier, not `Infix` tier
 
 ---
@@ -165,15 +165,15 @@ if !type_names.is_empty() {
 ## 🐛 Known Limitations
 
 ### 1. Single Precedence Level
-**Current:** All infix operators at same precedence  
+**Current:** All infix operators at same precedence
 **Future:** Multiple tiers for `*` vs `+` etc.
 
 ### 2. Left-Associativity Only
-**Current:** All infix operators are left-associative  
+**Current:** All infix operators are left-associative
 **Future:** Allow specification: `[left]`, `[right]`, `[none]`
 
 ### 3. Prefix+Infix Mixing
-**Current:** May cause ambiguity (like BoolCalc's `not` + `and`)  
+**Current:** May cause ambiguity (like BoolCalc's `not` + `and`)
 **Future:** Better detection and precedence handling
 
 ---
@@ -214,14 +214,14 @@ if !type_names.is_empty() {
 
 ## 🎉 Success Criteria Met
 
-✅ Parse simple terms (`0`, `*x`, `@(0)`)  
-✅ Parse compound terms (`a!(0)`, `b!(c!(0))`)  
-✅ Parse infix operators (`a!(0) | b!(0)`)  
-✅ Handle precedence with parentheses  
-✅ Parse binders (`for(a x){*x}`)  
-✅ Parse complex expressions  
-✅ Grammar generation fully automated  
-✅ All tests passing  
+✅ Parse simple terms (`0`, `*x`, `@(0)`)
+✅ Parse compound terms (`a!(0)`, `b!(c!(0))`)
+✅ Parse infix operators (`a!(0) | b!(0)`)
+✅ Handle precedence with parentheses
+✅ Parse binders (`for(a x){*x}`)
+✅ Parse complex expressions
+✅ Grammar generation fully automated
+✅ All tests passing
 
 **Phase 2 Core Objectives: COMPLETE** 🚀
 

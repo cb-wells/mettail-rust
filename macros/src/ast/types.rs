@@ -1,4 +1,7 @@
-use syn::{Ident, Token, parse::{Parse, ParseStream}, Result as SynResult, Type};
+use syn::{
+    parse::{Parse, ParseStream},
+    Ident, Result as SynResult, Token, Type,
+};
 
 /// Top-level theory definition
 /// theory! { name: Foo, params: ..., exports { ... }, terms { ... }, equations { ... }, rewrites { ... } }
@@ -94,17 +97,19 @@ pub struct GrammarRule {
 /// Item in a grammar rule
 #[derive(Debug, Clone, PartialEq)]
 pub enum GrammarItem {
-    Terminal(String),      // "0"
-    NonTerminal(Ident),    // Elem
+    Terminal(String),   // "0"
+    NonTerminal(Ident), // Elem
     /// Binder: <Category> indicates this position binds a variable
     /// The bound variable is used in subsequent items
-    Binder { category: Ident },  // <Name>
+    Binder {
+        category: Ident,
+    }, // <Name>
     /// Collection: HashBag(Proc) sep "|" [delim "[" "]"]
     Collection {
         coll_type: CollectionType,
         element_type: Ident,
         separator: String,
-        delimiters: Option<(String, String)>,  // (open, close)
+        delimiters: Option<(String, String)>, // (open, close)
     },
 }
 
@@ -127,7 +132,7 @@ impl Parse for TheoryDef {
         let _ = input.parse::<Token![:]>()?;
         let name = input.parse::<Ident>()?;
         let _ = input.parse::<Token![,]>()?;
-        
+
         // Parse: params: (...) (optional)
         let params = if input.peek(Ident) {
             let lookahead = input.fork().parse::<Ident>()?;
@@ -139,7 +144,7 @@ impl Parse for TheoryDef {
         } else {
             Vec::new()
         };
-        
+
         // Parse: exports { ... }
         let exports = if input.peek(Ident) {
             let lookahead = input.fork().parse::<Ident>()?;
@@ -151,7 +156,7 @@ impl Parse for TheoryDef {
         } else {
             Vec::new()
         };
-        
+
         // Parse: terms { ... }
         let terms = if input.peek(Ident) {
             let lookahead = input.fork().parse::<Ident>()?;
@@ -163,7 +168,7 @@ impl Parse for TheoryDef {
         } else {
             Vec::new()
         };
-        
+
         // Parse: equations { ... }
         let equations = if input.peek(Ident) {
             let lookahead = input.fork().parse::<Ident>()?;
@@ -175,7 +180,7 @@ impl Parse for TheoryDef {
         } else {
             Vec::new()
         };
-        
+
         // Parse: rewrites { ... }
         let rewrites = if input.peek(Ident) {
             let lookahead = input.fork().parse::<Ident>()?;
@@ -187,7 +192,7 @@ impl Parse for TheoryDef {
         } else {
             Vec::new()
         };
-        
+
         Ok(TheoryDef {
             name,
             params,
@@ -204,30 +209,30 @@ fn parse_params(input: ParseStream) -> SynResult<Vec<TheoryParam>> {
     if params_ident != "params" {
         return Err(syn::Error::new(params_ident.span(), "expected 'params'"));
     }
-    
+
     let _ = input.parse::<Token![:]>()?;
-    
+
     let content;
     syn::parenthesized!(content in input);
-    
+
     let mut params = Vec::new();
     while !content.is_empty() {
         let name = content.parse::<Ident>()?;
         let _ = content.parse::<Token![:]>()?;
         let ty = content.parse::<Type>()?;
-        
+
         params.push(TheoryParam { name, ty });
-        
+
         if content.peek(Token![,]) {
             let _ = content.parse::<Token![,]>()?;
         }
     }
-    
+
     // Optional comma after closing paren
     if input.peek(Token![,]) {
         let _ = input.parse::<Token![,]>()?;
     }
-    
+
     Ok(params)
 }
 
@@ -236,25 +241,25 @@ fn parse_exports(input: ParseStream) -> SynResult<Vec<Export>> {
     if exports_ident != "exports" {
         return Err(syn::Error::new(exports_ident.span(), "expected 'exports'"));
     }
-    
+
     let content;
     syn::braced!(content in input);
-    
+
     let mut exports = Vec::new();
     while !content.is_empty() {
         let name = content.parse::<Ident>()?;
         exports.push(Export { name });
-        
+
         if content.peek(Token![;]) {
             let _ = content.parse::<Token![;]>()?;
         }
     }
-    
+
     // Optional comma after closing brace
     if input.peek(Token![,]) {
         let _ = input.parse::<Token![,]>()?;
     }
-    
+
     Ok(exports)
 }
 
@@ -263,20 +268,20 @@ fn parse_terms(input: ParseStream) -> SynResult<Vec<GrammarRule>> {
     if terms_ident != "terms" {
         return Err(syn::Error::new(terms_ident.span(), "expected 'terms'"));
     }
-    
+
     let content;
     syn::braced!(content in input);
-    
+
     let mut rules = Vec::new();
     while !content.is_empty() {
         rules.push(parse_grammar_rule(&content)?);
     }
-    
+
     //Optional comma after closing brace
     if input.peek(Token![,]) {
         let _ = input.parse::<Token![,]>()?;
     }
-    
+
     Ok(rules)
 }
 
@@ -285,11 +290,11 @@ fn parse_grammar_rule(input: ParseStream) -> SynResult<GrammarRule> {
     let label = input.parse::<Ident>()?;
     let _ = input.parse::<Token![.]>()?;
     let category = input.parse::<Ident>()?;
-    
+
     // Parse ::= (as two colons followed by equals)
     let _ = input.parse::<Token![::]>()?;
     let _ = input.parse::<Token![=]>()?;
-    
+
     // Parse items until semicolon
     let mut items = Vec::new();
     while !input.peek(Token![;]) {
@@ -307,9 +312,10 @@ fn parse_grammar_rule(input: ParseStream) -> SynResult<GrammarRule> {
             // Check if this is a collection type (HashBag, HashSet, Vec)
             let ident = input.parse::<Ident>()?;
             let ident_str = ident.to_string();
-            
-            if (ident_str == "HashBag" || ident_str == "HashSet" || ident_str == "Vec") 
-                && input.peek(syn::token::Paren) {
+
+            if (ident_str == "HashBag" || ident_str == "HashSet" || ident_str == "Vec")
+                && input.peek(syn::token::Paren)
+            {
                 // Collection: HashBag(Proc) sep "|" [delim "[" "]"]
                 items.push(parse_collection(ident, input)?);
             } else {
@@ -318,46 +324,41 @@ fn parse_grammar_rule(input: ParseStream) -> SynResult<GrammarRule> {
             }
         }
     }
-    
+
     let _ = input.parse::<Token![;]>()?;
-    
+
     // Infer binding structure: each Binder binds in the next NonTerminal
     let bindings = infer_bindings(&items);
-    
-    Ok(GrammarRule {
-        label,
-        category,
-        items,
-        bindings,
-    })
+
+    Ok(GrammarRule { label, category, items, bindings })
 }
 
 /// Infer binding structure from items
 /// Each Binder at position i binds in the next NonTerminal/Binder at position j > i
 fn infer_bindings(items: &[GrammarItem]) -> Vec<(usize, Vec<usize>)> {
     let mut bindings = Vec::new();
-    
+
     for (i, item) in items.iter().enumerate() {
         if matches!(item, GrammarItem::Binder { .. }) {
             // Find the next non-terminal item(s) that this binder binds in
             let mut bound_indices = Vec::new();
-            
+
             for (j, next_item) in items.iter().enumerate().skip(i + 1) {
                 match next_item {
                     GrammarItem::NonTerminal(_) | GrammarItem::Binder { .. } => {
                         bound_indices.push(j);
                         break; // For now, bind only in the immediately following item
-                    }
+                    },
                     GrammarItem::Terminal(_) | GrammarItem::Collection { .. } => continue,
                 }
             }
-            
+
             if !bound_indices.is_empty() {
                 bindings.push((i, bound_indices));
             }
         }
     }
-    
+
     bindings
 }
 
@@ -368,17 +369,19 @@ fn parse_collection(coll_type_ident: Ident, input: ParseStream) -> SynResult<Gra
         "HashBag" => CollectionType::HashBag,
         "HashSet" => CollectionType::HashSet,
         "Vec" => CollectionType::Vec,
-        _ => return Err(syn::Error::new(
-            coll_type_ident.span(),
-            "expected HashBag, HashSet, or Vec"
-        )),
+        _ => {
+            return Err(syn::Error::new(
+                coll_type_ident.span(),
+                "expected HashBag, HashSet, or Vec",
+            ))
+        },
     };
-    
+
     // Parse (ElementType)
     let content;
     syn::parenthesized!(content in input);
     let element_type = content.parse::<Ident>()?;
-    
+
     // Parse sep "separator"
     let sep_kw = input.parse::<Ident>()?;
     if sep_kw != "sep" {
@@ -386,12 +389,12 @@ fn parse_collection(coll_type_ident: Ident, input: ParseStream) -> SynResult<Gra
     }
     let separator: syn::LitStr = input.parse()?;
     let separator_value = separator.value();
-    
+
     // Validate separator is non-empty
     if separator_value.is_empty() {
         return Err(syn::Error::new(separator.span(), "separator cannot be empty"));
     }
-    
+
     // Optional: delim "open" "close"
     let delimiters = if input.peek(Ident) {
         let lookahead = input.fork().parse::<Ident>()?;
@@ -402,10 +405,10 @@ fn parse_collection(coll_type_ident: Ident, input: ParseStream) -> SynResult<Gra
             }
             let open: syn::LitStr = input.parse()?;
             let close: syn::LitStr = input.parse()?;
-            
+
             let open_value = open.value();
             let close_value = close.value();
-            
+
             // Validate delimiters are non-empty
             if open_value.is_empty() {
                 return Err(syn::Error::new(open.span(), "open delimiter cannot be empty"));
@@ -413,7 +416,7 @@ fn parse_collection(coll_type_ident: Ident, input: ParseStream) -> SynResult<Gra
             if close_value.is_empty() {
                 return Err(syn::Error::new(close.span(), "close delimiter cannot be empty"));
             }
-            
+
             Some((open_value, close_value))
         } else {
             None
@@ -421,7 +424,7 @@ fn parse_collection(coll_type_ident: Ident, input: ParseStream) -> SynResult<Gra
     } else {
         None
     };
-    
+
     Ok(GrammarItem::Collection {
         coll_type,
         element_type,
@@ -435,38 +438,38 @@ fn parse_equations(input: ParseStream) -> SynResult<Vec<Equation>> {
     if eq_ident != "equations" {
         return Err(syn::Error::new(eq_ident.span(), "expected 'equations'"));
     }
-    
+
     let content;
     syn::braced!(content in input);
-    
+
     let mut equations = Vec::new();
     while !content.is_empty() {
         equations.push(parse_equation(&content)?);
     }
-    
+
     // Optional comma after closing brace
     if input.peek(Token![,]) {
         let _ = input.parse::<Token![,]>()?;
     }
-    
+
     Ok(equations)
 }
 
 fn parse_equation(input: ParseStream) -> SynResult<Equation> {
     // Parse optional freshness conditions: if x # Q then
     let mut conditions = Vec::new();
-    
+
     if input.peek(Token![if]) {
         let _ = input.parse::<Token![if]>()?;
-        
+
         // Parse one or more freshness conditions
         loop {
             let var = input.parse::<Ident>()?;
             let _ = input.parse::<Token![#]>()?;
             let term = input.parse::<Ident>()?;
-            
+
             conditions.push(FreshnessCondition { var, term });
-            
+
             // Check for 'then' or continue with more conditions
             if input.peek(Ident) {
                 let lookahead = input.fork().parse::<Ident>()?;
@@ -475,36 +478,32 @@ fn parse_equation(input: ParseStream) -> SynResult<Equation> {
                     break;
                 }
             }
-            
+
             if input.peek(Token![,]) {
                 let _ = input.parse::<Token![,]>()?;
                 // Continue parsing more conditions
             } else {
                 return Err(syn::Error::new(
                     input.span(),
-                    "expected 'then' or ',' after freshness condition"
+                    "expected 'then' or ',' after freshness condition",
                 ));
             }
         }
     }
-    
+
     // Parse left-hand side
     let left = parse_expr(input)?;
-    
+
     // Parse ==
     let _ = input.parse::<Token![==]>()?;
-    
+
     // Parse right-hand side
     let right = parse_expr(input)?;
-    
+
     // Parse semicolon
     let _ = input.parse::<Token![;]>()?;
-    
-    Ok(Equation {
-        conditions,
-        left,
-        right,
-    })
+
+    Ok(Equation { conditions, left, right })
 }
 
 fn parse_expr(input: ParseStream) -> SynResult<Expr> {
@@ -512,27 +511,27 @@ fn parse_expr(input: ParseStream) -> SynResult<Expr> {
     if input.peek(syn::token::Brace) {
         let content;
         syn::braced!(content in input);
-        
+
         let mut elements = Vec::new();
         let mut rest = None;
-        
+
         // Parse elements and optional rest
         while !content.is_empty() {
             // Check for rest pattern: ...rest
             if content.peek(Token![...]) {
                 let _ = content.parse::<Token![...]>()?;
                 rest = Some(content.parse::<Ident>()?);
-                
+
                 // Optional trailing comma
                 if content.peek(Token![,]) {
                     let _ = content.parse::<Token![,]>()?;
                 }
                 break;
             }
-            
+
             // Parse regular element expression
             elements.push(parse_expr(&content)?);
-            
+
             // Parse comma separator
             if content.peek(Token![,]) {
                 let _ = content.parse::<Token![,]>()?;
@@ -540,22 +539,22 @@ fn parse_expr(input: ParseStream) -> SynResult<Expr> {
                 break;
             }
         }
-        
+
         return Ok(Expr::CollectionPattern {
-            constructor: None,  // Will be inferred during validation
+            constructor: None, // Will be inferred during validation
             elements,
             rest,
         });
     }
-    
+
     // Parse parenthesized expression or variable
     if input.peek(syn::token::Paren) {
         let content;
         syn::parenthesized!(content in input);
-        
+
         // Parse constructor name or 'subst'
         let constructor = content.parse::<Ident>()?;
-        
+
         // Check if this is a substitution
         if constructor == "subst" {
             // Parse: subst term var replacement
@@ -563,20 +562,20 @@ fn parse_expr(input: ParseStream) -> SynResult<Expr> {
             let term = parse_expr(&content)?;
             let var = content.parse::<Ident>()?;
             let replacement = parse_expr(&content)?;
-            
+
             return Ok(Expr::Subst {
                 term: Box::new(term),
                 var,
                 replacement: Box::new(replacement),
             });
         }
-        
+
         // Parse arguments for regular constructor
         let mut args = Vec::new();
         while !content.is_empty() {
             args.push(parse_expr(&content)?);
         }
-        
+
         Ok(Expr::Apply { constructor, args })
     } else {
         // Just a variable
@@ -590,10 +589,10 @@ fn parse_rewrites(input: ParseStream) -> SynResult<Vec<RewriteRule>> {
     if rewrites_ident != "rewrites" {
         return Err(syn::Error::new(rewrites_ident.span(), "expected 'rewrites'"));
     }
-    
+
     let content;
     syn::braced!(content in input);
-    
+
     let mut rewrites = Vec::new();
     while !content.is_empty() {
         // Skip comments (// ...)
@@ -601,23 +600,26 @@ fn parse_rewrites(input: ParseStream) -> SynResult<Vec<RewriteRule>> {
             let _ = content.parse::<Token![/]>()?;
             let _ = content.parse::<Token![/]>()?;
             // Skip until end of line - consume tokens until we see something we recognize
-            while !content.is_empty() && !content.peek(syn::token::Paren) && !content.peek(Token![if]) {
+            while !content.is_empty()
+                && !content.peek(syn::token::Paren)
+                && !content.peek(Token![if])
+            {
                 let _ = content.parse::<proc_macro2::TokenTree>()?;
             }
         }
-        
+
         if content.is_empty() {
             break;
         }
-        
+
         rewrites.push(parse_rewrite_rule(&content)?);
     }
-    
+
     // Optional comma after closing brace
     if input.peek(Token![,]) {
         let _ = input.parse::<Token![,]>()?;
     }
-    
+
     Ok(rewrites)
 }
 
@@ -626,11 +628,11 @@ fn parse_rewrite_rule(input: ParseStream) -> SynResult<RewriteRule> {
     // OR congruence premise: if S => T then
     let mut conditions = Vec::new();
     let mut premise = None;
-    
+
     while input.peek(Token![if]) {
         let _ = input.parse::<Token![if]>()?;
         let var = input.parse::<Ident>()?;
-        
+
         // Check if this is a congruence premise (if S => T then) or freshness (if x # Q then)
         if input.peek(Token![=]) && input.peek2(Token![>]) {
             // Congruence premise: if S => T then
@@ -641,7 +643,7 @@ fn parse_rewrite_rule(input: ParseStream) -> SynResult<RewriteRule> {
             if then_kw != "then" {
                 return Err(syn::Error::new(then_kw.span(), "expected 'then'"));
             }
-            
+
             premise = Some((var, target));
         } else {
             // Freshness condition: if x # Q then
@@ -651,32 +653,27 @@ fn parse_rewrite_rule(input: ParseStream) -> SynResult<RewriteRule> {
             if then_kw != "then" {
                 return Err(syn::Error::new(then_kw.span(), "expected 'then'"));
             }
-            
+
             conditions.push(FreshnessCondition { var, term });
         }
     }
-    
+
     // Parse left-hand side
     let left = parse_expr(input)?;
-    
+
     // Parse =>
     let _ = input.parse::<Token![=]>()?;
     let _ = input.parse::<Token![>]>()?;
-    
+
     // Parse right-hand side
     let right = parse_expr(input)?;
-    
+
     // Optional semicolon
     if input.peek(Token![;]) {
         let _ = input.parse::<Token![;]>()?;
     }
-    
-    Ok(RewriteRule {
-        conditions,
-        premise,
-        left,
-        right,
-    })
+
+    Ok(RewriteRule { conditions, premise, left, right })
 }
 
 #[cfg(test)]
@@ -695,26 +692,31 @@ mod tests {
                 EZero . Elem ::= "0" ;
             }
         };
-        
+
         let result = parse2::<TheoryDef>(input);
         assert!(result.is_ok(), "Failed to parse HashBag: {:?}", result.err());
-        
+
         let theory = result.unwrap();
         assert_eq!(theory.name.to_string(), "TestBag");
         assert_eq!(theory.terms.len(), 2);
-        
+
         // Check EBag has a Collection item
         let ebag = &theory.terms[0];
         assert_eq!(ebag.label.to_string(), "EBag");
         assert_eq!(ebag.items.len(), 1);
-        
+
         match &ebag.items[0] {
-            GrammarItem::Collection { coll_type, element_type, separator, delimiters } => {
+            GrammarItem::Collection {
+                coll_type,
+                element_type,
+                separator,
+                delimiters,
+            } => {
                 assert_eq!(*coll_type, CollectionType::HashBag);
                 assert_eq!(element_type.to_string(), "Elem");
                 assert_eq!(separator, "|");
                 assert!(delimiters.is_none());
-            }
+            },
             _ => panic!("Expected Collection item"),
         }
     }
@@ -728,19 +730,19 @@ mod tests {
                 EList . Elem ::= Vec(Elem) sep "," delim "[" "]" ;
             }
         };
-        
+
         let result = parse2::<TheoryDef>(input);
         assert!(result.is_ok(), "Failed to parse Vec with delimiters: {:?}", result.err());
-        
+
         let theory = result.unwrap();
         let elist = &theory.terms[0];
-        
+
         match &elist.items[0] {
             GrammarItem::Collection { coll_type, separator, delimiters, .. } => {
                 assert_eq!(*coll_type, CollectionType::Vec);
                 assert_eq!(separator, ",");
                 assert_eq!(delimiters.as_ref().unwrap(), &("[".to_string(), "]".to_string()));
-            }
+            },
             _ => panic!("Expected Collection item with delimiters"),
         }
     }
@@ -754,19 +756,19 @@ mod tests {
                 ESet . Elem ::= HashSet(Elem) sep "," delim "{" "}" ;
             }
         };
-        
+
         let result = parse2::<TheoryDef>(input);
         assert!(result.is_ok(), "Failed to parse HashSet: {:?}", result.err());
-        
+
         let theory = result.unwrap();
         let eset = &theory.terms[0];
-        
+
         match &eset.items[0] {
             GrammarItem::Collection { coll_type, separator, delimiters, .. } => {
                 assert_eq!(*coll_type, CollectionType::HashSet);
                 assert_eq!(separator, ",");
                 assert_eq!(delimiters.as_ref().unwrap(), &("{".to_string(), "}".to_string()));
-            }
+            },
             _ => panic!("Expected HashSet collection"),
         }
     }
@@ -780,7 +782,7 @@ mod tests {
                 EBag . Elem ::= HashBag(Elem) sep "" ;
             }
         };
-        
+
         let result = parse2::<TheoryDef>(input);
         assert!(result.is_err(), "Should reject empty separator");
         let err = result.err().unwrap();
@@ -796,7 +798,7 @@ mod tests {
                 EBag . Elem ::= HashBag(Elem) "|" ;
             }
         };
-        
+
         let result = parse2::<TheoryDef>(input);
         assert!(result.is_err(), "Should require 'sep' keyword");
         // The error will be about unexpected token, not specifically about 'sep'

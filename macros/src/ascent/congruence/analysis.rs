@@ -1,36 +1,36 @@
-use crate::ast::{TheoryDef, RewriteRule, Expr, GrammarItem, GrammarRule};
+use crate::ast::{Expr, GrammarItem, GrammarRule, RewriteRule, TheoryDef};
+use std::collections::{HashMap, HashSet};
 use syn::Ident;
-use std::collections::{HashSet, HashMap};
 
 /// Information about a collection congruence rule
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct CollectionCongruenceInfo {
-    pub constructor: Ident,           // PPar
-    pub parent_category: Ident,       // Proc
-    pub element_category: Ident,      // Proc (for PPar)
-    pub source_var: Ident,            // S in "if S => T"
-    pub target_var: Ident,            // T in "if S => T"
-    pub rest_var: Option<Ident>,      // rest in "{S, ...rest}"
+    pub constructor: Ident,      // PPar
+    pub parent_category: Ident,  // Proc
+    pub element_category: Ident, // Proc (for PPar)
+    pub source_var: Ident,       // S in "if S => T"
+    pub target_var: Ident,       // T in "if S => T"
+    pub rest_var: Option<Ident>, // rest in "{S, ...rest}"
 }
 
 /// Information about a regular (non-collection) congruence rule
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct RegularCongruencePattern {
-    pub constructor: Ident,           // PNew
-    pub category: Ident,              // Proc
-    pub rewrite_field_idx: usize,     // Which field rewrites (the one matching source_var)
-    pub is_binding: bool,             // Whether this is a binding constructor
-    pub source_var: Ident,            // S in "if S => T"
-    pub target_var: Ident,            // T in "if S => T"
+    pub constructor: Ident,       // PNew
+    pub category: Ident,          // Proc
+    pub rewrite_field_idx: usize, // Which field rewrites (the one matching source_var)
+    pub is_binding: bool,         // Whether this is a binding constructor
+    pub source_var: Ident,        // S in "if S => T"
+    pub target_var: Ident,        // T in "if S => T"
 }
 
 /// Information about an element pattern extracted from a base rewrite
 #[derive(Debug, Clone)]
 pub struct ElementPatternInfo {
-    pub constructor: Ident,      // PInput, POutput, PDrop, PAmb
-    pub category: Ident,          // Proc
+    pub constructor: Ident, // PInput, POutput, PDrop, PAmb
+    pub category: Ident,    // Proc
     pub captures: Vec<CaptureInfo>,
     pub is_nested: bool,         // True if pattern has nested structure
     pub expr: Option<Expr>,      // The full element expression for nested pattern matching
@@ -48,15 +48,19 @@ pub struct CaptureInfo {
 
 /// Parse a congruence rule LHS to extract constructor, field index, and variable bindings
 /// Returns (constructor, rewrite_field_idx, all_bindings)
-/// 
+///
 /// For collection congruences, returns a sentinel field_idx of 0.
 /// For regular congruences, returns the actual field index where source_var appears.
-pub fn parse_congruence_lhs(expr: &Expr, source_var: &Ident, _theory: &TheoryDef) -> Option<(Ident, usize, Vec<Ident>)> {
+pub fn parse_congruence_lhs(
+    expr: &Expr,
+    source_var: &Ident,
+    _theory: &TheoryDef,
+) -> Option<(Ident, usize, Vec<Ident>)> {
     match expr {
         Expr::Apply { constructor, args } => {
             // Check if any arg is a CollectionPattern
             for (_i, arg) in args.iter().enumerate() {
-                if let Expr::CollectionPattern { elements,  .. } = arg {
+                if let Expr::CollectionPattern { elements, .. } = arg {
                     // Collection pattern case
                     // Check if source_var appears in the elements
                     for elem in elements {
@@ -71,11 +75,11 @@ pub fn parse_congruence_lhs(expr: &Expr, source_var: &Ident, _theory: &TheoryDef
                     }
                 }
             }
-            
+
             // Regular (non-collection) case
             let mut bindings = Vec::new();
             let mut field_idx = None;
-            
+
             for (i, arg) in args.iter().enumerate() {
                 match arg {
                     Expr::Var(var) => {
@@ -83,17 +87,17 @@ pub fn parse_congruence_lhs(expr: &Expr, source_var: &Ident, _theory: &TheoryDef
                             field_idx = Some(i);
                         }
                         bindings.push(var.clone());
-                    }
+                    },
                     Expr::CollectionPattern { .. } => {
                         // Skip collection patterns in regular case
                         continue;
-                    }
+                    },
                     _ => return None, // Nested constructors not supported in congruence LHS
                 }
             }
-            
+
             Some((constructor.clone(), field_idx?, bindings))
-        }
+        },
         _ => None,
     }
 }
@@ -109,7 +113,7 @@ fn rule_involves_category(expr: &Expr, category: &Ident, theory: &TheoryDef) -> 
             return true;
         }
     }
-    
+
     // Check collection element categories
     if let Expr::Apply { constructor, args } = expr {
         for arg in args {
@@ -127,7 +131,7 @@ fn rule_involves_category(expr: &Expr, category: &Ident, theory: &TheoryDef) -> 
             }
         }
     }
-    
+
     false
 }
 
@@ -139,7 +143,9 @@ pub fn find_base_rewrites_for_category<'a>(
     category: &Ident,
     theory: &'a TheoryDef,
 ) -> Vec<&'a RewriteRule> {
-    theory.rewrites.iter()
+    theory
+        .rewrites
+        .iter()
         .filter(|rule| {
             // Base rewrites only (no premise)
             rule.premise.is_none() &&
@@ -148,7 +154,6 @@ pub fn find_base_rewrites_for_category<'a>(
         })
         .collect()
 }
-
 
 /// Extract element patterns from a base rewrite LHS
 /// For `(PDrop (NQuote P)) => P`: returns [(PDrop, ...)]
@@ -159,11 +164,11 @@ pub fn extract_element_patterns_from_base_rewrite(
     theory: &TheoryDef,
 ) -> Vec<ElementPatternInfo> {
     let mut patterns = Vec::new();
-    
+
     // Only extract patterns from collection LHS that match the congruence's collection constructor
     // Case 1: Direct constructor patterns (e.g., (PDrop ...) for PDrop base rewrite)
     // Case 2: Collection with element patterns (e.g., (PPar {(PInput ...), (POutput ...)})
-    
+
     if let Expr::Apply { constructor, args } = lhs {
         if *constructor == cong_info.constructor {
             // This is the collection constructor we're interested in
@@ -192,61 +197,60 @@ pub fn extract_element_patterns_from_base_rewrite(
                     // This is a direct pattern - the congruence should lift it into collections
                     // Extract captures from the pattern for the congruence clause
                     let var_categories = extract_variable_categories(lhs, theory);
-                    let captures: Vec<CaptureInfo> = var_categories.iter().map(|(var_name, cat)| {
-                        CaptureInfo {
-                            var_name: var_name.clone(),
-                            category: cat.clone(),
-                            field_idx: 0,  // Not used for nested patterns
-                            is_binder: false,  // Simplified for now
-                        }
-                    }).collect();
-                    
+                    let captures: Vec<CaptureInfo> = var_categories
+                        .iter()
+                        .map(|(var_name, cat)| {
+                            CaptureInfo {
+                                var_name: var_name.clone(),
+                                category: cat.clone(),
+                                field_idx: 0,     // Not used for nested patterns
+                                is_binder: false, // Simplified for now
+                            }
+                        })
+                        .collect();
+
                     patterns.push(ElementPatternInfo {
                         constructor: constructor.clone(),
                         category: cong_info.element_category.clone(),
                         captures,
-                        is_nested: true,  // Direct patterns use full pattern matching
-                        expr: Some(lhs.clone()),  // Store full LHS for pattern matching
+                        is_nested: true, // Direct patterns use full pattern matching
+                        expr: Some(lhs.clone()), // Store full LHS for pattern matching
                         rest_var: None,  // Direct patterns don't have rest (they're the whole term)
                     });
                 }
             }
         }
     }
-    
+
     patterns
 }
 
 /// Analyze a constructor pattern to extract captures
-fn analyze_constructor_pattern(
-    expr: &Expr,
-    theory: &TheoryDef,
-) -> Option<ElementPatternInfo> {
+fn analyze_constructor_pattern(expr: &Expr, theory: &TheoryDef) -> Option<ElementPatternInfo> {
     if let Expr::Apply { constructor, args } = expr {
-        let grammar_rule = theory.terms.iter()
-            .find(|r| r.label == *constructor)?;
-        
+        let grammar_rule = theory.terms.iter().find(|r| r.label == *constructor)?;
+
         let category = grammar_rule.category.clone();
-        
+
         // Pattern is nested if it has nested Apply nodes in args (not just Vars)
         let is_nested = args.iter().any(|arg| matches!(arg, Expr::Apply { .. }));
-        
+
         // For nested patterns, we'll use full pattern matching via generate_ascent_pattern
         // Don't extract captures here - they'll be extracted during projection generation
         let captures = if is_nested {
-            Vec::new()  // Will be populated during projection generation
+            Vec::new() // Will be populated during projection generation
         } else {
             // For flat patterns, extract captures normally
             extract_captures(args, grammar_rule, theory)
         };
-        
+
         return Some(ElementPatternInfo {
             constructor: constructor.clone(),
             category,
             captures,
             is_nested,
-            expr: None,  // Will be set by caller if needed
-            rest_var: None,  // Will be set by caller based on parent collection pattern
+            expr: None,     // Will be set by caller if needed
+            rest_var: None, // Will be set by caller based on parent collection pattern
         });
     }
     None
@@ -259,32 +263,44 @@ fn extract_captures(
     _theory: &TheoryDef,
 ) -> Vec<CaptureInfo> {
     let mut captures = Vec::new();
-    
+
     // Get non-terminal positions in grammar
-    let non_term_positions: Vec<(usize, &GrammarItem)> = grammar_rule.items.iter()
+    let non_term_positions: Vec<(usize, &GrammarItem)> = grammar_rule
+        .items
+        .iter()
         .enumerate()
-        .filter(|(_, item)| matches!(item, 
-            GrammarItem::NonTerminal(_) | 
-            GrammarItem::Binder { .. } |
-            GrammarItem::Collection { .. }))
+        .filter(|(_, item)| {
+            matches!(
+                item,
+                GrammarItem::NonTerminal(_)
+                    | GrammarItem::Binder { .. }
+                    | GrammarItem::Collection { .. }
+            )
+        })
         .collect();
-    
+
     // Build a map of which indices are bound together
     // For bindings like (binder_idx, [body_idx]), both should map to the same field
-    let mut bound_indices: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+    let mut bound_indices: std::collections::HashMap<usize, usize> =
+        std::collections::HashMap::new();
     for (binder_idx, body_indices) in &grammar_rule.bindings {
         for body_idx in body_indices {
             bound_indices.insert(*body_idx, *binder_idx);
         }
     }
-    
+
     // Map grammar indices to field indices, accounting for bindings
     let mut field_idx = 0;
     let mut grammar_to_field = vec![0; grammar_rule.items.len()];
     let mut processed_as_binding = std::collections::HashSet::new();
-    
+
     for (idx, item) in grammar_rule.items.iter().enumerate() {
-        if matches!(item, GrammarItem::NonTerminal(_) | GrammarItem::Binder { .. } | GrammarItem::Collection { .. }) {
+        if matches!(
+            item,
+            GrammarItem::NonTerminal(_)
+                | GrammarItem::Binder { .. }
+                | GrammarItem::Collection { .. }
+        ) {
             // Check if this index is a body that's bound to a binder
             if let Some(&binder_idx) = bound_indices.get(&idx) {
                 // This is a body bound to a binder - use the binder's field index
@@ -294,7 +310,7 @@ fn extract_captures(
                 processed_as_binding.insert(idx);
                 continue;
             }
-            
+
             // Check if this is a binder
             let is_binder = grammar_rule.bindings.iter().any(|(b_idx, _)| *b_idx == idx);
             if is_binder {
@@ -304,36 +320,38 @@ fn extract_captures(
                 processed_as_binding.insert(idx);
                 continue;
             }
-            
+
             // Regular non-terminal
             grammar_to_field[idx] = field_idx;
             field_idx += 1;
         }
     }
-    
+
     // Process each argument
     for (arg_idx, arg) in args.iter().enumerate() {
         if arg_idx >= non_term_positions.len() {
             continue;
         }
-        
+
         let (grammar_idx, grammar_item) = non_term_positions[arg_idx];
         let field_idx = grammar_to_field[grammar_idx];
-        
+
         let category = match grammar_item {
             GrammarItem::NonTerminal(cat) => cat.clone(),
             GrammarItem::Binder { category: cat } => cat.clone(),
             GrammarItem::Collection { element_type, .. } => element_type.clone(),
             _ => continue,
         };
-        
-        let is_binder = grammar_rule.bindings.iter()
+
+        let is_binder = grammar_rule
+            .bindings
+            .iter()
             .any(|(binder_idx, _)| *binder_idx == grammar_idx);
-        
+
         // Extract all variables from this argument (handles nested patterns)
         extract_vars_from_expr(arg, &category, field_idx, is_binder, &mut captures);
     }
-    
+
     captures
 }
 
@@ -353,23 +371,23 @@ fn extract_vars_from_expr(
                 field_idx,
                 is_binder,
             });
-        }
+        },
         Expr::Apply { args, .. } => {
             // Recursively extract from nested constructors
             for arg in args {
                 extract_vars_from_expr(arg, category, field_idx, is_binder, captures);
             }
-        }
+        },
         Expr::CollectionPattern { elements, .. } => {
             // Extract from collection elements
             for elem in elements {
                 extract_vars_from_expr(elem, category, field_idx, is_binder, captures);
             }
-        }
+        },
         Expr::Subst { term, replacement, .. } => {
             extract_vars_from_expr(term, category, field_idx, is_binder, captures);
             extract_vars_from_expr(replacement, category, field_idx, is_binder, captures);
-        }
+        },
     }
 }
 
@@ -390,7 +408,7 @@ fn extract_variable_categories_recursive(
         Expr::Var(_var_name) => {
             // We don't know the category from just the variable, need context
             // This will be filled in from the grammar context
-        }
+        },
         Expr::Apply { constructor, args } => {
             // Look up the constructor in the grammar to find field categories
             if let Some(grammar_rule) = theory.terms.iter().find(|r| r.label == *constructor) {
@@ -403,11 +421,15 @@ fn extract_variable_categories_recursive(
                                     categories.insert(var_name.to_string(), cat.clone());
                                 } else {
                                     // Recurse into nested expressions
-                                    extract_variable_categories_recursive(&args[non_term_idx], theory, categories);
+                                    extract_variable_categories_recursive(
+                                        &args[non_term_idx],
+                                        theory,
+                                        categories,
+                                    );
                                 }
                             }
                             non_term_idx += 1;
-                        }
+                        },
                         GrammarItem::Binder { category } => {
                             if non_term_idx < args.len() {
                                 if let Expr::Var(var_name) = &args[non_term_idx] {
@@ -415,55 +437,68 @@ fn extract_variable_categories_recursive(
                                 }
                             }
                             non_term_idx += 1;
-                            
+
                             // The body is the next non-terminal (handled in bindings)
-                            if let Some(&body_idx) = grammar_rule.bindings.iter()
+                            if let Some(&body_idx) = grammar_rule
+                                .bindings
+                                .iter()
                                 .find(|(binder_idx, _)| *binder_idx == item_idx)
                                 .and_then(|(_, bodies)| bodies.first())
                             {
-                                if let Some(GrammarItem::NonTerminal(body_cat)) = grammar_rule.items.get(body_idx) {
+                                if let Some(GrammarItem::NonTerminal(body_cat)) =
+                                    grammar_rule.items.get(body_idx)
+                                {
                                     if non_term_idx < args.len() {
                                         if let Expr::Var(var_name) = &args[non_term_idx] {
-                                            categories.insert(var_name.to_string(), body_cat.clone());
+                                            categories
+                                                .insert(var_name.to_string(), body_cat.clone());
                                         } else {
-                                            extract_variable_categories_recursive(&args[non_term_idx], theory, categories);
+                                            extract_variable_categories_recursive(
+                                                &args[non_term_idx],
+                                                theory,
+                                                categories,
+                                            );
                                         }
                                     }
                                     non_term_idx += 1;
                                 }
                             }
-                        }
+                        },
                         GrammarItem::Collection { element_type, .. } => {
                             if non_term_idx < args.len() {
-                                if let Expr::CollectionPattern { elements, .. } = &args[non_term_idx] {
+                                if let Expr::CollectionPattern { elements, .. } =
+                                    &args[non_term_idx]
+                                {
                                     for elem in elements {
                                         // Bare variables in collections should have the element type
                                         if let Expr::Var(var_name) = elem {
-                                            categories.insert(var_name.to_string(), element_type.clone());
+                                            categories
+                                                .insert(var_name.to_string(), element_type.clone());
                                         } else {
-                                            extract_variable_categories_recursive(elem, theory, categories);
+                                            extract_variable_categories_recursive(
+                                                elem, theory, categories,
+                                            );
                                         }
                                     }
                                 }
                             }
                             non_term_idx += 1;
-                        }
-                        _ => {}
+                        },
+                        _ => {},
                     }
                 }
             }
-        }
+        },
         Expr::Subst { term, .. } => {
             extract_variable_categories_recursive(term, theory, categories);
-        }
+        },
         Expr::CollectionPattern { elements, .. } => {
             for elem in elements {
                 extract_variable_categories_recursive(elem, theory, categories);
             }
-        }
+        },
     }
 }
-
 
 /// Check if a rewrite rule is a collection congruence
 pub fn is_collection_congruence(rule: &RewriteRule, _theory: &TheoryDef) -> bool {
@@ -478,7 +513,7 @@ pub fn contains_collection_pattern(expr: &Expr) -> bool {
         Expr::Apply { args, .. } => args.iter().any(contains_collection_pattern),
         Expr::Subst { term, replacement, .. } => {
             contains_collection_pattern(term) || contains_collection_pattern(replacement)
-        }
+        },
         Expr::Var(_) => false,
     }
 }
@@ -494,7 +529,7 @@ pub fn extract_category(expr: &Expr, theory: &TheoryDef) -> Option<Ident> {
                 }
             }
             None
-        }
+        },
         Expr::Var(_) => None,
         Expr::Subst { term, .. } => extract_category(term, theory),
         Expr::CollectionPattern { constructor, .. } => {
@@ -507,7 +542,7 @@ pub fn extract_category(expr: &Expr, theory: &TheoryDef) -> Option<Ident> {
                 }
             }
             None
-        }
+        },
     }
 }
 
@@ -528,13 +563,16 @@ pub fn extract_collection_congruence_info(
                     if let Expr::Var(v) = &elements[0] {
                         if v == source_var {
                             // Found it! Get category info
-                            let parent_category = theory.terms.iter()
+                            let parent_category = theory
+                                .terms
+                                .iter()
                                 .find(|r| r.label == *constructor)
                                 .map(|r| r.category.clone())?;
-                            
+
                             // Get element category from the collection field
-                            let element_category = get_constructor_collection_element_type(constructor, theory)?;
-                            
+                            let element_category =
+                                get_constructor_collection_element_type(constructor, theory)?;
+
                             return Some(CollectionCongruenceInfo {
                                 constructor: constructor.clone(),
                                 parent_category,
@@ -556,27 +594,32 @@ pub fn extract_collection_congruence_info(
 /// Returns the set of categories that are subjects of collection congruences
 pub fn find_collection_congruence_element_categories(theory: &TheoryDef) -> HashSet<Ident> {
     let mut categories = HashSet::new();
-    
+
     for rule in &theory.rewrites {
         if let Some((source_var, target_var)) = &rule.premise {
-            if let Some(info) = extract_collection_congruence_info(&rule.left, source_var, target_var, theory) {
+            if let Some(info) =
+                extract_collection_congruence_info(&rule.left, source_var, target_var, theory)
+            {
                 categories.insert(info.element_category);
             }
         }
     }
-    
+
     categories
 }
 
 /// Helper: Get element type from a collection constructor
-pub fn get_constructor_collection_element_type(constructor: &Ident, theory: &TheoryDef) -> Option<Ident> {
+pub fn get_constructor_collection_element_type(
+    constructor: &Ident,
+    theory: &TheoryDef,
+) -> Option<Ident> {
     let grammar_rule = theory.terms.iter().find(|r| r.label == *constructor)?;
-    
+
     for item in &grammar_rule.items {
         if let GrammarItem::Collection { element_type, .. } = item {
             return Some(element_type.clone());
         }
     }
-    
+
     None
 }

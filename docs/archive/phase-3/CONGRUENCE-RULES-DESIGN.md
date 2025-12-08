@@ -1,7 +1,7 @@
 # Congruence Rules Design
 
-**Status:** Design Phase  
-**Date:** October 29, 2025  
+**Status:** Design Phase
+**Date:** October 29, 2025
 **Phase:** 3 - Rewrite Engine Enhancement
 
 ---
@@ -42,7 +42,7 @@ rewrites {
     // Direct communication rule
     if x # Q then (PPar (PInput chan x P) (POutput chan Q))
         => (subst P x (NQuote Q));
-    
+
     // Congruence: rewrite right side of parallel composition
     if S => T then (PPar P S) => (PPar P T);
 }
@@ -81,7 +81,7 @@ if S => T then (PPar P S) => (PPar P T)
 if x # Q, S => T then (PInput chan x S) => (PInput chan x T)
 
 // Future work: Multiple rewrite premises (not in initial implementation)
-if S1 => T1, S2 => T2 then ... 
+if S1 => T1, S2 => T2 then ...
 ```
 
 ---
@@ -156,7 +156,7 @@ if input.peek(Token![if]) {
 if input.peek(Token![if]) {
     loop {
         let first_var = parse_ident();
-        
+
         if peek_token!(#) {
             // Freshness condition: x # Q
             parse_token!(#);
@@ -173,11 +173,11 @@ if input.peek(Token![if]) {
         } else {
             error!("Expected # or => after variable in premise");
         }
-        
+
         if !peek_token!(,) { break; }
         parse_token!(,);
     }
-    
+
     parse_token!(then);
 }
 ```
@@ -196,14 +196,14 @@ if input.peek(Token![if]) {
 
 ```rust
 fn generate_rule_matcher(
-    idx: usize, 
+    idx: usize,
     rule: &RewriteRule,
     theory: &TheoryDef
 ) -> TokenStream {
     // Check if this is a congruence rule
     let has_rewrite_premise = rule.premises.iter()
         .any(|p| matches!(p, Premise::Rewrite { .. }));
-    
+
     if has_rewrite_premise {
         generate_congruence_matcher(idx, rule, theory)
     } else {
@@ -229,14 +229,14 @@ pub fn try_rewrite_rule_1(term: &Proc) -> Option<Proc> {
     if let Proc::PPar(field_0, field_1) = term {
         // field_1 corresponds to variable S in the pattern
         // Try applying ALL rewrite rules to field_1
-        
+
         if let Some(rewritten) = try_rewrite_rule_0(&**field_1) {
             return Some(Proc::PPar(
                 field_0.clone(),
                 Box::new(rewritten)
             ));
         }
-        
+
         // Try next rule
         if let Some(rewritten) = try_rewrite_rule_1(&**field_1) {
             return Some(Proc::PPar(
@@ -244,7 +244,7 @@ pub fn try_rewrite_rule_1(term: &Proc) -> Option<Proc> {
                 Box::new(rewritten)
             ));
         }
-        
+
         // Try remaining rules...
         // (Generated for all rules in theory)
     }
@@ -339,7 +339,7 @@ if S => T then (PPar S S) => (PPar T T)
 
 **Validation:** During typechecking, ensure:
 - LHS contains exactly one occurrence of `source_var`
-- RHS contains exactly one occurrence of `target_var` 
+- RHS contains exactly one occurrence of `target_var`
 - Both occur in same position
 
 **Tasks:**
@@ -359,14 +359,14 @@ if x # P, S => T then (PInput chan x S) => (PInput chan x T)
 pub fn try_rewrite_rule_N(term: &Proc) -> Option<Proc> {
     if let Proc::PInput(field_0, scope_field) = term {
         let (binder, body) = scope_field.clone().unbind();
-        
+
         // Try rewriting body (which corresponds to S)
         if let Some(rewritten) = try_rewrite_rule_0(&*body) {
             // Check freshness condition BEFORE returning
             if !is_fresh(&binder, &rewritten) {
                 return None;  // Freshness violated after rewrite
             }
-            
+
             // Re-bind with rewritten body
             let new_scope = Scope::new(binder.clone(), Box::new(rewritten));
             return Some(Proc::PInput(
@@ -374,7 +374,7 @@ pub fn try_rewrite_rule_N(term: &Proc) -> Option<Proc> {
                 new_scope
             ));
         }
-        
+
         // Try more rules...
     }
     None
@@ -414,7 +414,7 @@ pub fn reduce(term: Proc) -> Proc {
     let mut step = 0;
     loop {
         let mut changed = false;
-        
+
         // Try all rules (direct + congruence)
         for i in 0..RULE_COUNT {
             if let Some(rewritten) = try_rewrite_rule(i, &current) {
@@ -424,7 +424,7 @@ pub fn reduce(term: Proc) -> Proc {
                 break;  // Apply one rule at a time
             }
         }
-        
+
         if !changed {
             break;  // Normal form reached
         }
@@ -627,6 +627,6 @@ b!(0) | *@(0)
 
 ---
 
-**Last Updated:** October 29, 2025  
+**Last Updated:** October 29, 2025
 **Status:** Ready for implementation
 

@@ -64,18 +64,18 @@ fn generate_equation_pattern_via_rewrite_logic(
     let mut rewrite_bindings = HashMap::new();
     let mut clauses = Vec::new();
     // ... (empty duplicate_vars, equational_checks for equations)
-    
+
     // 2. Call proven rewrite logic
     generate_ascent_pattern(
         expr, &term_ident, &expected_category, theory,
         &mut rewrite_bindings, ..., &mut clauses, ...
     );
-    
+
     // 3. Convert bindings format
     for (var_name, _) in rewrite_bindings {
         bindings.insert(var_name, format_ident!("..."));
     }
-    
+
     Some(clauses)
 }
 ```

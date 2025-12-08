@@ -69,10 +69,10 @@ theory! {
         PInput . Proc ::= "for" "(" <Name> ")" "{" Proc "}" ;
         //                          ^^^^^^        ^^^^
         //                          Binder        Body (where Name is bound)
-        
+
         // Alternative notation (more explicit):
         PInput . Proc ::= "for" "(" Bind<Name> ")" "{" Proc "}" ;
-        
+
         // Or following the MeTTaIL Scala convention:
         PInput . Proc ::= "for" "(" Name ")" "{" Proc "}" [bind 0 in 1] ;
         //                                                  ^^^^^^^^^^^^
@@ -155,18 +155,18 @@ theory! {
     exports { Proc, Name }
     terms {
         PZero . Proc ::= "0" ;
-        
+
         PDrop . Proc ::= "*" (Name) ;
-        
+
         // Input: binds a Name in the Proc body
         PInput . Proc ::= "for" "(" <Name> ")" "{" Proc "}" ;
         //                          ^^^^^^        ^^^^
         //                          Binder        Body
-        
+
         POutput . Proc ::= (Name) "!" "(" (Proc) ")" ;
-        
+
         PPar . Proc ::= (Proc) "|" (Proc) ;
-        
+
         NQuote . Name ::= "@" (Proc) ;
     }
     equations {
@@ -177,7 +177,7 @@ theory! {
     rewrites {
         // Communication
         comm:
-            (PPar 
+            (PPar
                 (POutput x Q)
                 (PInput scope))
             => {
@@ -235,7 +235,7 @@ theory! {
         PInput . Proc ::= "for" "(" <Name> ")" "{" Proc "}" ;
         POutput . Proc ::= (Name) "!" "(" (Proc) ")" ;
         PPar . Proc ::= (Proc) "|" (Proc) ;
-        
+
         // Name can be a variable or a quoted process
         NVar . Name ::= Var ;           // ← NEW: Names are variables!
         NQuote . Name ::= "@" (Proc) ;
@@ -298,7 +298,7 @@ PInput . Proc ::= "for" "(" <Name> ")" "{" Proc "}" ;
 pub enum GrammarItem {
     Terminal(String),
     NonTerminal(Ident),
-    
+
     /// Binder: <Category> indicates this position binds a variable
     Binder {
         category: Ident,   // What type it binds (e.g., Name)
@@ -309,7 +309,7 @@ pub struct GrammarRule {
     pub label: Ident,
     pub category: Ident,
     pub items: Vec<GrammarItem>,
-    
+
     /// Which items are binders, and what they bind in
     /// For example: vec![(0, vec![1])] means item 0 binds in item 1
     pub bindings: Vec<(usize, Vec<usize>)>,
@@ -352,7 +352,7 @@ pub type Name = Var<String>;  // Or embed in enum
 ## Next Steps
 
 1. Update `GrammarItem` to have `Binder { category }` (no var name!)
-2. Parse `<Cat>` syntax  
+2. Parse `<Cat>` syntax
 3. Infer binding structure (which items bind in which)
 4. Generate `Scope<Binder<String>, Body>` types
 5. Handle variable categories properly

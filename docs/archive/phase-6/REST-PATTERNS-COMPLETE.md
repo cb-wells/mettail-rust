@@ -20,7 +20,7 @@ Implemented explicit `...rest` variables that can match empty or non-empty colle
 
 ```rust
 // Entry rule with rest
-(PPar {(PAmb N (PPar {(PIn M P) , ...rest})) , (PAmb M R)}) 
+(PPar {(PAmb N (PPar {(PIn M P) , ...rest})) , (PAmb M R)})
     => (PPar {(PAmb M (PPar {(PAmb N (PPar {P , ...rest})), R}))});
 
 // Exit rule with rest

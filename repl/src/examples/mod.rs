@@ -3,8 +3,8 @@
 // This module provides example processes for exploration,
 // organized by theory and category.
 
-pub mod rhocalc;
 pub mod ambient;
+pub mod rhocalc;
 
 /// Metadata for an example process
 pub struct Example {
@@ -39,8 +39,8 @@ pub enum ExampleCategory {
     Advanced,
     Performance,
     EdgeCase,
-    Mobility,      // For ambient calculus
-    Security,      // For ambient calculus
+    Mobility, // For ambient calculus
+    Security, // For ambient calculus
 }
 
 impl Example {
@@ -59,9 +59,12 @@ impl Example {
 
     /// Get examples by category (any theory)
     pub fn by_category(cat: ExampleCategory) -> Vec<&'static Example> {
-        Self::all().into_iter().filter(|e| e.category == cat).collect()
-    }       
-    
+        Self::all()
+            .into_iter()
+            .filter(|e| e.category == cat)
+            .collect()
+    }
+
     /// Get all examples for a specific theory
     pub fn by_theory(theory: TheoryName) -> Vec<&'static Example> {
         match theory {
@@ -69,12 +72,15 @@ impl Example {
             TheoryName::AmbientCalculus => ambient::all(),
         }
     }
-    
+
     /// Get examples by theory and category
-    pub fn by_theory_and_category(theory: TheoryName, cat: ExampleCategory) -> Vec<&'static Example> {
-        Self::all().into_iter()
+    pub fn by_theory_and_category(
+        theory: TheoryName,
+        cat: ExampleCategory,
+    ) -> Vec<&'static Example> {
+        Self::all()
+            .into_iter()
             .filter(|e| e.theory == theory && e.category == cat)
             .collect()
     }
 }
-

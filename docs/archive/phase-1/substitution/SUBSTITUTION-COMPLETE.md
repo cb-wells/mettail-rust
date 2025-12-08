@@ -43,10 +43,10 @@ impl Expr {
             // Variable case: check if it matches
             Expr::EVar(Var::Free(v)) if v == var => replacement.clone(),
             Expr::EVar(_) => self.clone(),
-            
+
             // Lambda case: handle shadowing and capture avoidance
             Expr::ELam(scope) => { /* ... */ },
-            
+
             // Application case: substitute in both subterms
             Expr::EApp(e1, e2) => {
                 Expr::EApp(
@@ -54,12 +54,12 @@ impl Expr {
                     Box::new(e2.substitute(var, replacement))
                 )
             },
-            
+
             // Constant case: no variables
             Expr::EConst => self.clone(),
         }
     }
-    
+
     /// Helper: Create a term from a Var
     fn from_var(var: mettail_runtime::Var<String>) -> Self {
         Expr::EVar(var)
@@ -120,13 +120,13 @@ if binder.0 == *var {
 if replacement_free_vars.contains(&binder.0) {
     // Would cause capture! Rename the binder
     let fresh = FreeVar::fresh_named(binder.0.pretty_name.clone());
-    
+
     // Substitute old binder for fresh in body
     let renamed_body = body.substitute(&binder.0, &Self::from_var(Var::Free(fresh.clone())));
-    
+
     // Now substitute in the renamed body
     let subst_body = renamed_body.substitute(var, replacement);
-    
+
     Expr::ELam(Scope::new(Binder(fresh), Box::new(subst_body)))
 }
 ```

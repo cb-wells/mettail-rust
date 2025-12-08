@@ -12,7 +12,7 @@ We will integrate the **moniker** library for proper binding and substitution in
 
 Moniker uses a hybrid approach that combines the best of two worlds:
 
-1. **Free Variables**: Use unique identifiers (like `x$42`) 
+1. **Free Variables**: Use unique identifiers (like `x$42`)
 2. **Bound Variables**: Use De Bruijn indices (like `@1.0`)
 
 ### Key Insight from Lambda Calculus Example
@@ -91,7 +91,7 @@ impl Proc {
             Proc::PInput { scope } => {
                 // Unbind the scope
                 let (binder, body) = scope.clone().unbind();
-                
+
                 // Check if the bound variable shadows the substitution var
                 if &binder.0 == var {
                     // Don't substitute (shadowed)
@@ -131,13 +131,13 @@ moniker = "0.10"
 pub enum GrammarItem {
     Terminal(String),
     NonTerminal(Ident),
-    
+
     // NEW: Binder declaration
     Binder {
         var: Ident,        // The variable name (e.g., x)
         category: Ident,   // What type it binds (e.g., Name)
     },
-    
+
     // NEW: Bound variable usage
     BoundVar {
         var: Ident,        // Which binder this refers to (e.g., x)
@@ -194,7 +194,7 @@ theory! {
     }
     rewrites {
         // Communication: x!(Q) | for(y){P} => P[Q/y]
-        (PPar 
+        (PPar
             (POutput x (NQuote Q))
             (PInput scope))
         => {

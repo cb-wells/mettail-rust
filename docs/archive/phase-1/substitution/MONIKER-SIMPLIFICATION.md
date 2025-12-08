@@ -75,7 +75,7 @@ fn infer_type_with_context(...) -> Result<String, ValidationError>
 ```
 
 **Status:** **KEEP** - Type-checking still needed, but:
-- Variables now have type `Var<String>` 
+- Variables now have type `Var<String>`
 - Binders have type `Binder<String>`
 - Scopes have type `Scope<Binder<String>, Body>`
 
@@ -157,7 +157,7 @@ Proc::PInput(Scope::new(Binder(x_var.clone()), body))
 ### DELETE
 - [ ] `mettail-macros/src/scope.rs` - Replaced by moniker
 
-### SIMPLIFY  
+### SIMPLIFY
 - [ ] `mettail-macros/src/validator.rs` - Use `BoundTerm::free_vars()`
 - [ ] `mettail-macros/src/substitution.rs` - Already cleared, will regenerate
 
@@ -232,13 +232,13 @@ pub struct GrammarRule {
 
 fn generate_variant(rule: &GrammarRule) -> TokenStream {
     let label = &rule.label;
-    
+
     // Check if this rule has bindings
     if let Some((binder_idx, body_indices)) = rule.bindings.first() {
         // This is a binding constructor
         let binder_cat = get_category_at(rule, *binder_idx);
         let body = get_item_at(rule, body_indices[0]);
-        
+
         quote! {
             #label(mettail_runtime::Scope<
                 mettail_runtime::Binder<String>,
@@ -259,7 +259,7 @@ fn generate_variant(rule: &GrammarRule) -> TokenStream {
 
 fn generate_binder_parse(rule: &GrammarRule) -> TokenStream {
     let (binder_idx, body_indices) = &rule.bindings[0];
-    
+
     quote! {
         let var_name = self.parse_identifier()?;
         let var = mettail_runtime::FreeVar::fresh_named(var_name);

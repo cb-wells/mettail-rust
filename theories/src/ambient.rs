@@ -11,11 +11,11 @@ theory! {
     },
     terms {
         PZero . Proc ::= "0" ;
-        
+
         PIn . Proc ::= "in(" Name "," Proc ")";
         POut . Proc ::= "out(" Name "," Proc ")";
         POpen . Proc ::= "open(" Name "," Proc ")";
-        
+
         PAmb . Proc ::= Name "[" Proc "]";
         PNew . Proc ::= "new(" <Name> "," Proc ")";
 
@@ -34,9 +34,9 @@ theory! {
     },
     rewrites {
         // {n[{in(m,p), ...q}], m[r]} => {m[{n[{p, ...q}], r}]}
-        (PPar {(PAmb N (PPar {(PIn M P) , ...rest})) , (PAmb M R)}) 
+        (PPar {(PAmb N (PPar {(PIn M P) , ...rest})) , (PAmb M R)})
             => (PPar {(PAmb M (PPar {(PAmb N (PPar {P , ...rest})), R}))});
-        
+
         // m[{n[{out(m,p), ...q}], r}] => {n[{p, ...q}], m[r]}
         (PAmb M (PPar {(PAmb N (PPar {(POut M P), ...rest})), R}))
             => (PPar {(PAmb N (PPar {P, ...rest})), (PAmb M R)});

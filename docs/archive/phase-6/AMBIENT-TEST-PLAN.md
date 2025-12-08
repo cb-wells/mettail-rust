@@ -91,7 +91,7 @@
 - [ ] Rewrite in parallel with capabilities
 - [ ] Rewrite in parallel with restrictions
 
-#### 2.2 New Congruence  
+#### 2.2 New Congruence
 - ✅ Direct new congruence
 - ✅ New with rest patterns
 - ✅ New in collection
@@ -236,16 +236,16 @@ struct TestCase {
     name: &'static str,
     description: &'static str,
     category: TestCategory,
-    
+
     // Input/Output
     input: &'static str,
     expected_output: Option<&'static str>,  // None if multiple valid outcomes
-    
+
     // Validation
     should_normalize: bool,
     min_rewrites: usize,
     max_rewrites: Option<usize>,
-    
+
     // Verification
     check_properties: Vec<Property>,  // e.g., confluence, termination
 }

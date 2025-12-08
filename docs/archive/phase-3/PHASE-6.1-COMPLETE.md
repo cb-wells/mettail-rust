@@ -1,7 +1,7 @@
 # Phase 6.1 Complete: Detection & Analysis ✅
 
-**Status**: Implemented and compiling  
-**Time**: ~1 hour  
+**Status**: Implemented and compiling
+**Time**: ~1 hour
 **Files Modified**: `mettail-macros/src/rewrite_gen.rs`
 
 ## What Was Built

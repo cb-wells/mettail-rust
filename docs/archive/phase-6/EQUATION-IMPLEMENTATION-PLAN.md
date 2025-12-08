@@ -1,7 +1,7 @@
 # Equation Implementation Plan (REVISED)
 
-**Date**: November 19, 2025 (Updated after review)  
-**Status**: 🚨 CRITICAL - Equations Not Implemented  
+**Date**: November 19, 2025 (Updated after review)
+**Status**: 🚨 CRITICAL - Equations Not Implemented
 **Priority**: HIGH - Semantic Correctness Issue
 
 ---
@@ -87,7 +87,7 @@ fn generate_equation_pattern_via_rewrite_logic(
     let mut clauses: Vec<TokenStream> = Vec::new();
     let duplicate_vars: HashSet<String> = HashSet::new(); // Empty for equations
     let mut equational_checks: Vec<TokenStream> = Vec::new();
-    
+
     // 2. Call the rewrite logic
     let term_ident = format_ident!("{}", term_name);
     let expected_category = extract_category_from_expr(expr, theory)?;
@@ -96,14 +96,14 @@ fn generate_equation_pattern_via_rewrite_logic(
         &mut rewrite_bindings, &mut variable_categories, &mut clauses,
         &duplicate_vars, &mut equational_checks
     );
-    
+
     // 3. Convert bindings back to equation format
     for (var_name, token) in rewrite_bindings {
         // Extract Ident from TokenStream (it's just `term.clone()`)
         let var_ident = format_ident!("{}", to_snake_case(&var_name));
         bindings.insert(var_name, var_ident);
     }
-    
+
     // 4. Return combined pattern
     Some(quote! {
         #(#clauses)*
@@ -113,7 +113,7 @@ fn generate_equation_pattern_via_rewrite_logic(
 
 ---
 
-### Rest Patterns: Free Implementation! 
+### Rest Patterns: Free Implementation!
 
 Since we're reusing `generate_ascent_pattern`, **rest patterns work automatically!**
 
@@ -179,11 +179,11 @@ fn generate_equation_pattern_via_rewrite_logic(
     let mut clauses: Vec<TokenStream> = Vec::new();
     let duplicate_vars: HashSet<String> = HashSet::new(); // No duplicates in equations
     let mut equational_checks: Vec<TokenStream> = Vec::new();
-    
+
     // Call rewrite pattern logic
     let term_ident = format_ident!("{}", term_name);
     let expected_category = extract_category_from_expr(expr, theory)?;
-    
+
     generate_ascent_pattern(
         expr,
         &term_ident,
@@ -195,7 +195,7 @@ fn generate_equation_pattern_via_rewrite_logic(
         &duplicate_vars,
         &mut equational_checks,
     );
-    
+
     // Convert bindings to equation format
     // Rewrite bindings are TokenStream like `term.clone()`
     // Equation bindings are Ident that will be bound in the clauses
@@ -204,7 +204,7 @@ fn generate_equation_pattern_via_rewrite_logic(
         let var_ident = format_ident!("{}", var_snake);
         bindings.insert(var_name, var_ident);
     }
-    
+
     Some(clauses)
 }
 ```
@@ -302,22 +302,22 @@ if x # N then (PNew x {P, (PIn N P)}) == {P, (PIn N (PNew x P))}
 **Implementation**:
 ```rust
 fn generate_equation_freshness(
-    conditions: &[FreshnessCondition], 
+    conditions: &[FreshnessCondition],
     bindings: &HashMap<String, Ident>
 ) -> TokenStream {
     let mut checks = Vec::new();
-    
+
     for condition in conditions {
         let var_ident = bindings.get(&condition.variable)
             .expect(&format!("Freshness variable {} not bound", condition.variable));
         let term_ident = bindings.get(&condition.term)
             .expect(&format!("Freshness term {} not bound", condition.term));
-        
+
         checks.push(quote! {
             if !mettail_runtime::contains_free(&#term_ident, &#var_ident),
         });
     }
-    
+
     quote! { #(#checks)* }
 }
 ```
@@ -339,26 +339,26 @@ use mettail_examples::ambient::*;
 #[test]
 fn test_zero_identity() {
     let parser = AmbientParser::new();
-    
+
     // Parse both sides
     let p = parser.parse_proc("a[0]").unwrap();
     let p_with_zero_left = parser.parse_proc("{a[0], 0}").unwrap();
     let p_with_zero_right = parser.parse_proc("{0, a[0]}").unwrap();
-    
+
     // Run Ascent
     let mut prog = amb_source();
     prog.proc.insert((p.clone(),));
     prog.proc.insert((p_with_zero_left.clone(),));
     prog.proc.insert((p_with_zero_right.clone(),));
     prog.run();
-    
+
     // Check equivalence
     assert!(
         prog.eq_proc.contains(&(p.clone(), p_with_zero_left.clone()))
         || prog.eq_proc.contains(&(p_with_zero_left.clone(), p.clone())),
         "Zero identity: {{P, 0}} should equal P"
     );
-    
+
     assert!(
         prog.eq_proc.contains(&(p.clone(), p_with_zero_right.clone()))
         || prog.eq_proc.contains(&(p_with_zero_right.clone(), p.clone())),
@@ -369,16 +369,16 @@ fn test_zero_identity() {
 #[test]
 fn test_new_extrusion_collection() {
     let parser = AmbientParser::new();
-    
+
     // Test: {a[0], new(x, b[x])} == new(x, {a[0], b[x]})
     let lhs = parser.parse_proc("{a[0], new(x, b[x])}").unwrap();
     let rhs = parser.parse_proc("new(x, {a[0], b[x]})").unwrap();
-    
+
     let mut prog = amb_source();
     prog.proc.insert((lhs.clone(),));
     prog.proc.insert((rhs.clone(),));
     prog.run();
-    
+
     assert!(
         prog.eq_proc.contains(&(lhs.clone(), rhs.clone()))
         || prog.eq_proc.contains(&(rhs.clone(), lhs.clone())),
@@ -494,10 +494,10 @@ cargo test --bin equation_tests
 
 ## Timeline (Revised)
 
-- **Week 1**: 
+- **Week 1**:
   - Days 1-3: Adapter implementation
   - Days 4-5: RHS verification
-- **Week 2**: 
+- **Week 2**:
   - Days 1-2: Freshness conditions
   - Days 3-5: Comprehensive testing
 

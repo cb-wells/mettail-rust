@@ -15,11 +15,11 @@ A single theory with minimal features:
 ```rust
 theory! {
     name: SimpleMonoid,
-    
+
     exports {
         Elem;
     }
-    
+
     terms {
         Zero . Elem ::= "0";
         Plus . Elem ::= Elem "+" Elem;
@@ -34,19 +34,19 @@ theory! {
 
 ### What We'll Prove
 
-✅ **Procedural macros can parse theory syntax**  
-✅ **Can generate AST types**  
-✅ **Can perform compile-time validation**  
+✅ **Procedural macros can parse theory syntax**
+✅ **Can generate AST types**
+✅ **Can perform compile-time validation**
 ✅ **Generated code integrates with Rust**
 
 ### What We'll Defer
 
-⏸️ Theory composition (conjunction/disjunction)  
-⏸️ Equations and rewrites  
-⏸️ Parameterized theories  
-⏸️ Replacements and binders  
-⏸️ Network serialization  
-⏸️ Full interpreter generation  
+⏸️ Theory composition (conjunction/disjunction)
+⏸️ Equations and rewrites
+⏸️ Parameterized theories
+⏸️ Replacements and binders
+⏸️ Network serialization
+⏸️ Full interpreter generation
 
 ---
 
@@ -77,14 +77,14 @@ use syn::{parse_macro_input, Ident};
 #[proc_macro]
 pub fn theory(input: TokenStream) -> TokenStream {
     let theory_def = parse_macro_input!(input as TheoryDef);
-    
+
     // Validate at compile time
     validate_theory(&theory_def)
         .unwrap_or_else(|e| panic!("Theory validation failed: {}", e));
-    
+
     // Generate code
     let ast_types = generate_ast(&theory_def);
-    
+
     quote! {
         #ast_types
     }
@@ -124,7 +124,7 @@ Add compile-time checks:
 fn validate_theory(theory: &TheoryDef) -> Result<(), String> {
     // Check: all referenced categories are exported
     let exported: HashSet<_> = theory.exports.iter().collect();
-    
+
     for rule in &theory.terms {
         if !exported.contains(&rule.category) {
             return Err(format!(
@@ -132,7 +132,7 @@ fn validate_theory(theory: &TheoryDef) -> Result<(), String> {
                 rule.category, rule.label
             ));
         }
-        
+
         for item in &rule.items {
             if let GrammarItem::NonTerminal(cat) = item {
                 if !exported.contains(cat) {
@@ -144,7 +144,7 @@ fn validate_theory(theory: &TheoryDef) -> Result<(), String> {
             }
         }
     }
-    
+
     Ok(())
 }
 ```
@@ -180,7 +180,7 @@ Generate AST enums:
 ```rust
 fn generate_ast(theory: &TheoryDef) -> proc_macro2::TokenStream {
     let mut enums = Vec::new();
-    
+
     for cat in &theory.exports {
         let variants = theory.terms
             .iter()
@@ -194,14 +194,14 @@ fn generate_ast(theory: &TheoryDef) -> proc_macro2::TokenStream {
                         _ => None,
                     })
                     .collect::<Vec<_>>();
-                
+
                 if fields.is_empty() {
                     quote! { #label }
                 } else {
                     quote! { #label(#(#fields),*) }
                 }
             });
-        
+
         enums.push(quote! {
             #[derive(Debug, Clone, PartialEq)]
             pub enum #cat {
@@ -209,7 +209,7 @@ fn generate_ast(theory: &TheoryDef) -> proc_macro2::TokenStream {
             }
         });
     }
-    
+
     quote! {
         #(#enums)*
     }
@@ -238,11 +238,11 @@ use mettail_macros::theory;
 
 theory! {
     name: SimpleMonoid,
-    
+
     exports {
         Elem;
     }
-    
+
     terms {
         Zero . Elem ::= "0";
         Plus . Elem ::= Elem "+" Elem;
@@ -255,7 +255,7 @@ fn main() {
         Box::new(Elem::Zero),
         Box::new(Elem::Zero),
     );
-    
+
     println!("Expression: {:?}", expr);
 }
 ```
@@ -383,7 +383,7 @@ Before considering POC complete, verify:
 After POC completion, decide:
 
 ### ✅ Continue with Macros?
-**If YES:** Expand to full features (rewrites, composition, etc.)  
+**If YES:** Expand to full features (rewrites, composition, etc.)
 **If NO:** Fall back to LALRPOP + runtime interpreter
 
 ### Evaluation Criteria:

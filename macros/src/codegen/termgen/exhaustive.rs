@@ -1,4 +1,4 @@
-use crate::ast::{TheoryDef, GrammarItem, GrammarRule};
+use crate::ast::{GrammarItem, GrammarRule, TheoryDef};
 use proc_macro2::TokenStream;
 use quote::quote;
 use syn::Ident;
@@ -8,7 +8,7 @@ pub fn generate_term_generation(theory: &TheoryDef) -> TokenStream {
     let context_struct = generate_context_struct(theory);
     let context_impl = generate_context_impl(theory);
     let public_apis = generate_public_apis(theory);
-    
+
     quote! {
         #context_struct
         #context_impl
@@ -18,15 +18,19 @@ pub fn generate_term_generation(theory: &TheoryDef) -> TokenStream {
 
 /// Generate the GenerationContext struct that holds memoization tables
 fn generate_context_struct(theory: &TheoryDef) -> TokenStream {
-    let category_fields: Vec<TokenStream> = theory.exports.iter().map(|export| {
-        let cat_name = &export.name;
-        let field_name = category_to_field_name(cat_name);
-        
-        quote! {
-            #field_name: std::collections::HashMap<usize, Vec<#cat_name>>
-        }
-    }).collect();
-    
+    let category_fields: Vec<TokenStream> = theory
+        .exports
+        .iter()
+        .map(|export| {
+            let cat_name = &export.name;
+            let field_name = category_to_field_name(cat_name);
+
+            quote! {
+                #field_name: std::collections::HashMap<usize, Vec<#cat_name>>
+            }
+        })
+        .collect();
+
     quote! {
         struct GenerationContext {
             vars: Vec<String>,
@@ -40,24 +44,34 @@ fn generate_context_struct(theory: &TheoryDef) -> TokenStream {
 
 /// Generate impl GenerationContext with generation methods
 fn generate_context_impl(theory: &TheoryDef) -> TokenStream {
-    let new_fields: Vec<TokenStream> = theory.exports.iter().map(|export| {
-        let field_name = category_to_field_name(&export.name);
-        quote! {
-            #field_name: std::collections::HashMap::new()
-        }
-    }).collect();
-    
-    let generation_calls: Vec<TokenStream> = theory.exports.iter().map(|export| {
-        let method_name = category_to_generate_method(&export.name);
-        quote! {
-            self.#method_name(depth);
-        }
-    }).collect();
-    
-    let category_methods: Vec<TokenStream> = theory.exports.iter().map(|export| {
-        generate_category_generation_method(export.name.clone(), theory)
-    }).collect();
-    
+    let new_fields: Vec<TokenStream> = theory
+        .exports
+        .iter()
+        .map(|export| {
+            let field_name = category_to_field_name(&export.name);
+            quote! {
+                #field_name: std::collections::HashMap::new()
+            }
+        })
+        .collect();
+
+    let generation_calls: Vec<TokenStream> = theory
+        .exports
+        .iter()
+        .map(|export| {
+            let method_name = category_to_generate_method(&export.name);
+            quote! {
+                self.#method_name(depth);
+            }
+        })
+        .collect();
+
+    let category_methods: Vec<TokenStream> = theory
+        .exports
+        .iter()
+        .map(|export| generate_category_generation_method(export.name.clone(), theory))
+        .collect();
+
     quote! {
         impl GenerationContext {
             fn new(vars: Vec<String>, max_depth: usize, max_collection_width: usize) -> Self {
@@ -70,7 +84,7 @@ fn generate_context_impl(theory: &TheoryDef) -> TokenStream {
                     #(#new_fields),*
                 }
             }
-            
+
             fn new_with_extended_vars(
                 vars: Vec<String>,
                 initial_var_count: usize,
@@ -85,14 +99,14 @@ fn generate_context_impl(theory: &TheoryDef) -> TokenStream {
                     #(#new_fields),*
                 }
             }
-            
+
             fn generate_all(mut self) -> Self {
                 for depth in 0..=self.max_depth {
                     #(#generation_calls)*
                 }
                 self
             }
-            
+
             #(#category_methods)*
         }
     }
@@ -102,29 +116,31 @@ fn generate_context_impl(theory: &TheoryDef) -> TokenStream {
 fn generate_category_generation_method(cat_name: Ident, theory: &TheoryDef) -> TokenStream {
     let method_name = category_to_generate_method(&cat_name);
     let field_name = category_to_field_name(&cat_name);
-    
+
     // Get all rules for this category
-    let rules: Vec<&GrammarRule> = theory.terms.iter()
+    let rules: Vec<&GrammarRule> = theory
+        .terms
+        .iter()
         .filter(|r| r.category == cat_name)
         .collect();
-    
+
     let depth_0_cases = generate_depth_0_cases(&cat_name, &rules);
     let depth_d_cases = generate_depth_d_cases(&cat_name, &rules, theory);
-    
+
     quote! {
         fn #method_name(&mut self, depth: usize) {
             let mut terms: Vec<#cat_name> = Vec::new();
-            
+
             if depth == 0 {
                 #depth_0_cases
             } else {
                 #depth_d_cases
             }
-            
+
             // Deduplicate
             terms.sort();
             terms.dedup();
-            
+
             self.#field_name.insert(depth, terms);
         }
     }
@@ -133,15 +149,24 @@ fn generate_category_generation_method(cat_name: Ident, theory: &TheoryDef) -> T
 /// Generate depth 0 cases (nullary constructors and variables)
 fn generate_depth_0_cases(cat_name: &Ident, rules: &[&GrammarRule]) -> TokenStream {
     let mut cases = Vec::new();
-    
+
     for rule in rules {
         let label = &rule.label;
-        
+
         // Check if this is a nullary constructor
-        let non_terminals: Vec<_> = rule.items.iter()
-            .filter(|item| matches!(item, GrammarItem::NonTerminal(_) | GrammarItem::Binder { .. } | GrammarItem::Collection { .. }))
+        let non_terminals: Vec<_> = rule
+            .items
+            .iter()
+            .filter(|item| {
+                matches!(
+                    item,
+                    GrammarItem::NonTerminal(_)
+                        | GrammarItem::Binder { .. }
+                        | GrammarItem::Collection { .. }
+                )
+            })
             .collect();
-        
+
         if non_terminals.is_empty() {
             // Nullary constructor
             cases.push(quote! {
@@ -168,43 +193,52 @@ fn generate_depth_0_cases(cat_name: &Ident, rules: &[&GrammarRule]) -> TokenStre
             // Skip Collection constructors - they can't be exhaustively generated
         }
     }
-    
+
     quote! {
         #(#cases)*
     }
 }
 
 /// Generate depth d cases (recursive constructors)
-fn generate_depth_d_cases(cat_name: &Ident, rules: &[&GrammarRule], theory: &TheoryDef) -> TokenStream {
+fn generate_depth_d_cases(
+    cat_name: &Ident,
+    rules: &[&GrammarRule],
+    theory: &TheoryDef,
+) -> TokenStream {
     let mut cases = Vec::new();
-    
+
     for rule in rules {
         // Check if this rule has collections
-        let has_collection = rule.items.iter().any(|item| matches!(item, GrammarItem::Collection { .. }));
-        
+        let has_collection = rule
+            .items
+            .iter()
+            .any(|item| matches!(item, GrammarItem::Collection { .. }));
+
         if has_collection {
             // Handle collection constructors
             cases.push(generate_collection_constructor_case(cat_name, rule, theory));
             continue;
         }
-        
+
         // Skip nullary and var constructors (handled at depth 0)
-        let non_terminals: Vec<_> = rule.items.iter()
+        let non_terminals: Vec<_> = rule
+            .items
+            .iter()
             .filter_map(|item| match item {
                 GrammarItem::NonTerminal(nt) => Some(nt.clone()),
                 GrammarItem::Binder { category } => Some(category.clone()),
                 _ => None,
             })
             .collect();
-        
+
         if non_terminals.is_empty() {
             continue; // Nullary
         }
-        
+
         if non_terminals.len() == 1 && non_terminals[0].to_string() == "Var" {
             continue; // Var constructor
         }
-        
+
         // Generate recursive case
         if rule.bindings.is_empty() {
             // Simple constructor without binders
@@ -214,28 +248,34 @@ fn generate_depth_d_cases(cat_name: &Ident, rules: &[&GrammarRule], theory: &The
             cases.push(generate_binder_constructor_case(cat_name, rule, theory));
         }
     }
-    
+
     quote! {
         #(#cases)*
     }
 }
 
 /// Generate case for simple constructor (no binders)
-fn generate_simple_constructor_case(cat_name: &Ident, rule: &GrammarRule, theory: &TheoryDef) -> TokenStream {
+fn generate_simple_constructor_case(
+    cat_name: &Ident,
+    rule: &GrammarRule,
+    theory: &TheoryDef,
+) -> TokenStream {
     let label = &rule.label;
-    
+
     // Get argument categories
-    let arg_cats: Vec<Ident> = rule.items.iter()
+    let arg_cats: Vec<Ident> = rule
+        .items
+        .iter()
         .filter_map(|item| match item {
             GrammarItem::NonTerminal(nt) => Some(nt.clone()),
             _ => None,
         })
         .collect();
-    
+
     if arg_cats.is_empty() {
         return quote! {};
     }
-    
+
     // Generate depth loops based on arity
     match arg_cats.len() {
         1 => generate_unary_case(cat_name, label, &arg_cats[0], theory),
@@ -245,10 +285,15 @@ fn generate_simple_constructor_case(cat_name: &Ident, rule: &GrammarRule, theory
 }
 
 /// Generate unary constructor case
-fn generate_unary_case(cat_name: &Ident, label: &Ident, arg_cat: &Ident, theory: &TheoryDef) -> TokenStream {
+fn generate_unary_case(
+    cat_name: &Ident,
+    label: &Ident,
+    arg_cat: &Ident,
+    theory: &TheoryDef,
+) -> TokenStream {
     let field_name = category_to_field_name(arg_cat);
     let is_var = arg_cat.to_string() == "Var";
-    
+
     if is_exported(arg_cat, theory) {
         let constructor = if is_var {
             quote! {
@@ -259,7 +304,7 @@ fn generate_unary_case(cat_name: &Ident, label: &Ident, arg_cat: &Ident, theory:
                 #cat_name::#label(Box::new(arg1.clone()))
             }
         };
-        
+
         quote! {
             for d1 in 0..depth {
                 if let Some(args1) = self.#field_name.get(&d1) {
@@ -280,15 +325,15 @@ fn generate_binary_case(
     label: &Ident,
     arg1_cat: &Ident,
     arg2_cat: &Ident,
-    theory: &TheoryDef
+    theory: &TheoryDef,
 ) -> TokenStream {
     let field1 = category_to_field_name(arg1_cat);
     let field2 = category_to_field_name(arg2_cat);
-    
+
     if !is_exported(arg1_cat, theory) || !is_exported(arg2_cat, theory) {
         return quote! {};
     }
-    
+
     quote! {
         for d1 in 0..depth {
             for d2 in 0..depth {
@@ -312,38 +357,51 @@ fn generate_binary_case(
 }
 
 /// Generate n-ary constructor case (n > 2)
-fn generate_nary_case(cat_name: &Ident, label: &Ident, arg_cats: &[Ident], theory: &TheoryDef) -> TokenStream {
+fn generate_nary_case(
+    cat_name: &Ident,
+    label: &Ident,
+    arg_cats: &[Ident],
+    theory: &TheoryDef,
+) -> TokenStream {
     // For now, use a simplified approach: all args at depth-1
     // This is less comprehensive but simpler
     let n = arg_cats.len();
-    
-    let field_names: Vec<TokenStream> = arg_cats.iter().enumerate().map(|(i, cat)| {
-        if !is_exported(cat, theory) {
-            return quote! {};
-        }
-        let field = category_to_field_name(cat);
-        let di = syn::Ident::new(&format!("d{}", i), proc_macro2::Span::call_site());
-        let argi = syn::Ident::new(&format!("args{}", i), proc_macro2::Span::call_site());
-        quote! {
-            if let Some(#argi) = self.#field.get(&#di)
-        }
-    }).collect();
-    
-    let arg_iters: Vec<TokenStream> = (0..n).map(|i| {
-        let argi = syn::Ident::new(&format!("args{}", i), proc_macro2::Span::call_site());
-        let argi_single = syn::Ident::new(&format!("arg{}", i), proc_macro2::Span::call_site());
-        quote! {
-            for #argi_single in #argi
-        }
-    }).collect();
-    
-    let constructor_args: Vec<TokenStream> = (0..n).map(|i| {
-        let argi = syn::Ident::new(&format!("arg{}", i), proc_macro2::Span::call_site());
-        quote! {
-            Box::new(#argi.clone())
-        }
-    }).collect();
-    
+
+    let field_names: Vec<TokenStream> = arg_cats
+        .iter()
+        .enumerate()
+        .map(|(i, cat)| {
+            if !is_exported(cat, theory) {
+                return quote! {};
+            }
+            let field = category_to_field_name(cat);
+            let di = syn::Ident::new(&format!("d{}", i), proc_macro2::Span::call_site());
+            let argi = syn::Ident::new(&format!("args{}", i), proc_macro2::Span::call_site());
+            quote! {
+                if let Some(#argi) = self.#field.get(&#di)
+            }
+        })
+        .collect();
+
+    let arg_iters: Vec<TokenStream> = (0..n)
+        .map(|i| {
+            let argi = syn::Ident::new(&format!("args{}", i), proc_macro2::Span::call_site());
+            let argi_single = syn::Ident::new(&format!("arg{}", i), proc_macro2::Span::call_site());
+            quote! {
+                for #argi_single in #argi
+            }
+        })
+        .collect();
+
+    let constructor_args: Vec<TokenStream> = (0..n)
+        .map(|i| {
+            let argi = syn::Ident::new(&format!("arg{}", i), proc_macro2::Span::call_site());
+            quote! {
+                Box::new(#argi.clone())
+            }
+        })
+        .collect();
+
     // Simplified: just use depth-1 for all args
     quote! {
         if depth > 0 {
@@ -358,49 +416,54 @@ fn generate_nary_case(cat_name: &Ident, label: &Ident, arg_cats: &[Ident], theor
 }
 
 /// Generate case for constructor with binders
-fn generate_binder_constructor_case(cat_name: &Ident, rule: &GrammarRule, theory: &TheoryDef) -> TokenStream {
+fn generate_binder_constructor_case(
+    cat_name: &Ident,
+    rule: &GrammarRule,
+    theory: &TheoryDef,
+) -> TokenStream {
     let label = &rule.label;
-    
+
     // For binder constructors, we need to:
     // 1. Get non-binder, non-body arguments
     // 2. Generate the body at various depths
     // 3. Create a Scope with a fixed binder name "x"
-    
+
     let (binder_idx, body_indices) = &rule.bindings[0];
     let body_idx = body_indices[0];
-    
+
     // Collect all argument categories (excluding binder)
     let mut arg_positions: Vec<(usize, Ident)> = Vec::new();
     for (i, item) in rule.items.iter().enumerate() {
         if i == *binder_idx {
             continue; // Skip binder
         }
-        
+
         match item {
             GrammarItem::NonTerminal(cat) => {
                 arg_positions.push((i, cat.clone()));
-            }
+            },
             GrammarItem::Collection { .. } => {
                 // Collections will be handled in Phase 5
                 // For now, skip term generation for collection constructors
-            }
-            GrammarItem::Binder { .. } => {} // Skip
-            GrammarItem::Terminal(_) => {} // Skip
+            },
+            GrammarItem::Binder { .. } => {}, // Skip
+            GrammarItem::Terminal(_) => {},   // Skip
         }
     }
-    
+
     // Find the body category
     let body_cat = match &rule.items[body_idx] {
         GrammarItem::NonTerminal(cat) => cat,
         _ => panic!("Body should be a NonTerminal"),
     };
-    
+
     // Find non-body arguments
-    let other_args: Vec<(usize, Ident)> = arg_positions.iter()
+    let other_args: Vec<(usize, Ident)> = arg_positions
+        .iter()
         .filter(|(i, _)| *i != body_idx)
         .cloned()
         .collect();
-    
+
     if other_args.is_empty() {
         // Simple case: only body (e.g., Lambda x. body)
         generate_simple_binder_case(cat_name, label, body_cat, theory)
@@ -417,14 +480,14 @@ fn generate_simple_binder_case(
     cat_name: &Ident,
     label: &Ident,
     body_cat: &Ident,
-    theory: &TheoryDef
+    theory: &TheoryDef,
 ) -> TokenStream {
     if !is_exported(body_cat, theory) {
         return quote! {};
     }
-    
+
     let body_field = category_to_field_name(body_cat);
-    
+
     quote! {
         // Generate bodies WITH unique binder variables
         // Count how many vars are binder vars (vars beyond the initial pool)
@@ -432,7 +495,7 @@ fn generate_simple_binder_case(
         let binder_name = format!("x{}", current_binding_depth);
         let mut extended_vars = self.vars.clone();
         extended_vars.push(binder_name.clone());
-        
+
         // Create temporary context for generating bodies that can use the binder
         let mut temp_ctx = GenerationContext::new_with_extended_vars(
             extended_vars,
@@ -441,7 +504,7 @@ fn generate_simple_binder_case(
             self.max_collection_width
         );
         temp_ctx = temp_ctx.generate_all();
-        
+
         // Get all bodies from temp context (up to depth-1)
         let mut bodies_with_binder = Vec::new();
         for d in 0..depth {
@@ -449,7 +512,7 @@ fn generate_simple_binder_case(
                 bodies_with_binder.extend(ts.clone());
             }
         }
-        
+
         // Create scopes with bodies that may reference the binder
         for body in bodies_with_binder {
             let binder_var = mettail_runtime::get_or_create_var(&binder_name);
@@ -466,22 +529,22 @@ fn generate_binder_with_one_arg(
     label: &Ident,
     arg_cat: &Ident,
     body_cat: &Ident,
-    theory: &TheoryDef
+    theory: &TheoryDef,
 ) -> TokenStream {
     if !is_exported(arg_cat, theory) || !is_exported(body_cat, theory) {
         return quote! {};
     }
-    
+
     let arg_field = category_to_field_name(arg_cat);
     let body_field = category_to_field_name(body_cat);
-    
+
     quote! {
         // Generate bodies WITH unique binder variable
         let current_binding_depth = self.vars.len() - self.initial_var_count;
         let binder_name = format!("x{}", current_binding_depth);
         let mut extended_vars = self.vars.clone();
         extended_vars.push(binder_name.clone());
-        
+
         let mut temp_ctx = GenerationContext::new_with_extended_vars(
             extended_vars,
             self.initial_var_count,
@@ -489,7 +552,7 @@ fn generate_binder_with_one_arg(
             self.max_collection_width
         );
         temp_ctx = temp_ctx.generate_all();
-        
+
         // Collect all bodies from temp context
         let mut bodies_with_binder = Vec::new();
         for d in 0..depth {
@@ -497,7 +560,7 @@ fn generate_binder_with_one_arg(
                 bodies_with_binder.extend(terms.clone());
             }
         }
-        
+
         // Generate with all depth combinations
         for d1 in 0..depth {
             if let Some(args1) = self.#arg_field.get(&d1) {
@@ -507,7 +570,7 @@ fn generate_binder_with_one_arg(
                         let binder = mettail_runtime::Binder(binder_var);
                         // Scope::new will close free binder_var in body to bound variable
                         let scope = mettail_runtime::Scope::new(binder, Box::new(body.clone()));
-                        
+
                         // Check depth constraint
                         // This is approximate since we don't track individual body depths
                         terms.push(#cat_name::#label(
@@ -526,52 +589,64 @@ fn generate_binder_with_multiple_args(
     label: &Ident,
     other_args: &[(usize, Ident)],
     body_cat: &Ident,
-    theory: &TheoryDef
+    theory: &TheoryDef,
 ) -> TokenStream {
     // Simplified: use depth-1 for all args
     if !is_exported(body_cat, theory) {
         return quote! {};
     }
-    
+
     let body_field = category_to_field_name(body_cat);
-    
+
     // Generate nested loops for other args
-    let arg_fields: Vec<TokenStream> = other_args.iter().enumerate().map(|(i, (_, cat))| {
-        if !is_exported(cat, theory) {
-            return quote! {};
-        }
-        let field = category_to_field_name(cat);
-        let argi = syn::Ident::new(&format!("args{}", i), proc_macro2::Span::call_site());
-        quote! {
-            if let Some(#argi) = self.#field.get(&d)
-        }
-    }).collect();
-    
-    let arg_loops: Vec<TokenStream> = other_args.iter().enumerate().map(|(i, _)| {
-        let argi = syn::Ident::new(&format!("args{}", i), proc_macro2::Span::call_site());
-        let arg_single = syn::Ident::new(&format!("arg{}", i), proc_macro2::Span::call_site());
-        quote! {
-            for #arg_single in #argi
-        }
-    }).collect();
-    
-    let constructor_args: Vec<TokenStream> = other_args.iter().enumerate().map(|(i, _)| {
-        let arg_single = syn::Ident::new(&format!("arg{}", i), proc_macro2::Span::call_site());
-        quote! {
-            Box::new(#arg_single.clone())
-        }
-    }).collect();
-    
+    let arg_fields: Vec<TokenStream> = other_args
+        .iter()
+        .enumerate()
+        .map(|(i, (_, cat))| {
+            if !is_exported(cat, theory) {
+                return quote! {};
+            }
+            let field = category_to_field_name(cat);
+            let argi = syn::Ident::new(&format!("args{}", i), proc_macro2::Span::call_site());
+            quote! {
+                if let Some(#argi) = self.#field.get(&d)
+            }
+        })
+        .collect();
+
+    let arg_loops: Vec<TokenStream> = other_args
+        .iter()
+        .enumerate()
+        .map(|(i, _)| {
+            let argi = syn::Ident::new(&format!("args{}", i), proc_macro2::Span::call_site());
+            let arg_single = syn::Ident::new(&format!("arg{}", i), proc_macro2::Span::call_site());
+            quote! {
+                for #arg_single in #argi
+            }
+        })
+        .collect();
+
+    let constructor_args: Vec<TokenStream> = other_args
+        .iter()
+        .enumerate()
+        .map(|(i, _)| {
+            let arg_single = syn::Ident::new(&format!("arg{}", i), proc_macro2::Span::call_site());
+            quote! {
+                Box::new(#arg_single.clone())
+            }
+        })
+        .collect();
+
     quote! {
         if depth > 0 {
             let d = depth - 1;
-            
+
             // Generate bodies WITH unique binder variable
             let current_binding_depth = self.vars.len() - self.initial_var_count;
             let binder_name = format!("x{}", current_binding_depth);
             let mut extended_vars = self.vars.clone();
             extended_vars.push(binder_name.clone());
-            
+
             let mut temp_ctx = GenerationContext::new_with_extended_vars(
                 extended_vars,
                 self.initial_var_count,
@@ -579,14 +654,14 @@ fn generate_binder_with_multiple_args(
                 self.max_collection_width
             );
             temp_ctx = temp_ctx.generate_all();
-            
+
             let mut bodies_with_binder = Vec::new();
             for depth_i in 0..=d {
                 if let Some(terms) = temp_ctx.#body_field.get(&depth_i) {
                     bodies_with_binder.extend(terms.clone());
                 }
             }
-            
+
             #(#arg_fields)* {
                 #(#arg_loops)* {
                     for body in &bodies_with_binder {
@@ -606,19 +681,29 @@ fn generate_binder_with_multiple_args(
 
 /// Generate case for constructor with collections
 /// Example: PPar(HashBag<Proc>) generates bags of various sizes
-fn generate_collection_constructor_case(cat_name: &Ident, rule: &GrammarRule, theory: &TheoryDef) -> TokenStream {
+fn generate_collection_constructor_case(
+    cat_name: &Ident,
+    rule: &GrammarRule,
+    theory: &TheoryDef,
+) -> TokenStream {
     let label = &rule.label;
-    
+
     // Find the collection field
-    let (collection_idx, element_cat) = rule.items.iter().enumerate()
+    let (collection_idx, element_cat) = rule
+        .items
+        .iter()
+        .enumerate()
         .find_map(|(i, item)| match item {
             GrammarItem::Collection { element_type, .. } => Some((i, element_type.clone())),
             _ => None,
         })
         .expect("Collection constructor must have a collection field");
-    
+
     // Check if there are other (non-collection) fields
-    let other_fields: Vec<(usize, Ident)> = rule.items.iter().enumerate()
+    let other_fields: Vec<(usize, Ident)> = rule
+        .items
+        .iter()
+        .enumerate()
         .filter_map(|(i, item)| {
             if i == collection_idx {
                 return None;
@@ -629,7 +714,7 @@ fn generate_collection_constructor_case(cat_name: &Ident, rule: &GrammarRule, th
             }
         })
         .collect();
-    
+
     if other_fields.is_empty() {
         // Pure collection constructor (e.g., PPar(HashBag<Proc>))
         generate_pure_collection_case(cat_name, label, &element_cat, theory)
@@ -645,14 +730,14 @@ fn generate_pure_collection_case(
     cat_name: &Ident,
     label: &Ident,
     element_cat: &Ident,
-    theory: &TheoryDef
+    theory: &TheoryDef,
 ) -> TokenStream {
     if !is_exported(element_cat, theory) {
         return quote! {};
     }
-    
+
     let field_name = category_to_field_name(element_cat);
-    
+
     quote! {
         // Generate collections of size 0 to max_collection_width
         for size in 0..=self.max_collection_width {
@@ -727,33 +812,33 @@ fn generate_public_apis(theory: &TheoryDef) -> TokenStream {
     let impls: Vec<TokenStream> = theory.exports.iter().map(|export| {
         let cat_name = &export.name;
         let field_name = category_to_field_name(cat_name);
-        
+
         quote! {
             impl #cat_name {
                 /// Generate all terms up to max_depth
-                /// 
+                ///
                 /// # Arguments
                 /// * `vars` - Pool of variable names for free variables
                 /// * `max_depth` - Maximum operator nesting level
                 /// * `max_collection_width` - Maximum number of elements in any collection
-                /// 
+                ///
                 /// # Returns
                 /// Sorted, deduplicated vector of terms
-                /// 
+                ///
                 /// # Warning
                 /// Number of terms grows exponentially with depth and collection width!
                 /// Recommend max_depth <= 3 and max_collection_width <= 2 for exhaustive generation.
                 pub fn generate_terms(vars: &[String], max_depth: usize, max_collection_width: usize) -> Vec<#cat_name> {
                     let ctx = GenerationContext::new(vars.to_vec(), max_depth, max_collection_width);
                     let ctx = ctx.generate_all();
-                    
+
                     let mut all_terms = Vec::new();
                     for depth in 0..=max_depth {
                         if let Some(terms) = ctx.#field_name.get(&depth) {
                             all_terms.extend(terms.clone());
                         }
                     }
-                    
+
                     all_terms.sort();
                     all_terms.dedup();
                     all_terms
@@ -761,7 +846,7 @@ fn generate_public_apis(theory: &TheoryDef) -> TokenStream {
             }
         }
     }).collect();
-    
+
     quote! {
         #(#impls)*
     }
@@ -783,4 +868,3 @@ fn category_to_generate_method(cat: &Ident) -> Ident {
 fn is_exported(cat: &Ident, theory: &TheoryDef) -> bool {
     theory.exports.iter().any(|e| &e.name == cat)
 }
-

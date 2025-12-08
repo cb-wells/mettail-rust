@@ -1,8 +1,8 @@
 # Rewrite Engine Implementation - Complete ✅
 
-**Date:** October 28, 2025  
-**Status:** COMPLETE  
-**LOC Added:** ~600 lines in `rewrite_gen.rs`  
+**Date:** October 28, 2025
+**Status:** COMPLETE
+**LOC Added:** ~600 lines in `rewrite_gen.rs`
 
 ---
 
@@ -106,7 +106,7 @@ if let Proc::PPar(field_0, field_1) = term {
 // Extract the FreeVar from the body that matches the binder name
 let free_vars = body.free_vars();
 let binder = if let Some(fv) = free_vars.iter()
-    .find(|fv| fv.pretty_name.as_deref() == Some(&x)) 
+    .find(|fv| fv.pretty_name.as_deref() == Some(&x))
 {
     Binder((*fv).clone())  // Use the SAME FreeVar
 } else {

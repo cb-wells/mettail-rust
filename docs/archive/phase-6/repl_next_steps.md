@@ -132,10 +132,10 @@ Rewrite Graph Statistics:
   Total rewrites:      66
   Normal forms:        13
   Equivalence classes: 8
-  
+
   Max depth:           7
   Avg branching:       1.32
-  
+
   Initial term:        {a!(0), for(a->x){*x}, ...}
   Current term:        {*(@(0))}  (step 2/5)
 ```

@@ -1,53 +1,60 @@
-use crate::ast::{TheoryDef, Expr};
+use crate::ascent::congruence;
+use crate::ast::{Expr, TheoryDef};
 use proc_macro2::TokenStream;
 use quote::quote;
 use std::collections::HashMap;
-use crate::ascent::congruence;
 
 /// Generate RHS construction for Ascent clause
-pub fn generate_ascent_rhs(expr: &Expr, bindings: &HashMap<String, TokenStream>, theory: &TheoryDef) -> TokenStream {
+pub fn generate_ascent_rhs(
+    expr: &Expr,
+    bindings: &HashMap<String, TokenStream>,
+    theory: &TheoryDef,
+) -> TokenStream {
     match expr {
         Expr::CollectionPattern { .. } => {
             // If we reach here, it's a bare collection pattern (not inside Apply)
             // Fall back to no-flatten version
             generate_ascent_collection_rhs(expr, bindings, theory, None)
-        }
-        _ => generate_rhs_construction(expr, bindings, theory)
+        },
+        _ => generate_rhs_construction(expr, bindings, theory),
     }
 }
 
 /// Generate RHS for collection patterns, optionally using flatten helper
-/// 
+///
 /// If `constructor_context` is Some((category, label)), uses the flatten helper.
 /// Otherwise, uses plain `bag.insert`.
 fn generate_ascent_collection_rhs(
     expr: &Expr,
     bindings: &HashMap<String, TokenStream>,
     theory: &TheoryDef,
-    constructor_context: Option<(syn::Ident, syn::Ident)>
+    constructor_context: Option<(syn::Ident, syn::Ident)>,
 ) -> TokenStream {
     if let Expr::CollectionPattern { constructor: _, elements, rest } = expr {
-        let elem_constructions: Vec<TokenStream> = elements.iter()
+        let elem_constructions: Vec<TokenStream> = elements
+            .iter()
             .map(|e| generate_rhs_construction(e, bindings, theory))
             .collect();
-        
+
         let coll_type = quote! { mettail_runtime::HashBag };
-        
+
         if let Some((category, label)) = constructor_context {
             // Use flatten helper
-            let helper_name = quote::format_ident!("insert_into_{}", label.to_string().to_lowercase());
-            
+            let helper_name =
+                quote::format_ident!("insert_into_{}", label.to_string().to_lowercase());
+
             if let Some(rest_var) = rest {
                 // Merge rest with new elements using flatten helper
                 let rest_var_name = rest_var.to_string();
-                let rest_binding = bindings.get(&rest_var_name)
-                    .unwrap_or_else(|| panic!(
+                let rest_binding = bindings.get(&rest_var_name).unwrap_or_else(|| {
+                    panic!(
                         "Rest variable '{}' not bound. Available bindings: {:?}",
                         rest_var_name,
                         bindings.keys().collect::<Vec<_>>()
-                    ));
-        
-        quote! {
+                    )
+                });
+
+                quote! {
                     {
                         let mut bag = (#rest_binding).clone();
                         #(#category::#helper_name(&mut bag, #elem_constructions);)*
@@ -68,14 +75,15 @@ fn generate_ascent_collection_rhs(
             // No constructor context - use plain insert (shouldn't flatten)
             if let Some(rest_var) = rest {
                 let rest_var_name = rest_var.to_string();
-                let rest_binding = bindings.get(&rest_var_name)
-                    .unwrap_or_else(|| panic!(
+                let rest_binding = bindings.get(&rest_var_name).unwrap_or_else(|| {
+                    panic!(
                         "Rest variable '{}' not bound. Available bindings: {:?}",
                         rest_var_name,
                         bindings.keys().collect::<Vec<_>>()
-                    ));
-    
-    quote! {
+                    )
+                });
+
+                quote! {
                     {
                         let mut bag = (#rest_binding).clone();
                         #(bag.insert(#elem_constructions);)*
@@ -98,10 +106,14 @@ fn generate_ascent_collection_rhs(
 }
 
 /// Generate RHS construction recursively
-/// 
+///
 /// Handles Variables, Apply, Subst, and nested CollectionPatterns.
 /// Made public for use in congruence generation.
-pub fn generate_rhs_construction(expr: &Expr, bindings: &HashMap<String, TokenStream>, theory: &TheoryDef) -> TokenStream {
+pub fn generate_rhs_construction(
+    expr: &Expr,
+    bindings: &HashMap<String, TokenStream>,
+    theory: &TheoryDef,
+) -> TokenStream {
     match expr {
         Expr::Var(var) => {
             let var_name = var.to_string();
@@ -121,38 +133,51 @@ pub fn generate_rhs_construction(expr: &Expr, bindings: &HashMap<String, TokenSt
                     panic!("Unbound variable '{}' in RHS", var_name);
                 }
             }
-        }
-        
+        },
+
         Expr::Apply { constructor, args } => {
             let category = congruence::extract_category(expr, theory).unwrap();
-            
+
             // Check if this constructor has collection fields
-            let grammar_rule = theory.terms.iter()
+            let grammar_rule = theory
+                .terms
+                .iter()
                 .find(|r| r.label == *constructor && r.category == category);
-            
-            let rhs_args: Vec<TokenStream> = args.iter().enumerate()
+
+            let rhs_args: Vec<TokenStream> = args
+                .iter()
+                .enumerate()
                 .map(|(i, arg)| {
                     // Check if this argument position corresponds to a Collection field
                     let is_collection_field = grammar_rule
                         .and_then(|rule| {
-                            rule.items.iter()
-                                .filter(|item| matches!(
-                                    item,
-                                    crate::ast::GrammarItem::NonTerminal(_) | 
-                                    crate::ast::GrammarItem::Collection { .. }
-                                ))
+                            rule.items
+                                .iter()
+                                .filter(|item| {
+                                    matches!(
+                                        item,
+                                        crate::ast::GrammarItem::NonTerminal(_)
+                                            | crate::ast::GrammarItem::Collection { .. }
+                                    )
+                                })
                                 .nth(i)
                         })
                         .map(|item| matches!(item, crate::ast::GrammarItem::Collection { .. }))
                         .unwrap_or(false);
-                    
+
                     // For collection fields, pass the constructor label so flatten helper can be used
-                    let inner = if is_collection_field && matches!(arg, Expr::CollectionPattern { .. }) {
-                        generate_ascent_collection_rhs(arg, bindings, theory, Some((category.clone(), constructor.clone())))
-                    } else {
-                        generate_ascent_rhs(arg, bindings, theory)
-                    };
-                    
+                    let inner =
+                        if is_collection_field && matches!(arg, Expr::CollectionPattern { .. }) {
+                            generate_ascent_collection_rhs(
+                                arg,
+                                bindings,
+                                theory,
+                                Some((category.clone(), constructor.clone())),
+                            )
+                        } else {
+                            generate_ascent_rhs(arg, bindings, theory)
+                        };
+
                     // Don't wrap collection fields in Box::new
                     if is_collection_field {
                         inner
@@ -161,35 +186,39 @@ pub fn generate_rhs_construction(expr: &Expr, bindings: &HashMap<String, TokenSt
                     }
                 })
                 .collect();
-            
+
             quote! {
                 #category::#constructor(#(#rhs_args),*)
             }
-        }
-        
+        },
+
         Expr::Subst { term, var, replacement } => {
             let term_rhs = generate_ascent_rhs(term, bindings, theory);
             let var_name = var.to_string();
-            let var_binding = bindings.get(&var_name)
-                .unwrap_or_else(|| panic!(
+            let var_binding = bindings.get(&var_name).unwrap_or_else(|| {
+                panic!(
                     "Substitution variable '{}' not bound. Available bindings: {:?}",
                     var_name,
                     bindings.keys().collect::<Vec<_>>()
-                ));
+                )
+            });
             let replacement_rhs = generate_ascent_rhs(replacement, bindings, theory);
-            
+
             // Determine the category of the replacement to call the right substitute method
-            let replacement_category = congruence::extract_category(replacement, theory).unwrap().to_string().to_lowercase();
+            let replacement_category = congruence::extract_category(replacement, theory)
+                .unwrap()
+                .to_string()
+                .to_lowercase();
             let subst_method = quote::format_ident!("substitute_{}", replacement_category);
-            
+
             quote! {
                 (#term_rhs).#subst_method(&#var_binding.0, &#replacement_rhs)
             }
-        }
-        
+        },
+
         Expr::CollectionPattern { .. } => {
             // This should have been handled at the top level by generate_ascent_rhs
             panic!("CollectionPattern should be handled by generate_ascent_rhs/generate_ascent_collection_rhs");
-        }
+        },
     }
 }

@@ -24,7 +24,7 @@ Created an explosive feedback loop where:
 
 With the example that found 180 paths, intermediate relations likely contained millions of facts.
 
-**Solution**: 
+**Solution**:
 - Removed `cat(c1) <-- cat(c0), eq_cat(c0,c1)` rule
 - Removed explicit reflexivity/transitivity/symmetry rules
 - Let `eqrel` data structure handle closure implicitly when needed
@@ -69,7 +69,7 @@ The optimizations change the exploration semantics:
 - **Old**: Explore ALL terms reachable via rewrites AND equalities
 - **New**: Explore only terms reachable via direct rewrites
 
-**Impact**: 
+**Impact**:
 - Much faster (6x speedup)
 - May find fewer terms if equations generate many equivalent forms
 - For rewrite-heavy systems (like Rho calculus), this is usually the desired behavior
@@ -84,7 +84,7 @@ If you need to explore ALL terms up to equational equivalence:
 
 ### Expected Performance (based on term rewriting benchmarks)
 - **1,000 terms**: < 1 second
-- **10,000 terms**: < 10 seconds  
+- **10,000 terms**: < 10 seconds
 - **100,000 terms**: < 2 minutes
 
 ### Remaining Bottlenecks

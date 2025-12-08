@@ -5,9 +5,8 @@
 // - Ascent execution
 // - Result extraction
 
-pub mod rhocalc;
 pub mod ambient;
+pub mod rhocalc;
 
-pub use rhocalc::RhoCalculusTheory;
 pub use ambient::AmbCalculusTheory;
-
+pub use rhocalc::RhoCalculusTheory;

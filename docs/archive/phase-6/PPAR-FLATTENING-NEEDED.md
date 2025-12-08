@@ -58,7 +58,7 @@ The current equation syntax doesn't support:
 This would require something like:
 ```rust
 // Hypothetical syntax:
-if {Q, ...inner} = nested_par then 
+if {Q, ...inner} = nested_par then
     (PPar {P, nested_par, ...outer}) == (PPar {P, Q, ...inner, ...outer})
 ```
 
@@ -104,10 +104,10 @@ Instead of equations, use congruence rewrites:
 rewrites {
     // Flatten nested parallel
     (PPar {P, (PPar {...rest}), ...outer}) => (PPar {P, ...rest, ...outer});
-    
+
     // Remove empty parallel
     (PPar {P, (PPar {}), ...rest}) => (PPar {P, ...rest});
-    
+
     // Single element unwrapping
     (PPar {P}) => P;
 }
@@ -142,7 +142,7 @@ If pursuing Option 1:
 Once PPar flattening is properly supported, the 7 failing tests should all pass:
 
 1. `equation_then_rewrite_extrusion_in` - needs flattening after extrusion
-2. `equation_zero_then_rewrite` - needs `{}` elimination 
+2. `equation_zero_then_rewrite` - needs `{}` elimination
 3. `extrusion_enables_out` - nested bags after extrusion
 4. `parallel_with_extrusion` - nested structure flattening
 5. `zero_in_multiple_contexts` - multiple `{}` to eliminate
@@ -151,7 +151,7 @@ Once PPar flattening is properly supported, the 7 failing tests should all pass:
 
 ## Conclusion
 
-The equation system implementation is **correct and complete**. The failing tests expose a **theory-level gap**: missing equations for the algebraic properties of parallel composition (associativity and unit). 
+The equation system implementation is **correct and complete**. The failing tests expose a **theory-level gap**: missing equations for the algebraic properties of parallel composition (associativity and unit).
 
 This requires either:
 - Extending the equation language to express these properties, OR

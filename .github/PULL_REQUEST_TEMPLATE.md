@@ -23,9 +23,9 @@ Fixes #
 
 ## Changes Made
 <!-- List the key changes in bullet points -->
-- 
-- 
-- 
+-
+-
+-
 
 ## Testing
 <!-- Describe how you tested your changes -->

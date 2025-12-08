@@ -1,5 +1,5 @@
-use crate::theory::{AscentResults, EquivClass, Rewrite, Term, TermInfo, Theory};
 use crate::examples::TheoryName;
+use crate::theory::{AscentResults, EquivClass, Rewrite, Term, TermInfo, Theory};
 use anyhow::Result;
 use std::fmt;
 
@@ -41,7 +41,7 @@ impl Theory for AmbCalculusTheory {
 
     fn run_ascent(&self, term: Box<dyn Term>) -> Result<AscentResults> {
         use ascent::*;
-        
+
         // Downcast to AmbTerm
         let amb_term = term
             .as_any()
@@ -53,13 +53,17 @@ impl Theory for AmbCalculusTheory {
         // Run Ascent with the generated source
         let prog = ascent_run! {
             include_source!(ambient_source);
-            
+
             proc(initial_proc.clone());
         };
 
         // Extract results
         let all_procs: Vec<Proc> = prog.proc.iter().map(|(p,)| p.clone()).collect();
-        let rewrites: Vec<(Proc, Proc)> = prog.rw_proc.iter().map(|(from, to)| (from.clone(), to.clone())).collect();
+        let rewrites: Vec<(Proc, Proc)> = prog
+            .rw_proc
+            .iter()
+            .map(|(from, to)| (from.clone(), to.clone()))
+            .collect();
 
         // Build term info
         let mut term_infos = Vec::new();
@@ -86,7 +90,7 @@ impl Theory for AmbCalculusTheory {
             .collect();
 
         // Build equivalence classes (from eq_proc)
-        let mut equivalences = Vec::new(); 
+        let mut equivalences = Vec::new();
         for (lhs, rhs) in prog.__eq_proc_ind_common.iter_all_added() {
             if lhs.to_string() != rhs.to_string() {
                 equivalences.push(EquivClass {

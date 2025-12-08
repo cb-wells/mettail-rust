@@ -1,6 +1,6 @@
 # Phase 1 Foundation Review
 
-**Date:** 2025-10-25  
+**Date:** 2025-10-25
 **Purpose:** Comprehensive review of what's needed for a proper foundation
 
 ---
@@ -112,7 +112,7 @@ impl TypeChecker {
 pub trait Term: Clone + Debug + PartialEq {
     /// Get the category/type of this term
     fn category(&self) -> &'static str;
-    
+
     /// Pretty-print the term
     fn display(&self) -> String;
 }
@@ -126,7 +126,7 @@ pub trait HasEquations<T: Term> {
 /// Parser trait
 pub trait Parser<T: Term> {
     type Error: std::error::Error;
-    
+
     fn parse(&self, input: &str) -> Result<T, Self::Error>;
 }
 ```
@@ -219,8 +219,8 @@ error: Type mismatch in equation
 
 **What's Missing:**
 ```rust
-fn validate_grammar_rule(rule: &GrammarRule, theory: &TheoryDef) 
-    -> Result<(), ValidationError> 
+fn validate_grammar_rule(rule: &GrammarRule, theory: &TheoryDef)
+    -> Result<(), ValidationError>
 {
     // 1. Check that rule.category is exported
     if !theory.exports.iter().any(|e| e.name == rule.category) {
@@ -229,7 +229,7 @@ fn validate_grammar_rule(rule: &GrammarRule, theory: &TheoryDef)
             span: rule.category.span(),
         });
     }
-    
+
     // 2. Check all NonTerminals reference exported categories
     for item in &rule.items {
         if let GrammarItem::NonTerminal(cat) = item {
@@ -241,7 +241,7 @@ fn validate_grammar_rule(rule: &GrammarRule, theory: &TheoryDef)
             }
         }
     }
-    
+
     Ok(())
 }
 ```
@@ -383,17 +383,17 @@ pub struct TypeChecker { /* ... */ }
 ## Basic Structure
 theory! {
     name: MyTheory,
-    
+
     exports {
         Category1
         Category2
     }
-    
+
     terms {
         Constructor1 . Category1 ::= "literal" ;
         Constructor2 . Category2 ::= (Category1) "+" (Category1) ;
     }
-    
+
     equations {
         (Constructor2 x y) == (Constructor2 y x)  // Commutativity
     }
@@ -414,7 +414,7 @@ theory! {
 /// - Type-checking
 mod arithmetic {
     use mettail_macros::theory;
-    
+
     theory! {
         name: Arithmetic,
         exports { Elem }
@@ -423,7 +423,7 @@ mod arithmetic {
 }
 ```
 
-**Where:** 
+**Where:**
 - API docs: Throughout source files
 - User guide: `docs/USER-GUIDE.md`
 - Examples: `examples/` with comments
@@ -605,7 +605,7 @@ pub struct GrammarRule {
 ### High Risk 🔴
 1. **Freshness semantics** - Subtle, need to get right
    - Mitigation: Start simple, add complexity incrementally
-   
+
 2. **Parser generation** - Complex, might take longer
    - Mitigation: Use proven library (`nom`), start with simple cases
 
@@ -628,15 +628,15 @@ pub struct GrammarRule {
 ## Recommendation
 
 ### Option A: Thorough Foundation (4 weeks)
-**Includes:** All 7 critical features, comprehensive testing, good docs  
-**Pros:** Solid foundation, fewer bugs, easier to extend  
-**Cons:** Takes longer  
+**Includes:** All 7 critical features, comprehensive testing, good docs
+**Pros:** Solid foundation, fewer bugs, easier to extend
+**Cons:** Takes longer
 
 ### Option B: Minimal Viable (3 weeks)
-**Includes:** Freshness, scoping, runtime, parser gen, binders  
-**Defer:** Error spans, complete testing, docs to Phase 1.5  
-**Pros:** Faster to Phase 2  
-**Cons:** More technical debt  
+**Includes:** Freshness, scoping, runtime, parser gen, binders
+**Defer:** Error spans, complete testing, docs to Phase 1.5
+**Pros:** Faster to Phase 2
+**Cons:** More technical debt
 
 ### My Recommendation: **Option A** (4 weeks)
 
@@ -684,7 +684,7 @@ If go-to-def still doesn't work:
 
 ---
 
-**Question for you:** 
+**Question for you:**
 
 Do you agree with this analysis? Should we:
 1. ✅ Proceed with 4-week plan (thorough foundation)

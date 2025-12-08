@@ -201,8 +201,8 @@ parse(display(parse(s))) == parse(s)
 
 ---
 
-**Status:** ✅ Phase 2 Parsing Complete  
-**Tests:** 11/11 passing  
-**Target:** `a!(0) | b!(c!(0)) | for(a x){*x}` ✅  
+**Status:** ✅ Phase 2 Parsing Complete
+**Tests:** 11/11 passing
+**Target:** `a!(0) | b!(c!(0)) | for(a x){*x}` ✅
 **Date:** October 26, 2025
 

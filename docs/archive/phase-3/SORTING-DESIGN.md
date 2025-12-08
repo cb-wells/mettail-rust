@@ -1,7 +1,7 @@
 # Generic Term Sorting Design
 
-**Status:** Design Document  
-**Date:** November 4, 2025  
+**Status:** Design Document
+**Date:** November 4, 2025
 **Goal:** Define a simple, correct, and generic method for sorting terms in MeTTaIL theories
 
 ---
@@ -131,16 +131,16 @@ where
 {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         use std::cmp::Ordering;
-        
+
         // Clone scopes to unbind without consuming
         let (p1, t1) = self.clone().unbind();
         let (p2, t2) = other.clone().unbind();
-        
+
         // Compare by pretty-printed representation
         // (since Binder doesn't implement Ord directly)
         let p1_str = format!("{:?}", p1);
         let p2_str = format!("{:?}", p2);
-        
+
         match p1_str.cmp(&p2_str) {
             Ordering::Equal => {
                 // Compare bodies by their Debug representation
@@ -250,7 +250,7 @@ The Rust compiler generates the `Ord` implementation automatically using:
 Just like we added `Hash` to `Scope` with a newtype wrapper, we can add `Ord`:
 
 1. ✅ **Scope** - Add `Ord` implementation (follows existing `Hash` pattern)
-2. ✅ **OrdVar** - Create wrapper type (follows existing `Scope` wrapper pattern)  
+2. ✅ **OrdVar** - Create wrapper type (follows existing `Scope` wrapper pattern)
 3. ✅ **Codegen** - Change `Var` to `OrdVar`, add `Ord` to derive list
 4. ✅ **No manual generation** - Rust derives everything automatically!
 
@@ -377,7 +377,7 @@ This requires more sophisticated analysis (rewrite normal forms).
 - **Moniker Crate:** https://github.com/brendanzab/moniker
 - **Rust Ord Trait:** https://doc.rust-lang.org/std/cmp/trait.Ord.html
 - **Rust Derive Macros:** https://doc.rust-lang.org/reference/procedural-macros.html#derive-macros
-- **MeTTaIL Docs:** 
+- **MeTTaIL Docs:**
   - `docs/design/DATA-STRUCTURES-DESIGN.md`
   - `docs/phase-1/PHASE-1-COMPLETE.md`
   - `docs/ROADMAP.md`

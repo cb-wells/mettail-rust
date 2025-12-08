@@ -10,17 +10,15 @@ pub struct TheoryRegistry {
 impl TheoryRegistry {
     /// Create a new registry
     pub fn new() -> Self {
-        Self {
-            theories: HashMap::new(),
-        }
+        Self { theories: HashMap::new() }
     }
-    
+
     /// Register a theory
     pub fn register(&mut self, theory: Box<dyn Theory>) {
         let name = theory.name().as_str();
         self.theories.insert(name.to_string(), theory);
     }
-    
+
     /// Get a theory by name
     pub fn get(&self, name: &str) -> Result<&dyn Theory> {
         self.theories
@@ -28,12 +26,12 @@ impl TheoryRegistry {
             .map(|b| b.as_ref())
             .ok_or_else(|| anyhow::anyhow!("Theory '{}' not found", name))
     }
-    
+
     /// List all available theories
     pub fn list(&self) -> Vec<&str> {
         self.theories.keys().map(|s| s.as_str()).collect()
     }
-    
+
     /// Check if a theory exists
     pub fn contains(&self, name: &str) -> bool {
         self.theories.contains_key(name)
@@ -49,15 +47,14 @@ impl Default for TheoryRegistry {
 /// Build the default registry with all available theories
 pub fn build_registry() -> Result<TheoryRegistry> {
     let mut registry = TheoryRegistry::new();
-    
+
     // Register RhoCalc
     registry.register(Box::new(crate::theories::RhoCalculusTheory));
     registry.register(Box::new(crate::theories::AmbCalculusTheory));
-    
+
     if registry.theories.is_empty() {
         bail!("No theories available.");
     }
-    
+
     Ok(registry)
 }
-

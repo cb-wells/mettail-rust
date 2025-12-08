@@ -8,7 +8,7 @@ Collection pattern matching with rest patterns (`{P, Q, ...rest}`) is **partiall
 
 ✅ Matching when the required elements appear **first** in iteration order:
 ```rust
-{a!(0), for(a->x0){*x0}} 
+{a!(0), for(a->x0){*x0}}
 // Successfully matches: POutput(a, 0) and PInput(a, x, *x0) are first two elements
 // Result: {*@(0)}
 ```
@@ -58,7 +58,7 @@ pinput_in_par(parent, chan, scope) <--
     if let Proc::PInput(chan_box, scope) = elem,
     let chan = chan_box.as_ref();
 
-// Extract only POutput processes  
+// Extract only POutput processes
 relation poutput_in_par(Proc, Name, Proc);
 poutput_in_par(parent, chan, payload) <--
     proc(parent),

@@ -1,6 +1,6 @@
 # Auto-Flattening Implementation Complete
 
-**Date**: 2025-11-22  
+**Date**: 2025-11-22
 **Status**: ✅ **Production Ready** - Automatic PPar flattening now working!
 
 ## Summary
@@ -100,7 +100,7 @@ let input_term = input_term.normalize();  // ← Added!
    - Result: `{{a, b}, c}` becomes `{a, b, c}`
 
 2. **Empty Bag Elimination**: Empty collections `{}` are flattened away:
-   - `{{}, p}` → `{p}` 
+   - `{{}, p}` → `{p}`
    - `{{}, {}, p}` → `{p}`
 
 3. **Preservation Through Constructors**: Non-collection constructors recursively normalize their fields:
@@ -146,7 +146,7 @@ To make these tests pass would require:
 
 - `mettail-macros/src/codegen.rs:322` - `generate_normalize_functions()`
 - `mettail-macros/src/ascent_gen.rs:1400` - Equation RHS normalization
-- `mettail-macros/src/rewrite_gen.rs:136` - Rewrite RHS normalization  
+- `mettail-macros/src/rewrite_gen.rs:136` - Rewrite RHS normalization
 - `mettail-macros/src/ascent_gen.rs:849,1167,1907,2037` - Congruence result normalization
 
 ## Conclusion

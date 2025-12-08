@@ -1,13 +1,13 @@
-use crate::ast::TheoryDef;
 use super::projections::{generate_binding_proj_declaration, generate_binding_proj_population};
+use crate::ast::TheoryDef;
 use proc_macro2::TokenStream;
-use quote::{quote, format_ident};
+use quote::{format_ident, quote};
 use syn::Ident;
 
 /// Generate congruence for binding constructors
 /// Example: if S => T then (PNew x S) => (PNew x T)
 /// Generates:
-/// rw_proc(s, t) <-- 
+/// rw_proc(s, t) <--
 ///     proc(s),
 ///     if let Proc::PNew(scope) = s,
 ///     let (x, body) = scope.clone().unbind(),
@@ -26,28 +26,33 @@ pub fn generate_binding_congruence(
 ) -> Option<TokenStream> {
     // For binding constructors, generate unbind + rewrite + rebind logic
     let rewritten_field = format_ident!("t0");
-    
+
     // Determine which fields are binders and which are being rewritten
-    let binder_vars: Vec<_> = rule.bindings.iter().enumerate().map(|(idx, (binder_idx, _))| {
-        let _var_name = bindings.get(*binder_idx)?;
-        // Use a unique name to avoid shadowing the input parameter 's'
-        Some(format_ident!("binder_{}", idx))
-    }).collect::<Option<Vec<_>>>()?;
-    
+    let binder_vars: Vec<_> = rule
+        .bindings
+        .iter()
+        .enumerate()
+        .map(|(idx, (binder_idx, _))| {
+            let _var_name = bindings.get(*binder_idx)?;
+            // Use a unique name to avoid shadowing the input parameter 's'
+            Some(format_ident!("binder_{}", idx))
+        })
+        .collect::<Option<Vec<_>>>()?;
+
     // For now, assume single binder and single body (common case)
     if binder_vars.len() != 1 {
         return None; // Complex binding patterns not yet supported
     }
-    
+
     let binder_var = &binder_vars[0];
-    
+
     // Generate field patterns for non-binder, non-rewritten fields
     let mut other_fields = Vec::new();
     let mut recon_args = Vec::new();
-    
+
     for (i, _var) in bindings.iter().enumerate() {
         let is_binder = rule.bindings.iter().any(|(b_idx, _)| *b_idx == i);
-        
+
         if is_binder {
             // Skip - handled by unbind
             continue;
@@ -61,9 +66,9 @@ pub fn generate_binding_congruence(
             recon_args.push(quote! { #field_name.clone() });
         }
     }
-    
+
     Some(quote! {
-        #rw_rel(s, t) <-- 
+        #rw_rel(s, t) <--
             #cat_lower(s),
             if let #category::#constructor(scope) = s,
             let (#binder_var, body) = scope.clone().unbind(),
@@ -85,13 +90,13 @@ fn generate_binding_congruence_clause(
     body_cat: &Ident,
 ) -> TokenStream {
     let body_rw_rel = format_ident!("rw_{}", body_cat.to_string().to_lowercase());
-    
+
     quote! {
         #rw_rel(parent, result) <--
             #proj_rel(parent, binder_var, body),
             #body_rw_rel(body, body_rewritten),
             let scope_tmp = mettail_runtime::Scope::from_parts_unsafe(
-                binder_var.clone(), 
+                binder_var.clone(),
                 Box::new(body_rewritten.clone())
             ),
             let result = #parent_cat::#constructor(scope_tmp).normalize();
@@ -120,29 +125,26 @@ pub fn generate_projection_based_binding_congruence(
         );
         return None;
     }
-    
+
     let (binder_idx, body_indices) = &rule.bindings[0];
-    
+
     // Validate: binder must bind in exactly one body
     if body_indices.len() != 1 {
-        eprintln!(
-            "Warning: Binder binding in multiple bodies not supported: {}",
-            constructor
-        );
+        eprintln!("Warning: Binder binding in multiple bodies not supported: {}", constructor);
         return None;
     }
-    
+
     let body_idx = body_indices[0];
-    
+
     // Get the body category
     let body_cat = match &rule.items[body_idx] {
         crate::ast::GrammarItem::NonTerminal(cat) => cat,
         _ => {
             eprintln!("Warning: Body field is not a non-terminal: {}", constructor);
             return None;
-        }
+        },
     };
-    
+
     // Map field_idx (from args) to grammar item index
     // field_idx counts only Var arguments in the congruence LHS
     // We need to find which grammar item position this corresponds to
@@ -156,7 +158,7 @@ pub fn generate_projection_based_binding_congruence(
                     break;
                 }
                 non_terminal_count += 1;
-            }
+            },
             crate::ast::GrammarItem::Binder { .. } => {
                 // Binders are also counted as fields in the congruence args
                 if non_terminal_count == rewrite_field_idx {
@@ -164,11 +166,11 @@ pub fn generate_projection_based_binding_congruence(
                     break;
                 }
                 non_terminal_count += 1;
-            }
-            _ => {}
+            },
+            _ => {},
         }
     }
-    
+
     let rewrite_grammar_idx = match rewrite_grammar_idx {
         Some(idx) => idx,
         None => {
@@ -177,9 +179,9 @@ pub fn generate_projection_based_binding_congruence(
                 rewrite_field_idx, constructor
             );
             return None;
-        }
+        },
     };
-    
+
     // Validate: the rewrite field must be the body
     if rewrite_grammar_idx != body_idx {
         eprintln!(
@@ -188,29 +190,30 @@ pub fn generate_projection_based_binding_congruence(
         );
         return None;
     }
-    
+
     // Generate projection relation name
     let constructor_lower = format_ident!("{}", constructor.to_string().to_lowercase());
     let proj_rel = format_ident!("{}_direct_congruence_proj", constructor_lower);
-    
+
     // Generate components
-    let proj_decl = generate_binding_proj_declaration(
-        &proj_rel, category, body_cat
-    );
-    
+    let proj_decl = generate_binding_proj_declaration(&proj_rel, category, body_cat);
+
     let proj_population = generate_binding_proj_population(
-        &proj_rel, category, &constructor, body_cat, rule, *binder_idx
+        &proj_rel,
+        category,
+        &constructor,
+        body_cat,
+        rule,
+        *binder_idx,
     );
-    
+
     let rw_rel = format_ident!("rw_{}", category.to_string().to_lowercase());
-    let congruence_clause = generate_binding_congruence_clause(
-        &rw_rel, &proj_rel, category, &constructor, body_cat
-    );
-    
+    let congruence_clause =
+        generate_binding_congruence_clause(&rw_rel, &proj_rel, category, &constructor, body_cat);
+
     Some(quote! {
         #proj_decl
         #proj_population
         #congruence_clause
     })
 }
-

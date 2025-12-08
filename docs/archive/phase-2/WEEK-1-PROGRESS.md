@@ -109,13 +109,13 @@ pub Proc: Proc = {
 ## 🐛 Issues & Resolutions
 
 ### Issue 1: OUT_DIR in lib.rs
-**Problem:** IDE couldn't resolve `env!("OUT_DIR")` during analysis  
-**Solution:** Removed direct `include!` of generated parser, using runtime-only approach  
+**Problem:** IDE couldn't resolve `env!("OUT_DIR")` during analysis
+**Solution:** Removed direct `include!` of generated parser, using runtime-only approach
 **Status:** ✅ Resolved
 
 ### Issue 2: Unused Code Warnings
-**Problem:** New module has unused function warnings  
-**Solution:** Expected - will be used when integrated with macro  
+**Problem:** New module has unused function warnings
+**Solution:** Expected - will be used when integrated with macro
 **Status:** ⚠️ Acceptable (temporary)
 
 ---
@@ -130,6 +130,6 @@ pub Proc: Proc = {
 
 ---
 
-**Last Updated:** Phase 2, Week 1, Day 2  
+**Last Updated:** Phase 2, Week 1, Day 2
 **Next Milestone:** Generate and test first working parser (Day 5)
 

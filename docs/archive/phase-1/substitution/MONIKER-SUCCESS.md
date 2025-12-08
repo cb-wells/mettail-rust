@@ -1,6 +1,6 @@
 # ✅ SUCCESS: Moniker Integration Complete!
 
-**Date:** 2025-10-25  
+**Date:** 2025-10-25
 **Status:** We're Now Actually Using Moniker! 🎉
 
 ---
@@ -61,7 +61,7 @@ pub enum Expr {
 1. **Parser Implementation** - Currently stubbed out (`if false { ... }`)
    - Need to parse variable names from input
    - Create `FreeVar` and construct `Scope`
-   
+
 2. **Variable Support** - Add `Var<String>` as a category
    - Need `EVar(Var<String>)` variant
    - This lets us actually use variables in terms

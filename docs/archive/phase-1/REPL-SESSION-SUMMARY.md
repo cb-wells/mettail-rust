@@ -1,6 +1,6 @@
 # REPL Implementation: Session Summary
 
-**Date:** November 10, 2025  
+**Date:** November 10, 2025
 **Status:** Foundation Complete ✅
 
 ---
@@ -115,10 +115,10 @@ pub struct ReplState {
 
 ### Critical: Rewrite Navigation Broken After First Apply
 
-**Problem:**  
+**Problem:**
 After applying a rewrite, subsequent `rewrites` command showed no available rewrites, even when not at a normal form.
 
-**Root Cause:**  
+**Root Cause:**
 When navigating to a target term:
 1. We looked up the target by ID in the graph
 2. Re-parsed the term from its display string
@@ -126,7 +126,7 @@ When navigating to a target term:
 
 But the newly parsed term got a **different hash ID** than the original term in the graph!
 
-**Solution:**  
+**Solution:**
 Added `current_graph_id` to `ReplState`:
 - Track the ID from the graph separately
 - Use `set_term_with_id()` to explicitly set graph position
@@ -139,8 +139,8 @@ pub struct ReplState {
     // ...
 }
 
-pub fn set_term_with_id(&mut self, term: Box<dyn Term>, 
-                        results: AscentResults, 
+pub fn set_term_with_id(&mut self, term: Box<dyn Term>,
+                        results: AscentResults,
                         graph_id: u64) -> Result<()> {
     self.current_graph_id = Some(graph_id);  // ← Track separately
     // ...
@@ -246,11 +246,11 @@ pub fn set_term_with_id(&mut self, term: Box<dyn Term>,
 ## 📈 Impact
 
 ### User Experience
-**Before:** Run examples manually, read terminal output  
+**Before:** Run examples manually, read terminal output
 **After:** Interactive exploration, step through rewrites, inspect graph
 
 ### Development Workflow
-**Before:** Add `println!` debugging to understand rewrite behavior  
+**Before:** Add `println!` debugging to understand rewrite behavior
 **After:** Load theory in REPL, navigate to problem, inspect state
 
 ### Future Potential

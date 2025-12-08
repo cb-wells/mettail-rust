@@ -5,39 +5,38 @@
 //! Ascent (which requires Hash for relations) and term generation
 //! (which requires Ord for enumeration).
 
-use std::collections::HashMap;
-use std::sync::Mutex;
-use std::hash::{Hash, Hasher};
-use std::fmt;
 use std::cmp::Ordering;
+use std::collections::HashMap;
+use std::fmt;
+use std::hash::{Hash, Hasher};
+use std::sync::Mutex;
 
 // Re-export moniker types
-pub use moniker::{
-    Var, FreeVar, Binder, BoundTerm, BoundPattern, BoundVar,
-};
+pub use moniker::{Binder, BoundPattern, BoundTerm, BoundVar, FreeVar, Var};
 
 // Variable cache for consistent variable identity within a parsing session
 lazy_static::lazy_static! {
-    static ref VAR_CACHE: Mutex<HashMap<String, FreeVar<String>>> = 
+    static ref VAR_CACHE: Mutex<HashMap<String, FreeVar<String>>> =
         Mutex::new(HashMap::new());
 }
 
 /// Get or create a variable from the cache
-/// 
+///
 /// This ensures that parsing the same variable name twice produces
 /// the same FreeVar instance, which is critical for correct variable
 /// identity in alpha-equivalence checking.
 pub fn get_or_create_var(name: impl Into<String>) -> FreeVar<String> {
     let name = name.into();
     let mut cache = VAR_CACHE.lock().unwrap();
-    
-    cache.entry(name.clone())
+
+    cache
+        .entry(name.clone())
         .or_insert_with(|| FreeVar::fresh_named(name))
         .clone()
 }
 
 /// Clear the variable cache
-/// 
+///
 /// Call this before parsing a new term to ensure variables from
 /// different terms don't accidentally share identity.
 pub fn clear_var_cache() {
@@ -54,12 +53,12 @@ pub fn var_cache_size() -> usize {
 //=============================================================================
 
 /// Wrapper around moniker::Scope that adds Hash and Ord implementations.
-/// 
+///
 /// The official moniker crate doesn't implement Hash or Ord for Scope,
 /// but we need these for:
 /// - Using Scopes in HashMap-based data structures (Ascent relations)
 /// - Generating terms in canonical order
-/// 
+///
 /// The Hash implementation hashes both pattern and body, which is safe
 /// because Scope's PartialEq already compares these fields alpha-equivalently.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -96,18 +95,18 @@ where
         // Clone scopes to unbind without consuming
         let (p1, t1) = self.clone().unbind();
         let (p2, t2) = other.clone().unbind();
-        
+
         // Compare by pretty-printed representation
         // (since Binder doesn't implement Ord directly)
         let p1_str = format!("{:?}", p1);
         let p2_str = format!("{:?}", p2);
-        
+
         match p1_str.cmp(&p2_str) {
             Ordering::Equal => {
                 let t1_str = format!("{:?}", t1);
                 let t2_str = format!("{:?}", t2);
                 t1_str.cmp(&t2_str)
-            }
+            },
             ord => ord,
         }
     }
@@ -152,25 +151,25 @@ impl<P, T> Scope<P, T> {
     pub fn inner(&self) -> &moniker::Scope<P, T> {
         &self.inner
     }
-    
+
     /// Direct access to the pattern (unsafe - preserves bound variables)
-    /// 
+    ///
     /// Use this instead of unbind() when you need stable variable identity
     /// for equations or pattern matching.
     pub fn unsafe_pattern(&self) -> &P {
         &self.inner.unsafe_pattern
     }
-    
+
     /// Direct access to the body (unsafe - preserves bound variables)
-    /// 
+    ///
     /// Use this instead of unbind() when you need stable variable identity
     /// for equations or pattern matching.
     pub fn unsafe_body(&self) -> &T {
         &self.inner.unsafe_body
     }
-    
+
     /// Construct a Scope from pattern and body directly (unsafe - no closing)
-    /// 
+    ///
     /// This assumes the body already has the correct bound variable structure.
     /// Used in generated Ascent code for reconstructing terms.
     pub fn from_parts_unsafe(pattern: P, body: T) -> Scope<P, T> {
@@ -178,7 +177,7 @@ impl<P, T> Scope<P, T> {
             inner: moniker::Scope {
                 unsafe_pattern: pattern,
                 unsafe_body: body,
-            }
+            },
         }
     }
 }
@@ -223,13 +222,13 @@ impl<P: Clone, T: Clone> From<moniker::Scope<P, T>> for Scope<P, T> {
 //=============================================================================
 
 /// Wrapper around moniker::Var that adds Ord implementation.
-/// 
+///
 /// The official moniker crate doesn't implement Ord for Var,
 /// but we need it for:
 /// - Sorting terms for enumeration
 /// - Using terms as keys in BTree collections
 /// - Canonical term ordering
-/// 
+///
 /// The Ord implementation compares variables by their pretty-printed names,
 /// providing a total order (NOT alpha-equivalence respecting).
 /// This is intentional - we want a total order for enumeration.
@@ -255,19 +254,23 @@ impl BoundTerm<String> for OrdVar {
     fn term_eq(&self, other: &Self) -> bool {
         self.0.term_eq(&other.0)
     }
-    
+
     fn close_term(&mut self, state: moniker::ScopeState, on_free: &impl moniker::OnFreeFn<String>) {
         self.0.close_term(state, on_free)
     }
-    
-    fn open_term(&mut self, state: moniker::ScopeState, on_bound: &impl moniker::OnBoundFn<String>) {
+
+    fn open_term(
+        &mut self,
+        state: moniker::ScopeState,
+        on_bound: &impl moniker::OnBoundFn<String>,
+    ) {
         self.0.open_term(state, on_bound)
     }
-    
+
     fn visit_vars(&self, on_var: &mut impl FnMut(&Var<String>)) {
         self.0.visit_vars(on_var)
     }
-    
+
     fn visit_mut_vars(&mut self, on_var: &mut impl FnMut(&mut Var<String>)) {
         self.0.visit_mut_vars(on_var)
     }
@@ -293,4 +296,3 @@ impl fmt::Display for OrdVar {
         write!(f, "{:?}", self.0)
     }
 }
-

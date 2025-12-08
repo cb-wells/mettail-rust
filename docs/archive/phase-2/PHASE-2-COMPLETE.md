@@ -245,6 +245,6 @@ See `docs/ROADMAP.md` for details.
 
 ---
 
-**Phase 2: COMPLETE** ✅  
+**Phase 2: COMPLETE** ✅
 **Ready for Phase 3** 🚀
 

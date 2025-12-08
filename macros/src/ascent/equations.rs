@@ -1,15 +1,15 @@
-use crate::ast::{TheoryDef, Equation, Expr};
-use proc_macro2::TokenStream;
-use quote::{quote, format_ident};
-use syn::Ident;
-use std::collections::{HashMap, HashSet};
 use crate::ascent::congruence;
 use crate::ascent::rewrites;
+use crate::ast::{Equation, Expr, TheoryDef};
+use proc_macro2::TokenStream;
+use quote::{format_ident, quote};
+use std::collections::{HashMap, HashSet};
+use syn::Ident;
 
 /// Main entry point: Generate all equation rules
 pub fn generate_equation_rules(theory: &TheoryDef) -> TokenStream {
     let mut rules = Vec::new();
-    
+
     // Add reflexivity for eq relations
     // This is needed for rewrites that check eq_cat(x, y) where x == y syntactically
     // The eqrel data structure requires explicit seeding even for reflexivity
@@ -17,17 +17,17 @@ pub fn generate_equation_rules(theory: &TheoryDef) -> TokenStream {
         let cat = &export.name;
         let cat_lower = format_ident!("{}", cat.to_string().to_lowercase());
         let eq_rel = format_ident!("eq_{}", cat.to_string().to_lowercase());
-        
+
         rules.push(quote! {
             #eq_rel(t.clone(), t.clone()) <-- #cat_lower(t);
         });
     }
-    
+
     // Add congruence rules for all constructors
     // If arg1 == arg2, then Constructor(arg1) == Constructor(arg2)
     let congruence_rules = generate_congruence_rules(theory);
     rules.extend(congruence_rules);
-    
+
     // Generate clauses for each equation declaration
     // These add the BASE equalities specified by the theory
     for (idx, equation) in theory.equations.iter().enumerate() {
@@ -39,7 +39,7 @@ pub fn generate_equation_rules(theory: &TheoryDef) -> TokenStream {
             eprintln!("  ❌ Failed to generate (returned None)");
         }
     }
-    
+
     quote! {
         #(#rules)*
     }
@@ -49,85 +49,84 @@ pub fn generate_equation_rules(theory: &TheoryDef) -> TokenStream {
 /// For each constructor, generate: if args are equal, then constructed terms are equal
 fn generate_congruence_rules(theory: &TheoryDef) -> Vec<TokenStream> {
     let mut rules = Vec::new();
-    
+
     for grammar_rule in &theory.terms {
         let category = &grammar_rule.category;
         let eq_rel = format_ident!("eq_{}", category.to_string().to_lowercase());
         let _cat_lower = format_ident!("{}", category.to_string().to_lowercase());
-        
+
         // Check if this constructor has binders
         let has_binders = !grammar_rule.bindings.is_empty();
-        
+
         if has_binders {
             // Skip binders for now - congruence for binders is more complex
             // (requires alpha-equivalence reasoning)
             continue;
         }
-        
+
         // Check if this constructor has collections - skip if so
-        let has_collections = grammar_rule.items.iter().any(|item| {
-            matches!(item, crate::ast::GrammarItem::Collection { .. })
-        });
-        
+        let has_collections = grammar_rule
+            .items
+            .iter()
+            .any(|item| matches!(item, crate::ast::GrammarItem::Collection { .. }));
+
         if has_collections {
             // Skip collections - they have built-in equality
             // (HashBag/HashSet equality is order-independent)
             continue;
         }
-        
+
         // Collect non-terminal arguments and their categories
         let mut args = Vec::new();
         let mut arg_categories = Vec::new();
-        
+
         for item in &grammar_rule.items {
             if let crate::ast::GrammarItem::NonTerminal(cat) = item {
                 args.push(cat);
                 arg_categories.push(cat);
             }
         }
-        
+
         if args.is_empty() {
             // No arguments - nullary constructor, no congruence needed
             continue;
         }
-        
+
         // Skip constructors with Var arguments - Var is not a user-defined category
         if args.iter().any(|cat| cat.to_string() == "Var") {
             continue;
         }
-        
+
         // Generate variable names for LHS and RHS
-        let lhs_vars: Vec<Ident> = (0..args.len())
-            .map(|i| format_ident!("x{}", i))
-            .collect();
-        let rhs_vars: Vec<Ident> = (0..args.len())
-            .map(|i| format_ident!("y{}", i))
-            .collect();
-        
+        let lhs_vars: Vec<Ident> = (0..args.len()).map(|i| format_ident!("x{}", i)).collect();
+        let rhs_vars: Vec<Ident> = (0..args.len()).map(|i| format_ident!("y{}", i)).collect();
+
         // Generate category bindings and equality checks for each argument
         // For each arg: cat(x), cat(y), eq_cat(x, y)
         // Note: First occurrences bind the variables (no .clone()), subsequent uses need .clone()
         let mut body_clauses = Vec::new();
-        
+
         for (cat, (lhs, rhs)) in args.iter().zip(lhs_vars.iter().zip(rhs_vars.iter())) {
             let cat_rel = format_ident!("{}", cat.to_string().to_lowercase());
             let eq_arg_rel = format_ident!("eq_{}", cat.to_string().to_lowercase());
-            
+
             // Bind the variables (no .clone())
             body_clauses.push(quote! { #cat_rel(#lhs) });
             body_clauses.push(quote! { #cat_rel(#rhs) });
             // Use the bound variables (.clone() needed here)
             body_clauses.push(quote! { #eq_arg_rel(#lhs.clone(), #rhs.clone()) });
         }
-        
+
         // Generate LHS and RHS constructor applications for the head
-        let lhs_boxed: Vec<TokenStream> = lhs_vars.iter()
+        let lhs_boxed: Vec<TokenStream> = lhs_vars
+            .iter()
             .map(|v| quote! { Box::new(#v.clone()) })
             .collect();
-        let rhs_boxed: Vec<TokenStream> = rhs_vars.iter()
+        let rhs_boxed: Vec<TokenStream> = rhs_vars
+            .iter()
             .map(|v| quote! { Box::new(#v.clone()) })
             .collect();
-        
+
         let label = grammar_rule.label.clone();
         // Generate the congruence rule
         // eq_cat(Constructor(x0, x1, ...), Constructor(y0, y1, ...)) <--
@@ -140,10 +139,9 @@ fn generate_congruence_rules(theory: &TheoryDef) -> Vec<TokenStream> {
             ) <-- #(#body_clauses),*;
         });
     }
-    
+
     rules
 }
-
 
 /// Adapter function: Use rewrite rule pattern matching for equations
 /// Converts between equation-style bindings and rewrite-style bindings
@@ -160,11 +158,11 @@ fn generate_equation_pattern_via_rewrite_logic(
     let mut clauses: Vec<TokenStream> = Vec::new();
     let duplicate_vars: HashSet<String> = HashSet::new(); // No duplicates in single-occurrence equations
     let mut equational_checks: Vec<TokenStream> = Vec::new();
-    
+
     // Call rewrite pattern logic
     let term_ident = format_ident!("{}", term_name);
     let expected_category = congruence::extract_category(expr, theory)?;
-    
+
     rewrites::generate_ascent_pattern(
         expr,
         &term_ident,
@@ -176,31 +174,31 @@ fn generate_equation_pattern_via_rewrite_logic(
         &duplicate_vars,
         &mut equational_checks,
     );
-    
+
     // Convert bindings to equation format
     // Rewrite bindings are TokenStream like `term.clone()` or `(*field).clone()`
     // For equations, we need explicit `let var = ...` bindings after pattern matching
     // so the RHS can reference simple variable names
     let mut explicit_bindings = Vec::new();
-    
+
     for (var_name, binding_expr) in &rewrite_bindings {
         // Skip internal binder variable names (binder_0, binder_1, etc.)
         // These are implementation details, not user-facing variables
         if var_name.starts_with("binder_") {
             continue;
         }
-        
+
         let var_snake = to_snake_case(var_name);
         let var_ident = format_ident!("{}", var_snake);
-        
+
         // Check if this is a binder variable binding (e.g., x -> binder_1)
         // Binder bindings are just identifiers, not expressions with .clone()
         let binding_str = binding_expr.to_string();
-        let is_binder_binding = binding_str.starts_with("binder_") && 
-                                !binding_str.contains('.') && 
-                                !binding_str.contains('(') &&
-                                binding_str.trim() == binding_str; // No whitespace, just the identifier
-        
+        let is_binder_binding = binding_str.starts_with("binder_")
+            && !binding_str.contains('.')
+            && !binding_str.contains('(')
+            && binding_str.trim() == binding_str; // No whitespace, just the identifier
+
         if is_binder_binding {
             // For binder variables like `x -> binder_1`, we DO need the explicit binding
             // `let x = binder_1.clone()` so the user variable name is available
@@ -218,7 +216,7 @@ fn generate_equation_pattern_via_rewrite_logic(
         }
         bindings.insert(var_name.clone(), var_ident);
     }
-    
+
     // Also add variables from variable_categories
     for (var_name, _category) in &variable_categories {
         if !bindings.contains_key(var_name) {
@@ -227,11 +225,11 @@ fn generate_equation_pattern_via_rewrite_logic(
             bindings.insert(var_name.clone(), var_ident);
         }
     }
-    
+
     // Combine pattern matching clauses with explicit bindings
     let mut all_clauses = clauses;
     all_clauses.extend(explicit_bindings);
-    
+
     Some(all_clauses)
 }
 
@@ -244,13 +242,19 @@ fn is_constructor(ident: &Ident, theory: &TheoryDef) -> bool {
 /// This is simpler than generate_equation_rhs which assumes Apply pattern matching
 /// Generate RHS for equations using Ident-based bindings (from pattern matching)
 /// This is simpler than rewrite RHS generation because variables are bound as Ident, not &Box<T>
-fn generate_equation_rhs_from_idents(expr: &Expr, bindings: &HashMap<String, Ident>, theory: &TheoryDef) -> TokenStream {
+fn generate_equation_rhs_from_idents(
+    expr: &Expr,
+    bindings: &HashMap<String, Ident>,
+    theory: &TheoryDef,
+) -> TokenStream {
     match expr {
         Expr::Var(var) => {
             // Check if this is a constructor or a variable
             if is_constructor(var, theory) {
                 // It's a nullary constructor
-                let constructor_category = theory.terms.iter()
+                let constructor_category = theory
+                    .terms
+                    .iter()
                     .find(|r| r.label == *var)
                     .map(|r| &r.category)
                     .expect("Constructor not found in theory");
@@ -264,13 +268,15 @@ fn generate_equation_rhs_from_idents(expr: &Expr, bindings: &HashMap<String, Ide
                     panic!("Variable {} not found in bindings", var_name);
                 }
             }
-        }
+        },
         Expr::Apply { constructor, args } => {
-            let grammar_rule = theory.terms.iter()
+            let grammar_rule = theory
+                .terms
+                .iter()
                 .find(|r| r.label == *constructor)
                 .expect("Constructor not found in theory");
             let category = &grammar_rule.category;
-            
+
             // Special case: Apply(Constructor, [CollectionPattern{constructor: None}])
             // This means the collection should have the Apply's constructor
             if args.len() == 1 {
@@ -284,7 +290,7 @@ fn generate_equation_rhs_from_idents(expr: &Expr, bindings: &HashMap<String, Ide
                     return generate_equation_rhs_from_idents(&normalized, bindings, theory);
                 }
             }
-            
+
             // Check if this constructor has binders
             if !grammar_rule.bindings.is_empty() {
                 // This is a binding constructor like PNew
@@ -293,7 +299,7 @@ fn generate_equation_rhs_from_idents(expr: &Expr, bindings: &HashMap<String, Ide
                 if args.len() >= 2 {
                     let binder_expr = generate_equation_rhs_from_idents(&args[0], bindings, theory);
                     let body_expr = generate_equation_rhs_from_idents(&args[1], bindings, theory);
-                    
+
                     return quote! {
                         #category::#constructor(mettail_runtime::Scope::from_parts_unsafe(#binder_expr, Box::new(#body_expr)))
                     };
@@ -301,21 +307,23 @@ fn generate_equation_rhs_from_idents(expr: &Expr, bindings: &HashMap<String, Ide
                     panic!("Binding constructor {} requires at least 2 arguments", constructor);
                 }
             }
-            
-            let arg_tokens: Vec<_> = args.iter()
+
+            let arg_tokens: Vec<_> = args
+                .iter()
                 .map(|arg| {
                     let inner = generate_equation_rhs_from_idents(arg, bindings, theory);
                     quote! { Box::new(#inner) }
                 })
                 .collect();
-            
+
             quote! {
                 #category::#constructor(#(#arg_tokens),*)
             }
-        }
+        },
         Expr::CollectionPattern { constructor, elements, rest } => {
             // Reconstruct collection
-            let elem_inserts: Vec<_> = elements.iter()
+            let elem_inserts: Vec<_> = elements
+                .iter()
                 .map(|elem| {
                     let elem_expr = generate_equation_rhs_from_idents(elem, bindings, theory);
                     quote! {
@@ -323,13 +331,15 @@ fn generate_equation_rhs_from_idents(expr: &Expr, bindings: &HashMap<String, Ide
                     }
                 })
                 .collect();
-            
+
             if let Some(cons) = constructor {
-                let category = theory.terms.iter()
+                let category = theory
+                    .terms
+                    .iter()
                     .find(|r| r.label == *cons)
                     .map(|r| &r.category)
                     .expect("Constructor category not found");
-                
+
                 // Check if there's a rest variable to merge in
                 let rest_merge = if let Some(rest_var) = rest {
                     let rest_var_str = rest_var.to_string();
@@ -347,7 +357,7 @@ fn generate_equation_rhs_from_idents(expr: &Expr, bindings: &HashMap<String, Ide
                 } else {
                     None
                 };
-                
+
                 quote! {
                     #category::#cons({
                         let mut bag = mettail_runtime::HashBag::new();
@@ -357,12 +367,18 @@ fn generate_equation_rhs_from_idents(expr: &Expr, bindings: &HashMap<String, Ide
                     })
                 }
             } else {
-                panic!("Collection pattern without constructor in RHS: Elements={:?}", elements.iter().map(|e| format!("{:?}", e)).collect::<Vec<_>>());
+                panic!(
+                    "Collection pattern without constructor in RHS: Elements={:?}",
+                    elements
+                        .iter()
+                        .map(|e| format!("{:?}", e))
+                        .collect::<Vec<_>>()
+                );
             }
-        }
+        },
         Expr::Subst { .. } => {
             panic!("Substitution expressions are not supported in equation RHS");
-        }
+        },
     }
 }
 
@@ -373,36 +389,32 @@ fn generate_equation_clause(equation: &Equation, theory: &TheoryDef) -> Option<T
     // NORMALIZE: If LHS is Apply(Constructor, [CollectionPattern{constructor: None}]),
     // transform to CollectionPattern{constructor: Some(Constructor)}
     let normalized_left = normalize_collection_apply(&equation.left);
-    
+
     // Determine the category from the LHS
     let category = congruence::extract_category(&normalized_left, theory)?;
     let cat_lower = format_ident!("{}", category.to_string().to_lowercase());
     let eq_rel = format_ident!("eq_{}", category.to_string().to_lowercase());
-    
+
     // Generate pattern matching for LHS using rewrite rule logic!
     let mut bindings: HashMap<String, Ident> = HashMap::new();
-    let lhs_clauses = generate_equation_pattern_via_rewrite_logic(
-        &normalized_left,
-        "p0",
-        &mut bindings,
-        theory,
-    )?;
-    
-    // Generate RHS construction  
+    let lhs_clauses =
+        generate_equation_pattern_via_rewrite_logic(&normalized_left, "p0", &mut bindings, theory)?;
+
+    // Generate RHS construction
     // Variables from our explicit bindings are already T, not &Box<T>
     // So we use a simpler RHS generator
     let rhs_construction = generate_equation_rhs_from_idents(&equation.right, &bindings, theory);
-    
+
     // Generate freshness checks if any
     let freshness_checks = generate_equation_freshness(&equation.conditions, &bindings);
-    
+
     // Only call normalize() if the category has collection constructors
     let rhs_with_normalize = if category_has_collections(&category, theory) {
         quote! { (#rhs_construction).normalize() }
     } else {
         rhs_construction
     };
-    
+
     Some(quote! {
         #eq_rel(p0, p1) <--
             #cat_lower(p0),
@@ -411,7 +423,6 @@ fn generate_equation_clause(equation: &Equation, theory: &TheoryDef) -> Option<T
             let p1 = #rhs_with_normalize;
     })
 }
-
 
 /// Normalize Apply(Constructor, [CollectionPattern]) to CollectionPattern{constructor}
 /// This handles cases like (PPar {P}) where the collection is wrapped in Apply
@@ -429,11 +440,10 @@ fn normalize_collection_apply(expr: &Expr) -> Expr {
             }
             // Not a collection, return as-is
             expr.clone()
-        }
-        _ => expr.clone()
+        },
+        _ => expr.clone(),
     }
 }
-
 
 /// Generate pattern matching code for equation LHS
 /// Convert a variable name to snake_case for use in generated code
@@ -442,21 +452,21 @@ fn to_snake_case(name: &str) -> String {
     if name.is_empty() {
         return name.to_string();
     }
-    
+
     // If it's a single character, just lowercase it
     if name.len() == 1 {
         return name.to_lowercase();
     }
-    
+
     // If it's already all lowercase, return as-is
     if name.chars().all(|c| !c.is_uppercase()) {
         return name.to_string();
     }
-    
+
     // Convert CamelCase or UPPERCASE to snake_case
     let mut result = String::new();
     let mut prev_was_uppercase = false;
-    
+
     for (i, ch) in name.chars().enumerate() {
         if ch.is_uppercase() {
             // Add underscore before uppercase if not at start and prev was lowercase
@@ -470,20 +480,26 @@ fn to_snake_case(name: &str) -> String {
             prev_was_uppercase = false;
         }
     }
-    
+
     result
 }
 
 /// Generate RHS construction code for collection pattern equations
 /// Collection variables are bound as T (cloned from iterator), not &Box<T>
 #[allow(dead_code)]
-fn generate_collection_equation_rhs(expr: &Expr, bindings: &HashMap<String, Ident>, theory: &TheoryDef) -> TokenStream {
+fn generate_collection_equation_rhs(
+    expr: &Expr,
+    bindings: &HashMap<String, Ident>,
+    theory: &TheoryDef,
+) -> TokenStream {
     match expr {
         Expr::Var(var) => {
             // Check if this is a constructor or a variable
             if is_constructor(var, theory) {
                 // It's a nullary constructor
-                let constructor_category = theory.terms.iter()
+                let constructor_category = theory
+                    .terms
+                    .iter()
                     .find(|r| r.label == *var)
                     .map(|r| &r.category)
                     .expect("Constructor not found in theory");
@@ -498,29 +514,36 @@ fn generate_collection_equation_rhs(expr: &Expr, bindings: &HashMap<String, Iden
                     quote! { #var }
                 }
             }
-        }
+        },
         _ => {
             // For other expressions, use the regular generator
             // (shouldn't happen for simple collection equations like (PPar {P}) == P)
             generate_equation_rhs(expr, bindings, theory, false)
-        }
+        },
     }
 }
 
 /// Generate RHS construction code
 /// `in_constructor` flag indicates if we're inside a constructor argument (affects Box wrapping)
 #[allow(dead_code)]
-fn generate_equation_rhs(expr: &Expr, bindings: &HashMap<String, Ident>, theory: &TheoryDef, in_constructor: bool) -> TokenStream {
+fn generate_equation_rhs(
+    expr: &Expr,
+    bindings: &HashMap<String, Ident>,
+    theory: &TheoryDef,
+    in_constructor: bool,
+) -> TokenStream {
     match expr {
         Expr::Var(var) => {
             // Check if this is a constructor or a variable
             if is_constructor(var, theory) {
                 // It's a nullary constructor - generate the constructor
-                let constructor_category = theory.terms.iter()
+                let constructor_category = theory
+                    .terms
+                    .iter()
                     .find(|r| r.label == *var)
                     .map(|r| &r.category)
                     .expect("Constructor not found in theory");
-                
+
                 if in_constructor {
                     quote! { Box::new(#constructor_category::#var) }
                 } else {
@@ -544,10 +567,10 @@ fn generate_equation_rhs(expr: &Expr, bindings: &HashMap<String, Ident>, theory:
                     quote! { #var }
                 }
             }
-        }
+        },
         Expr::Apply { constructor, args } => {
-            let category = congruence::extract_category(expr, theory)
-                .unwrap_or_else(|| constructor.clone());
+            let category =
+                congruence::extract_category(expr, theory).unwrap_or_else(|| constructor.clone());
             let arg_constructions: Vec<TokenStream> = args
                 .iter()
                 .map(|arg| {
@@ -556,7 +579,7 @@ fn generate_equation_rhs(expr: &Expr, bindings: &HashMap<String, Ident>, theory:
                     inner
                 })
                 .collect();
-            
+
             if in_constructor {
                 // We're being called as an argument to another constructor
                 // We need to wrap ourselves in Box::new
@@ -569,12 +592,13 @@ fn generate_equation_rhs(expr: &Expr, bindings: &HashMap<String, Ident>, theory:
                     #category::#constructor(#(#arg_constructions),*)
                 }
             }
-        }
+        },
         Expr::Subst { term, var, replacement } => {
             let term_code = generate_equation_rhs(term, bindings, theory, in_constructor);
             let var_name = var.to_string();
-            let replacement_code = generate_equation_rhs(replacement, bindings, theory, in_constructor);
-            
+            let replacement_code =
+                generate_equation_rhs(replacement, bindings, theory, in_constructor);
+
             quote! {
                 mettail_runtime::substitute(
                     &#term_code,
@@ -582,15 +606,16 @@ fn generate_equation_rhs(expr: &Expr, bindings: &HashMap<String, Ident>, theory:
                     &#replacement_code
                 )
             }
-        }
+        },
         Expr::CollectionPattern { elements, rest, .. } => {
             // Build a collection in RHS
-            let elem_constructions: Vec<TokenStream> = elements.iter()
+            let elem_constructions: Vec<TokenStream> = elements
+                .iter()
                 .map(|e| generate_equation_rhs(e, bindings, theory, false))
                 .collect();
-            
+
             let coll_type = quote! { mettail_runtime::HashBag };
-            
+
             if let Some(rest_var) = rest {
                 // Merge rest with new elements
                 if let Some(rest_binding) = bindings.get(&rest_var.to_string()) {
@@ -631,7 +656,7 @@ fn generate_equation_rhs(expr: &Expr, bindings: &HashMap<String, Ident>, theory:
                     }
                 }
             }
-        }
+        },
     }
 }
 
@@ -641,42 +666,53 @@ fn generate_equation_freshness(
     bindings: &HashMap<String, Ident>,
 ) -> Vec<TokenStream> {
     let mut checks = Vec::new();
-    
+
     for condition in conditions {
         let var_name = condition.var.to_string();
         let term_name = condition.term.to_string();
-        
+
         // Find the bound identifiers for both the binder variable and the term
-        let var_ident = bindings.get(&var_name)
+        let var_ident = bindings
+            .get(&var_name)
             .unwrap_or_else(|| panic!("Freshness variable '{}' not found in bindings", var_name));
-        let term_ident = bindings.get(&term_name)
+        let term_ident = bindings
+            .get(&term_name)
             .unwrap_or_else(|| panic!("Freshness term '{}' not found in bindings", term_name));
-        
+
         // Generate: if is_fresh(var, term)
         // The is_fresh function checks if the binder is not free in the term
         checks.push(quote! {
             if is_fresh(&#var_ident, &#term_ident)
         });
     }
-    
+
     checks
 }
 
 /// Check if a category has any collection constructors
 fn category_has_collections(category: &Ident, theory: &TheoryDef) -> bool {
     use crate::ast::GrammarItem;
-    
+
     theory.terms.iter().any(|rule| {
-        rule.category == *category && 
-        rule.items.iter().any(|item| matches!(item, GrammarItem::Collection { .. }))
+        rule.category == *category
+            && rule
+                .items
+                .iter()
+                .any(|item| matches!(item, GrammarItem::Collection { .. }))
     })
 }
 
 /// Check if a constructor is nullary (has no non-terminal arguments)
 #[allow(dead_code)]
 fn is_nullary_constructor(ident: &Ident, theory: &TheoryDef) -> bool {
-    theory.terms.iter()
+    theory
+        .terms
+        .iter()
         .find(|rule| rule.label == *ident)
-        .map(|rule| rule.items.iter().all(|item| matches!(item, crate::ast::GrammarItem::Terminal(_))))
+        .map(|rule| {
+            rule.items
+                .iter()
+                .all(|item| matches!(item, crate::ast::GrammarItem::Terminal(_)))
+        })
         .unwrap_or(false)
 }

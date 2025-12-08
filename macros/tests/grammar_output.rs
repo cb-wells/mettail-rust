@@ -6,7 +6,7 @@ mod grammar_output_tests {
     // Since we can't directly access internal modules from integration tests,
     // we need to make these public or use a different approach
     // For now, this demonstrates what we want to test
-    
+
     #[test]
     fn placeholder_test() {
         // This test will be properly implemented once we expose
@@ -15,4 +15,3 @@ mod grammar_output_tests {
         println!("Run: cargo test --package mettail-macros --lib lalrpop_gen");
     }
 }
-

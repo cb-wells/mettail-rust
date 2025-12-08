@@ -1,14 +1,16 @@
-use crate::ast::{TheoryDef, GrammarItem, GrammarRule};
+use crate::ast::{GrammarItem, GrammarRule, TheoryDef};
 use proc_macro2::TokenStream;
 use quote::quote;
 use syn::Ident;
 
 /// Generate random term generation code for all exported categories
 pub fn generate_random_generation(theory: &TheoryDef) -> TokenStream {
-    let category_impls: Vec<TokenStream> = theory.exports.iter().map(|export| {
-        generate_random_for_category(&export.name, theory)
-    }).collect();
-    
+    let category_impls: Vec<TokenStream> = theory
+        .exports
+        .iter()
+        .map(|export| generate_random_for_category(&export.name, theory))
+        .collect();
+
     quote! {
         #(#category_impls)*
     }
@@ -16,22 +18,24 @@ pub fn generate_random_generation(theory: &TheoryDef) -> TokenStream {
 
 /// Generate random generation methods for a specific category
 fn generate_random_for_category(cat_name: &Ident, theory: &TheoryDef) -> TokenStream {
-    let rules: Vec<&GrammarRule> = theory.terms.iter()
+    let rules: Vec<&GrammarRule> = theory
+        .terms
+        .iter()
         .filter(|r| r.category == *cat_name)
         .collect();
-    
+
     let depth_0_impl = generate_random_depth_0(cat_name, &rules);
     let depth_d_impl = generate_random_depth_d(cat_name, &rules, theory);
-    
+
     quote! {
         impl #cat_name {
             /// Generate a random term at exactly the given depth
-            /// 
+            ///
             /// # Arguments
             /// * `vars` - Pool of variable names for free variables
             /// * `depth` - Target depth (operator nesting level)
             /// * `max_collection_width` - Maximum number of elements in any collection
-            /// 
+            ///
             /// # Example
             /// ```ignore
             /// let term = Proc::generate_random_at_depth(&["a".into(), "b".into()], 25, 3);
@@ -41,18 +45,18 @@ fn generate_random_for_category(cat_name: &Ident, theory: &TheoryDef) -> TokenSt
                 let mut rng = rand::thread_rng();
                 Self::generate_random_at_depth_internal(vars, depth, max_collection_width, &mut rng, 0)
             }
-            
+
             /// Generate a random term at exactly the given depth with a seed
-            /// 
+            ///
             /// This is deterministic - same seed produces same term.
-            /// 
+            ///
             /// # Arguments
             /// * `vars` - Pool of variable names for free variables
             /// * `depth` - Target depth (operator nesting level)
             /// * `max_collection_width` - Maximum number of elements in any collection
             /// * `seed` - Random seed for reproducibility
             pub fn generate_random_at_depth_with_seed(
-                vars: &[String], 
+                vars: &[String],
                 depth: usize,
                 max_collection_width: usize,
                 seed: u64
@@ -61,7 +65,7 @@ fn generate_random_for_category(cat_name: &Ident, theory: &TheoryDef) -> TokenSt
                 let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
                 Self::generate_random_at_depth_internal(vars, depth, max_collection_width, &mut rng, 0)
             }
-            
+
             fn generate_random_at_depth_internal<R: rand::Rng>(
                 vars: &[String],
                 depth: usize,
@@ -82,29 +86,32 @@ fn generate_random_for_category(cat_name: &Ident, theory: &TheoryDef) -> TokenSt
 /// Generate random depth 0 case (nullary constructors and variables)
 fn generate_random_depth_0(cat_name: &Ident, rules: &[&GrammarRule]) -> TokenStream {
     let mut cases = Vec::new();
-    
+
     for rule in rules {
         let label = &rule.label;
-        
+
         // Skip collection constructors
-        let has_collections = rule.items.iter().any(|item| {
-            matches!(item, GrammarItem::Collection { .. })
-        });
-        
+        let has_collections = rule
+            .items
+            .iter()
+            .any(|item| matches!(item, GrammarItem::Collection { .. }));
+
         if has_collections {
             continue;
         }
-        
+
         // Skip binder constructors at depth 0
         // Binders should only be generated at depth > 0 with correct binding_depth
         if !rule.bindings.is_empty() {
             continue;
         }
-        
-        let non_terminals: Vec<_> = rule.items.iter()
+
+        let non_terminals: Vec<_> = rule
+            .items
+            .iter()
             .filter(|item| matches!(item, GrammarItem::NonTerminal(_) | GrammarItem::Binder { .. }))
             .collect();
-        
+
         if non_terminals.is_empty() {
             // Nullary constructor
             cases.push(quote! { #cat_name::#label });
@@ -137,7 +144,7 @@ fn generate_random_depth_0(cat_name: &Ident, rules: &[&GrammarRule]) -> TokenStr
             }
         }
     }
-    
+
     if cases.is_empty() {
         // No depth 0 constructors - should not happen, but handle gracefully
         quote! {
@@ -149,14 +156,18 @@ fn generate_random_depth_0(cat_name: &Ident, rules: &[&GrammarRule]) -> TokenStr
         quote! { #case }
     } else {
         // Multiple cases - generate match arms
-        let match_arms: Vec<TokenStream> = cases.iter().enumerate().map(|(i, case)| {
-            quote! {
-                #i => { #case }
-            }
-        }).collect();
-        
+        let match_arms: Vec<TokenStream> = cases
+            .iter()
+            .enumerate()
+            .map(|(i, case)| {
+                quote! {
+                    #i => { #case }
+                }
+            })
+            .collect();
+
         let num_cases = cases.len();
-        
+
         quote! {
             {
                 let choice = rng.gen_range(0..#num_cases);
@@ -170,38 +181,45 @@ fn generate_random_depth_0(cat_name: &Ident, rules: &[&GrammarRule]) -> TokenStr
 }
 
 /// Generate random depth d case (recursive constructors)
-fn generate_random_depth_d(cat_name: &Ident, rules: &[&GrammarRule], theory: &TheoryDef) -> TokenStream {
+fn generate_random_depth_d(
+    cat_name: &Ident,
+    rules: &[&GrammarRule],
+    theory: &TheoryDef,
+) -> TokenStream {
     let mut constructor_cases = Vec::new();
-    
+
     for rule in rules {
         // Check if this has collections
-        let has_collections = rule.items.iter().any(|item| {
-            matches!(item, GrammarItem::Collection { .. })
-        });
-        
+        let has_collections = rule
+            .items
+            .iter()
+            .any(|item| matches!(item, GrammarItem::Collection { .. }));
+
         if has_collections {
             // Handle collection constructors
             constructor_cases.push(generate_random_collection_constructor(cat_name, rule, theory));
             continue;
         }
-        
-        let non_terminals: Vec<_> = rule.items.iter()
+
+        let non_terminals: Vec<_> = rule
+            .items
+            .iter()
             .filter_map(|item| match item {
                 GrammarItem::NonTerminal(nt) => Some(nt.clone()),
                 GrammarItem::Binder { category } => Some(category.clone()),
                 _ => None,
             })
             .collect();
-        
+
         // Skip depth 0 constructors
         if non_terminals.is_empty() {
             continue;
         }
-        
+
         if non_terminals.len() == 1 && non_terminals[0].to_string() == "Var" {
             continue; // Skip Var constructors at depth > 0
         }
-        
+
         // Generate case for this constructor
         if rule.bindings.is_empty() {
             constructor_cases.push(generate_random_simple_constructor(cat_name, rule, theory));
@@ -209,21 +227,25 @@ fn generate_random_depth_d(cat_name: &Ident, rules: &[&GrammarRule], theory: &Th
             constructor_cases.push(generate_random_binder_constructor(cat_name, rule, theory));
         }
     }
-    
+
     if constructor_cases.is_empty() {
         // No recursive constructors - just return depth 0
         let depth_0 = generate_random_depth_0(cat_name, rules);
         quote! { #depth_0 }
     } else {
         // Generate match arms instead of closures to avoid borrowing issues
-        let match_arms: Vec<TokenStream> = constructor_cases.iter().enumerate().map(|(i, case)| {
-            quote! {
-                #i => { #case }
-            }
-        }).collect();
-        
+        let match_arms: Vec<TokenStream> = constructor_cases
+            .iter()
+            .enumerate()
+            .map(|(i, case)| {
+                quote! {
+                    #i => { #case }
+                }
+            })
+            .collect();
+
         let num_cases = constructor_cases.len();
-        
+
         quote! {
             {
                 let choice = rng.gen_range(0..#num_cases);
@@ -240,17 +262,19 @@ fn generate_random_depth_d(cat_name: &Ident, rules: &[&GrammarRule], theory: &Th
 fn generate_random_simple_constructor(
     cat_name: &Ident,
     rule: &GrammarRule,
-    theory: &TheoryDef
+    theory: &TheoryDef,
 ) -> TokenStream {
     let label = &rule.label;
-    
-    let arg_cats: Vec<Ident> = rule.items.iter()
+
+    let arg_cats: Vec<Ident> = rule
+        .items
+        .iter()
         .filter_map(|item| match item {
             GrammarItem::NonTerminal(nt) => Some(nt.clone()),
             _ => None,
         })
         .collect();
-    
+
     match arg_cats.len() {
         1 => generate_random_unary(cat_name, label, &arg_cats[0], theory),
         2 => generate_random_binary(cat_name, label, &arg_cats[0], &arg_cats[1], theory),
@@ -262,12 +286,12 @@ fn generate_random_unary(
     cat_name: &Ident,
     label: &Ident,
     arg_cat: &Ident,
-    theory: &TheoryDef
+    theory: &TheoryDef,
 ) -> TokenStream {
     if !is_exported(arg_cat, theory) {
         return quote! {};
     }
-    
+
     quote! {
         let arg = #arg_cat::generate_random_at_depth_internal(vars, depth - 1, max_collection_width, rng, binding_depth);
         #cat_name::#label(Box::new(arg))
@@ -279,12 +303,12 @@ fn generate_random_binary(
     label: &Ident,
     arg1_cat: &Ident,
     arg2_cat: &Ident,
-    theory: &TheoryDef
+    theory: &TheoryDef,
 ) -> TokenStream {
     if !is_exported(arg1_cat, theory) || !is_exported(arg2_cat, theory) {
         return quote! {};
     }
-    
+
     quote! {
         let d1 = rng.gen_range(0..depth);
         let d2 = if d1 == depth - 1 {
@@ -292,7 +316,7 @@ fn generate_random_binary(
         } else {
             depth - 1
         };
-        
+
         let arg1 = #arg1_cat::generate_random_at_depth_internal(vars, d1, max_collection_width, rng, binding_depth);
         let arg2 = #arg2_cat::generate_random_at_depth_internal(vars, d2, max_collection_width, rng, binding_depth);
         #cat_name::#label(Box::new(arg1), Box::new(arg2))
@@ -303,7 +327,7 @@ fn generate_random_nary(
     cat_name: &Ident,
     label: &Ident,
     arg_cats: &[Ident],
-    theory: &TheoryDef
+    theory: &TheoryDef,
 ) -> TokenStream {
     // Simplified: all args at depth - 1
     let arg_generations: Vec<TokenStream> = arg_cats.iter().map(|cat| {
@@ -314,7 +338,7 @@ fn generate_random_nary(
             Box::new(#cat::generate_random_at_depth_internal(vars, depth - 1, max_collection_width, rng, binding_depth))
         }
     }).collect();
-    
+
     quote! {
         #cat_name::#label(#(#arg_generations),*)
     }
@@ -324,21 +348,23 @@ fn generate_random_nary(
 fn generate_random_binder_constructor(
     cat_name: &Ident,
     rule: &GrammarRule,
-    theory: &TheoryDef
+    theory: &TheoryDef,
 ) -> TokenStream {
     let label = &rule.label;
-    
+
     let (binder_idx, body_indices) = &rule.bindings[0];
     let body_idx = body_indices[0];
-    
+
     // Find body category
     let body_cat = match &rule.items[body_idx] {
         GrammarItem::NonTerminal(cat) => cat,
         _ => panic!("Body should be NonTerminal"),
     };
-    
+
     // Find non-body, non-binder arguments
-    let other_args: Vec<(usize, Ident)> = rule.items.iter()
+    let other_args: Vec<(usize, Ident)> = rule
+        .items
+        .iter()
         .enumerate()
         .filter_map(|(i, item)| {
             if i == *binder_idx || i == body_idx {
@@ -351,7 +377,7 @@ fn generate_random_binder_constructor(
             }
         })
         .collect();
-    
+
     if other_args.is_empty() {
         // Simple binder: just body
         generate_random_simple_binder(cat_name, label, body_cat, theory)
@@ -368,29 +394,29 @@ fn generate_random_simple_binder(
     cat_name: &Ident,
     label: &Ident,
     body_cat: &Ident,
-    theory: &TheoryDef
+    theory: &TheoryDef,
 ) -> TokenStream {
     if !is_exported(body_cat, theory) {
         return quote! {};
     }
-    
+
     quote! {
         let binder_name = format!("x{}", binding_depth);
         let mut extended_vars = vars.to_vec();
         extended_vars.push(binder_name.clone());
-        
+
         let body = #body_cat::generate_random_at_depth_internal(
-            &extended_vars, 
+            &extended_vars,
             depth - 1,
             max_collection_width,
             rng,
             binding_depth + 1
         );
-        
+
         let binder_var = mettail_runtime::get_or_create_var(&binder_name);
         let binder = mettail_runtime::Binder(binder_var);
         let scope = mettail_runtime::Scope::new(binder, Box::new(body));
-        
+
         #cat_name::#label(scope)
     }
 }
@@ -400,12 +426,12 @@ fn generate_random_binder_with_one_arg(
     label: &Ident,
     arg_cat: &Ident,
     body_cat: &Ident,
-    theory: &TheoryDef
+    theory: &TheoryDef,
 ) -> TokenStream {
     if !is_exported(arg_cat, theory) || !is_exported(body_cat, theory) {
         return quote! {};
     }
-    
+
     quote! {
         let d1 = rng.gen_range(0..depth);
         let d2 = if d1 == depth - 1 {
@@ -413,24 +439,24 @@ fn generate_random_binder_with_one_arg(
         } else {
             depth - 1
         };
-        
+
         let arg1 = #arg_cat::generate_random_at_depth_internal(vars, d1, max_collection_width, rng, binding_depth);
-        
+
         let binder_name = format!("x{}", binding_depth);
         let mut extended_vars = vars.to_vec();
         extended_vars.push(binder_name.clone());
         let body = #body_cat::generate_random_at_depth_internal(
-            &extended_vars, 
+            &extended_vars,
             d2,
             max_collection_width,
             rng,
             binding_depth + 1
         );
-        
+
         let binder_var = mettail_runtime::get_or_create_var(&binder_name);
         let binder = mettail_runtime::Binder(binder_var);
         let scope = mettail_runtime::Scope::new(binder, Box::new(body));
-        
+
         #cat_name::#label(Box::new(arg1), scope)
     }
 }
@@ -440,12 +466,12 @@ fn generate_random_binder_with_multiple_args(
     label: &Ident,
     other_args: &[(usize, Ident)],
     body_cat: &Ident,
-    theory: &TheoryDef
+    theory: &TheoryDef,
 ) -> TokenStream {
     if !is_exported(body_cat, theory) {
         return quote! {};
     }
-    
+
     let arg_generations: Vec<TokenStream> = other_args.iter().map(|(_, cat)| {
         if !is_exported(cat, theory) {
             return quote! { panic!("Non-exported category") };
@@ -454,23 +480,23 @@ fn generate_random_binder_with_multiple_args(
             Box::new(#cat::generate_random_at_depth_internal(vars, depth - 1, max_collection_width, rng, binding_depth))
         }
     }).collect();
-    
+
     quote! {
         let binder_name = format!("x{}", binding_depth);
         let mut extended_vars = vars.to_vec();
         extended_vars.push(binder_name.clone());
         let body = #body_cat::generate_random_at_depth_internal(
-            &extended_vars, 
+            &extended_vars,
             depth - 1,
             max_collection_width,
             rng,
             binding_depth + 1
         );
-        
+
         let binder_var = mettail_runtime::get_or_create_var(&binder_name);
         let binder = mettail_runtime::Binder(binder_var);
         let scope = mettail_runtime::Scope::new(binder, Box::new(body));
-        
+
         #cat_name::#label(#(#arg_generations,)* scope)
     }
 }
@@ -479,28 +505,30 @@ fn generate_random_binder_with_multiple_args(
 fn generate_random_collection_constructor(
     cat_name: &Ident,
     rule: &GrammarRule,
-    theory: &TheoryDef
+    theory: &TheoryDef,
 ) -> TokenStream {
     let label = &rule.label;
-    
+
     // Find the collection field
-    let element_cat = rule.items.iter()
+    let element_cat = rule
+        .items
+        .iter()
         .find_map(|item| match item {
             GrammarItem::Collection { element_type, .. } => Some(element_type.clone()),
             _ => None,
         })
         .expect("Collection constructor must have a collection field");
-    
+
     if !is_exported(&element_cat, theory) {
         return quote! { panic!("Non-exported collection element category") };
     }
-    
+
     quote! {
         {
             // Choose a random collection size (0 to max_collection_width)
             let size = rng.gen_range(0..=max_collection_width);
             let mut bag = mettail_runtime::HashBag::new();
-            
+
             for _ in 0..size {
                 // Generate element at random depth < current depth
                 let elem_depth = if depth > 0 { rng.gen_range(0..depth) } else { 0 };
@@ -513,7 +541,7 @@ fn generate_random_collection_constructor(
                 );
                 bag.insert(elem);
             }
-            
+
             #cat_name::#label(bag)
         }
     }
@@ -523,4 +551,3 @@ fn generate_random_collection_constructor(
 fn is_exported(cat: &Ident, theory: &TheoryDef) -> bool {
     theory.exports.iter().any(|e| &e.name == cat)
 }
-

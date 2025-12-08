@@ -34,7 +34,7 @@ Current stats for your example:
 The Rho calculus equations you have:
 ```
 (PPar P Q) == (PPar Q P)              // Commutativity
-(PPar P (PPar Q R)) == (PPar (PPar P Q) R)  // Associativity  
+(PPar P (PPar Q R)) == (PPar (PPar P Q) R)  // Associativity
 ```
 
 These create **combinatorial explosion** for parallel compositions. With 4 parallel processes in your redex, there are many associative/commutative reorderings, and each combination can rewrite in multiple ways.
@@ -57,7 +57,7 @@ We made a key optimization trade-off:
 - ✅ Rewrite-based exploration (core functionality)
 - ✅ Equation-based rewrites (necessary for Rho calculus semantics)
 
-### What We Removed  
+### What We Removed
 - ❌ Recursive equality exploration (removed to prevent exponential blowup)
 - ❌ Reflexivity/symmetry/transitivity for all explored terms
 

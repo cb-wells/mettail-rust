@@ -1,7 +1,7 @@
 # Congruence-Driven Projection Generation
 
-**Date**: November 13, 2025  
-**Status**: Design Phase  
+**Date**: November 13, 2025
+**Status**: Design Phase
 **Priority**: Critical (Architectural Refactoring)
 
 ## Executive Summary
@@ -15,7 +15,7 @@ The current approach to collection rewriting is backwards: base rewrites decide 
 rewrites {
     // User forced to write workarounds
     (PPar {(PDrop (NQuote P)), ...rest}) => (PPar {P, ...rest});
-    (PPar {(PInput chan x P), (POutput chan Q), ...rest}) 
+    (PPar {(PInput chan x P), (POutput chan Q), ...rest})
         => (PPar {(subst P x (NQuote Q)), ...rest});
 }
 // Problem: Uses .iter().next() for single patterns → order-dependent bugs
@@ -26,9 +26,9 @@ rewrites {
 rewrites {
     // Clean base rewrites (no ...rest!)
     (PDrop (NQuote P)) => P;
-    (PPar {(PInput chan x P), (POutput chan Q)}) 
+    (PPar {(PInput chan x P), (POutput chan Q)})
         => (PPar {(subst P x (NQuote Q))});
-    
+
     // One congruence rule lifts ALL rewrites
     if S => T then (PPar {S, ...rest}) => (PPar {T, ...rest});
 }
@@ -112,10 +112,10 @@ rewrites {
     // Base rewrite with collection - matches specific elements
     (PPar {(PInput chan x P), (POutput chan Q)})
         => (PPar {(subst P x (NQuote Q))});
-    
+
     // Base rewrite without collection - operates on single terms
     (PDrop (NQuote P)) => P;
-    
+
     // Congruence - lifts any base rewrite on Proc into PPar
     // The ...rest pattern ONLY appears in the congruence rule
     if S => T then (PPar {S, ...rest}) => (PPar {T, ...rest});
@@ -140,7 +140,7 @@ rewrites {
 /// 4. Generate projection relations for all patterns
 fn generate_congruence_projections(theory: &TheoryDef) -> Vec<TokenStream> {
     let mut projections = Vec::new();
-    
+
     for (cong_idx, rule) in theory.rewrites.iter().enumerate() {
         // Only process congruence rules
         if let Some((source_var, _target_var)) = &rule.premise {
@@ -150,23 +150,23 @@ fn generate_congruence_projections(theory: &TheoryDef) -> Vec<TokenStream> {
                 // - constructor: PPar
                 // - element_category: Proc
                 // - rest_var: Option<Ident>
-                
+
                 // Find all base rewrites that involve this element category
                 let base_rewrites = find_base_rewrites_for_category(&cong_info.element_category, theory);
-                
+
                 // Find all REGULAR congruences on this element category
                 // These are congruence rules that aren't collection-based
                 let regular_congruences = find_regular_congruences_for_category(&cong_info.element_category, theory);
-                
+
                 // Generate projections for base rewrites
                 for (base_idx, base_rule) in base_rewrites.iter().enumerate() {
                     // Extract element patterns from the base rewrite's LHS
                     let element_patterns = extract_element_patterns(
-                        &base_rule.left, 
+                        &base_rule.left,
                         &cong_info,
                         theory
                     );
-                    
+
                     // Generate projection for each element pattern
                     for (pat_idx, pattern) in element_patterns.iter().enumerate() {
                         let proj = generate_projection_for_pattern(
@@ -181,13 +181,13 @@ fn generate_congruence_projections(theory: &TheoryDef) -> Vec<TokenStream> {
                         projections.push(proj);
                     }
                 }
-                
+
                 // Generate projections for regular congruences
                 // e.g., if S => T then (PNew x S) => (PNew x T)
                 // needs projection for PNew patterns in collections
                 for (reg_idx, reg_cong) in regular_congruences.iter().enumerate() {
                     let congruence_pattern = extract_regular_congruence_pattern(reg_cong, theory);
-                    
+
                     let proj = generate_projection_for_regular_congruence(
                         cong_idx,
                         reg_idx,
@@ -200,7 +200,7 @@ fn generate_congruence_projections(theory: &TheoryDef) -> Vec<TokenStream> {
             }
         }
     }
-    
+
     projections
 }
 
@@ -241,7 +241,7 @@ fn extract_collection_congruence_info(lhs: &Expr, source_var: &Ident) -> Option<
                             // Found it! Get category info
                             let parent_category = /* ... from theory ... */;
                             let element_category = /* ... from theory ... */;
-                            
+
                             return Some(CollectionCongruenceInfo {
                                 constructor: constructor.clone(),
                                 parent_category,
@@ -285,12 +285,12 @@ fn find_regular_congruences_for_category<'a>(
             if rule.premise.is_none() {
                 return false;
             }
-            
+
             // Is NOT a collection congruence
             if is_collection_congruence(rule) {
                 return false;
             }
-            
+
             // Operates on the target category
             extract_category(&rule.left, theory)
                 .map(|cat| cat == *category)
@@ -315,7 +315,7 @@ fn rule_involves_category(expr: &Expr, category: &Ident, theory: &TheoryDef) -> 
             return true;
         }
     }
-    
+
     // Check collection element categories
     if let Expr::Apply { args, .. } = expr {
         for arg in args {
@@ -329,7 +329,7 @@ fn rule_involves_category(expr: &Expr, category: &Ident, theory: &TheoryDef) -> 
             }
         }
     }
-    
+
     false
 }
 
@@ -342,7 +342,7 @@ fn extract_element_patterns(
     theory: &TheoryDef,
 ) -> Vec<ElementPatternInfo> {
     let mut patterns = Vec::new();
-    
+
     // Case 1: LHS is a direct constructor of the element category
     // e.g., (PDrop (NQuote P))
     if let Some(root_cat) = extract_category_from_expr(lhs, theory) {
@@ -353,7 +353,7 @@ fn extract_element_patterns(
             }
         }
     }
-    
+
     // Case 2: LHS contains a collection with element patterns
     // e.g., (PPar {(PInput ...), (POutput ...)})
     if let Expr::Apply { constructor, args } = lhs {
@@ -371,7 +371,7 @@ fn extract_element_patterns(
             }
         }
     }
-    
+
     patterns
 }
 
@@ -403,31 +403,31 @@ fn generate_projection_for_regular_congruence(
         cong_idx,
         reg_idx
     );
-    
+
     let parent_cat = &cong_info.parent_category;
     let parent_cat_lower = format_ident!("{}", parent_cat.to_string().to_lowercase());
     let collection_constructor = &cong_info.constructor;
     let elem_constructor = &pattern.constructor;
     let elem_cat = &pattern.category;
-    
+
     // For PNew, we need to extract the binder and the body
     // Signature: (parent, binder_var, rewrite_field, elem)
     let mut field_types = vec![quote! { #parent_cat }];
-    
+
     if let Some(_binder) = &pattern.binder_var {
         field_types.push(quote! { mettail_runtime::Binder<String> });
     }
-    
+
     // The field that will be rewritten
     field_types.push(quote! { #elem_cat });
-    
+
     // The original element
     field_types.push(quote! { #elem_cat });
-    
+
     let rel_decl = quote! {
         relation #rel_name(#(#field_types),*);
     };
-    
+
     // Generate pattern extraction
     // For PNew: extract scope, unbind to get (x, body)
     let extraction = if pattern.binder_var.is_some() {
@@ -443,13 +443,13 @@ fn generate_projection_for_regular_congruence(
             let rewrite_field = (**field).clone()
         }
     };
-    
+
     let tuple = if pattern.binder_var.is_some() {
         quote! { (parent.clone(), binder_var.clone(), rewrite_field.clone(), elem.clone()) }
     } else {
         quote! { (parent.clone(), rewrite_field.clone(), elem.clone()) }
     };
-    
+
     let population_rule = quote! {
         #rel_name(#tuple) <--
             #parent_cat_lower(parent),
@@ -457,7 +457,7 @@ fn generate_projection_for_regular_congruence(
             for (elem, _count) in bag_field.iter(),
             #extraction;
     };
-    
+
     quote! {
         #rel_decl
         #population_rule
@@ -475,13 +475,13 @@ fn generate_projection_for_pattern(
 ) -> TokenStream {
     // Generate projection relation name
     let rel_name = format_ident!(
-        "{}_proj_c{}_b{}_p{}", 
+        "{}_proj_c{}_b{}_p{}",
         pattern.constructor.to_string().to_lowercase(),
         cong_idx,
         base_idx,
         pat_idx
     );
-    
+
     // Build relation signature: (Parent, Capture1, Capture2, ..., Element)
     let mut field_types = vec![quote! { #(cong_info.parent_category) }];
     for capture in &pattern.captures {
@@ -493,28 +493,28 @@ fn generate_projection_for_pattern(
         }
     }
     field_types.push(quote! { #(cong_info.element_category) });
-    
+
     // Generate relation declaration
     let rel_decl = quote! {
         relation #rel_name(#(#field_types),*);
     };
-    
+
     // Generate population rule
     let parent_cat_lower = format_ident!("{}", cong_info.parent_category.to_string().to_lowercase());
     let constructor = &cong_info.constructor;
     let parent_cat = &cong_info.parent_category;
     let elem_constructor = &pattern.constructor;
     let elem_cat = &pattern.category;
-    
+
     // Generate pattern matching for element
     let elem_pattern_match = generate_pattern_match(pattern);
-    
+
     // Generate captures
     let capture_bindings = generate_capture_bindings(pattern);
-    
+
     // Generate tuple for relation
     let rel_tuple = generate_relation_tuple(pattern);
-    
+
     let population_rule = quote! {
         #rel_name(#rel_tuple) <--
             #parent_cat_lower(parent),
@@ -523,7 +523,7 @@ fn generate_projection_for_pattern(
             if let #elem_cat::#elem_constructor(#elem_pattern_match) = elem,
             #capture_bindings;
     };
-    
+
     quote! {
         #rel_decl
         #population_rule
@@ -551,7 +551,7 @@ struct FieldPattern {
 
 Base rewrites generate different code depending on their structure:
 
-**Case 1: Base rewrite with collection** 
+**Case 1: Base rewrite with collection**
 ```rust
 (PPar {(PInput chan x P), (POutput chan Q)}) => (PPar {(subst P x (NQuote Q))})
 ```
@@ -559,7 +559,7 @@ Base rewrites generate different code depending on their structure:
 - Generates a join-based rewrite using projections from congruence
 - Does NOT generate standalone rewrite clause
 - Works at any depth because congruence lifts it
-  
+
 **Case 2: Base rewrite without collection**
 ```rust
 (PDrop (NQuote P)) => P
@@ -579,18 +579,18 @@ Base rewrites generate different code depending on their structure:
 ```rust
 fn generate_rewrite_clauses(theory: &TheoryDef) -> Vec<TokenStream> {
     let mut clauses = Vec::new();
-    
+
     // Find which categories are subjects of collection congruences
     let collection_congruence_categories = find_collection_congruence_element_categories(theory);
-    
+
     for (rule_idx, rule) in theory.rewrites.iter().enumerate() {
         // Skip congruence rules (handled separately)
         if rule.premise.is_some() {
             continue;
         }
-        
+
         let category = extract_category(&rule.left);
-        
+
         // Check if this rewrite has a collection pattern
         if contains_collection_pattern(&rule.left) {
             // Collection-based rewrite (like communication)
@@ -607,7 +607,7 @@ fn generate_rewrite_clauses(theory: &TheoryDef) -> Vec<TokenStream> {
             clauses.push(generate_rewrite_clause(rule, theory));
         }
     }
-    
+
     clauses
 }
 
@@ -621,16 +621,16 @@ fn generate_collection_join_rewrite(
     // This is for multi-element patterns like communication
     // Find the congruence that covers this collection
     let cong_idx = find_covering_congruence(rule, theory);
-    
+
     // Extract element patterns
     let element_patterns = extract_all_element_patterns(&rule.left, theory);
-    
+
     // Generate joins for each projection
     let projection_joins = generate_projection_joins(cong_idx, rule_idx, &element_patterns);
-    
+
     // Generate RHS reconstruction
     let rhs_reconstruction = generate_rhs_from_projections(&rule.right, &element_patterns);
-    
+
     // Build the full rewrite clause
     quote! {
         rw_proc(parent, result) <--
@@ -641,7 +641,7 @@ fn generate_collection_join_rewrite(
 
 fn find_collection_congruence_element_categories(theory: &TheoryDef) -> HashSet<Ident> {
     let mut categories = HashSet::new();
-    
+
     for rule in &theory.rewrites {
         if let Some((source_var, _)) = &rule.premise {
             if let Some(info) = extract_collection_congruence_info(&rule.left, source_var) {
@@ -649,7 +649,7 @@ fn find_collection_congruence_element_categories(theory: &TheoryDef) -> HashSet<
             }
         }
     }
-    
+
     categories
 }
 ```
@@ -664,10 +664,10 @@ fn find_collection_congruence_element_categories(theory: &TheoryDef) -> HashSet<
 rewrites {
     // Base rewrite
     (PDrop (NQuote P)) => P;
-    
+
     // Regular congruence (non-collection)
     if S => T then (PNew x S) => (PNew x T);
-    
+
     // Collection congruence
     if S => T then (PPar {S, ...rest}) => (PPar {T, ...rest});
 }
@@ -737,10 +737,10 @@ fn generate_collection_congruence(
     theory: &TheoryDef,
 ) -> TokenStream {
     let rw_rel = format_ident!("rw_{}", cong_info.parent_category.to_string().to_lowercase());
-    
+
     // For each base rewrite, generate a congruence clause using its projection
     let base_rewrites = find_base_rewrites_for_category(&cong_info.element_category, theory);
-    
+
     let clauses: Vec<_> = base_rewrites.iter().enumerate().map(|(base_idx, base_rule)| {
         let pattern_info = analyze_lhs_pattern(&base_rule.left, theory);
         let proj_rel = format_ident!(
@@ -749,18 +749,18 @@ fn generate_collection_congruence(
             cong_idx,
             base_idx
         );
-        
+
         // Generate RHS reconstruction
         let rhs_term = reconstruct_term(&base_rule.right, &pattern_info);
-        
+
         let constructor = &cong_info.constructor;
         let parent_cat = &cong_info.parent_category;
         let constructor_lower = format_ident!("{}", constructor.to_string().to_lowercase());
         let insert_helper = format_ident!("insert_into_{}", constructor_lower);
-        
+
         // Generate captures tuple
         let captures = generate_captures_tuple(&pattern_info);
-        
+
         quote! {
             #rw_rel(parent, result) <--
                 #proj_rel(parent, #captures, elem),
@@ -778,7 +778,7 @@ fn generate_collection_congruence(
                 });
         }
     }).collect();
-    
+
     quote! {
         #(#clauses)*
     }
@@ -805,13 +805,13 @@ theory! {
         // Base rewrite 0: Communication (collection pattern)
         (PPar {(PInput chan x P), (POutput chan Q)})
             => (PPar {(subst P x (NQuote Q))});
-        
+
         // Base rewrite 1: Drop-quote (simple pattern)
         (PDrop (NQuote P)) => P;
-        
+
         // Regular congruence 0: PNew
         if S => T then (PNew x S) => (PNew x T);
-        
+
         // Collection congruence: PPar
         if S => T then (PPar {S, ...rest}) => (PPar {T, ...rest});
     }
@@ -913,7 +913,7 @@ rw_proc(parent, result) <--
 #### Step 5: Generate Congruence Rule (for base rewrite 1)
 ```rust
 // Drop-quote lifted into collections via congruence
-// Matches: (PPar {(PDrop (NQuote P))}) 
+// Matches: (PPar {(PDrop (NQuote P))})
 // Also: (PPar {(PDrop (NQuote P)), other_elem1, other_elem2, ...})
 // The other elements are preserved via the reconstruction
 rw_proc(parent, result) <--
@@ -1118,7 +1118,7 @@ rewrites {
 rewrites {
     // Just write the base rewrite (no ...rest needed!)
     (PDrop (NQuote P)) => P;
-    
+
     // Congruence automatically lifts it into collections
     if S => T then (PPar {S, ...rest}) => (PPar {T, ...rest});
 }
@@ -1145,7 +1145,7 @@ rewrites {
     // Clean: no ...rest needed!
     (PPar {(PInput chan x P), (POutput chan Q)})
         => (PPar {(subst P x (NQuote Q))});
-    
+
     // Congruence handles embedding in larger collections
     if S => T then (PPar {S, ...rest}) => (PPar {T, ...rest});
 }

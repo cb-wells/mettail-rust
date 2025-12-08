@@ -21,20 +21,20 @@ Added to `mettail-runtime/src/lib.rs`:
 
 ```rust
 /// Get or create a free variable with the given name.
-/// 
+///
 /// Within a parsing session, all variables with the same name will share
 /// the same unique ID.
 pub fn get_or_create_var(name: impl Into<String>) -> FreeVar<String> {
     let name = name.into();
     let mut cache = VAR_CACHE.lock().unwrap();
-    
+
     cache.entry(name.clone())
         .or_insert_with(|| FreeVar::fresh_named(name))
         .clone()
 }
 
 /// Clear the variable cache.
-/// 
+///
 /// Call this between independent parsing sessions.
 pub fn clear_var_cache() {
     VAR_CACHE.lock().unwrap().clear()
@@ -46,13 +46,13 @@ pub fn clear_var_cache() {
 ```rust
 fn main() {
     let rdx_str = "for(a<-x){*x|*x}|a!(0)";
-    
+
     // Clear variable cache before parsing to ensure fresh IDs for this term
     mettail_runtime::clear_var_cache();
-    
+
     let parser = rhocalc::ProcParser::new();
     let redex = parser.parse(rdx_str).unwrap();
-    
+
     // Now all occurrences of "x" in the parsed term have the same ID
     // ...
 }
@@ -92,11 +92,11 @@ pub Name: Name = {
 
 ## Benefits
 
-✅ **Correct variable equality**: Same name → same ID within a parse session  
-✅ **Pattern matching works**: Rewrite rules can match on variable identity  
-✅ **Freshness checks work**: Can properly check if a variable appears free  
-✅ **Simple API**: Just call `clear_var_cache()` before each independent parse  
-✅ **No post-processing**: Variables have correct IDs immediately after parsing  
+✅ **Correct variable equality**: Same name → same ID within a parse session
+✅ **Pattern matching works**: Rewrite rules can match on variable identity
+✅ **Freshness checks work**: Can properly check if a variable appears free
+✅ **Simple API**: Just call `clear_var_cache()` before each independent parse
+✅ **No post-processing**: Variables have correct IDs immediately after parsing
 ✅ **Backward compatible**: Doesn't break existing moniker functionality
 
 ## Best Practices

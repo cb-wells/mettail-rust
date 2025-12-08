@@ -1,6 +1,6 @@
 # MeTTaIL vs K Framework: Comparative Analysis
 
-**Date:** October 2024  
+**Date:** October 2024
 **Purpose:** Strategic assessment of MeTTaIL's design relative to K Framework
 
 ---
@@ -36,7 +36,7 @@ module LESSON-13-B
 
   rule <k> I1:Int + I2:Int => I1 +Int I2 ...</k>
   rule <k> B1:Bool && B2:Bool => B1 andBool B2 ...</k>
-  
+
   syntax KItem ::= freezer1(Val) | freezer2(Exp)
   rule <k> E1:Val + E2:Exp => E2 ~> freezer1(E1) ...</k> [priority(51)]
   rule <k> E1:Exp + E2:Exp => E1 ~> freezer2(E2) ...</k> [priority(52)]
@@ -48,17 +48,17 @@ endmodule
 theory! {
     name: RhoCalc,
     exports { Proc, Name }
-    
+
     terms {
         PZero . Proc ::= "0" ;
         PPar . Proc ::= Proc "|" Proc ;
         PInput . Proc ::= "for" "(" Name <Name> ")" "{" Proc "}" ;
     }
-    
+
     equations {
         (PPar P Q) == (PPar Q P) ;
     }
-    
+
     rewrites {
         if x # Q then (PPar (PInput chan x P) (POutput chan Q))
             => (subst P x (NQuote Q))

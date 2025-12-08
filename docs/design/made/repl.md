@@ -1,7 +1,7 @@
 # Term Explorer REPL - Design Document
 
-**Status**: 🎯 Planned  
-**Timeline**: Q1 2026 (4 weeks)  
+**Status**: 🎯 Planned
+**Timeline**: Q1 2026 (4 weeks)
 **Priority**: HIGH (Developer Experience)
 
 ---
@@ -96,7 +96,7 @@ Rewrite graph for initial term {a!(0), for(a->x0){*x0}}:
 Paths to normal forms: 1
 Total reachable terms: 2
 
-rhocalc> 
+rhocalc>
 ```
 
 ### Generating Terms
@@ -585,7 +585,7 @@ This works because `ascent_run!` returns a struct with relation fields!
 
 **Problem**: Need to match user-selected term with Ascent results.
 
-**Solution**: 
+**Solution**:
 - Implement `Eq` and `Hash` for all term types (already done!)
 - Use `HashMap` for fast lookups
 - Handle α-equivalence by normalizing binders
@@ -689,8 +689,8 @@ The Term Explorer REPL will make MeTTaIL **accessible and usable** by:
 - Demonstrating MeTTaIL's capabilities to new users
 - Laying groundwork for educational applications
 
-**Timeline**: 4 weeks (Jan-Feb 2026)  
-**Effort**: ~80-100 hours  
+**Timeline**: 4 weeks (Jan-Feb 2026)
+**Effort**: ~80-100 hours
 **Priority**: HIGH - essential for developer experience
 
 This is a **foundational tool** that will enable all future work on MeTTaIL by making it easy to understand, debug, and demonstrate the system.

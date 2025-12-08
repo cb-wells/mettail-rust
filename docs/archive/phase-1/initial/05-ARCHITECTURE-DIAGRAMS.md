@@ -227,7 +227,7 @@ Implementation Approaches:
 
 Macros:
   theory! { A }  ∧  theory! { B }  →  Combined at compile time
-  
+
 Runtime:
   let a = interpret(A);
   let b = interpret(B);

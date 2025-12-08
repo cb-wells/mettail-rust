@@ -2,7 +2,7 @@
 
 ## 🎯 Current Status
 
-**Completed:** ✅ LALRPOP integration, grammar generation module, comprehensive tests  
+**Completed:** ✅ LALRPOP integration, grammar generation module, comprehensive tests
 **Next:** 🎯 Binder handling, file I/O, parser integration
 
 ---
@@ -51,8 +51,8 @@ cargo test
 ## 🎯 Next Priorities (In Order)
 
 ### 1. Binder Syntax (HIGH PRIORITY)
-**File:** `mettail-macros/src/lalrpop_gen.rs`  
-**Function:** `generate_rule_alternative()` and `generate_sequence_alternative()`  
+**File:** `mettail-macros/src/lalrpop_gen.rs`
+**Function:** `generate_rule_alternative()` and `generate_sequence_alternative()`
 **Task:** Generate `Scope::new(Binder(...), body)` for binder rules
 
 **Example:**
@@ -71,7 +71,7 @@ cargo test
 ```
 
 ### 2. Precedence Detection (MEDIUM PRIORITY)
-**File:** `mettail-macros/src/lalrpop_gen.rs`  
+**File:** `mettail-macros/src/lalrpop_gen.rs`
 **Task:** Detect infix operators, generate tiered grammar
 
 **Example:**
@@ -100,7 +100,7 @@ Proc2: Proc = {  // Tier 2: High precedence (atoms)
 **Recommendation:** Option B (build script approach)
 
 ### 4. Test with Rho Calculus (NEXT TEST)
-**File:** Create `theories/rho_parse_test.rs`  
+**File:** Create `theories/rho_parse_test.rs`
 **Task:** Generate grammar for full Rho Calculus, verify syntax
 
 ---
@@ -108,18 +108,18 @@ Proc2: Proc = {  // Tier 2: High precedence (atoms)
 ## 🐛 Known Issues
 
 ### Issue 1: Binders Generate Box, Not Scope
-**Status:** Known limitation  
-**Impact:** Can't parse binder syntax yet  
+**Status:** Known limitation
+**Impact:** Can't parse binder syntax yet
 **Fix:** Implement Scope generation (Priority #1)
 
 ### Issue 2: No Precedence
-**Status:** Known limitation  
-**Impact:** `0 + 1 * 2` parses incorrectly  
+**Status:** Known limitation
+**Impact:** `0 + 1 * 2` parses incorrectly
 **Fix:** Implement precedence detection (Priority #2)
 
 ### Issue 3: Grammars Not Written to Disk
-**Status:** Design phase  
-**Impact:** Can't actually use generated parsers  
+**Status:** Design phase
+**Impact:** Can't actually use generated parsers
 **Fix:** Add file I/O (Priority #3)
 
 ---
@@ -138,8 +138,8 @@ Proc2: Proc = {  // Tier 2: High precedence (atoms)
 - Want version control or not?
 
 ### Decision 2: How to Handle Name Hints?
-**Issue:** Variables are parsed as strings but become FreeVar  
-**Need:** Preserve names for pretty-printing  
+**Issue:** Variables are parsed as strings but become FreeVar
+**Need:** Preserve names for pretty-printing
 **Options:**
 - Store name hints in FreeVar (moniker supports this)
 - Separate name map
@@ -189,7 +189,7 @@ if let Some((binder_idx, body_indices)) = &rule.bindings.get(0) {
 ### Hint 2: Infix Operator Detection
 ```rust
 // Check if rule has form: NonTerm Terminal NonTerm
-if rule.items.len() == 3 
+if rule.items.len() == 3
     && matches!(rule.items[0], GrammarItem::NonTerminal(_))
     && matches!(rule.items[1], GrammarItem::Terminal(_))
     && matches!(rule.items[2], GrammarItem::NonTerminal(_))
@@ -263,8 +263,8 @@ Before starting next session:
 
 ## 🚀 Ready to Start!
 
-**Estimated next session:** 2-3 hours  
-**Goal:** Binder support + file I/O + Rho Calculus test  
+**Estimated next session:** 2-3 hours
+**Goal:** Binder support + file I/O + Rho Calculus test
 **Stretch goal:** Basic parser integration
 
 **Command to start:**

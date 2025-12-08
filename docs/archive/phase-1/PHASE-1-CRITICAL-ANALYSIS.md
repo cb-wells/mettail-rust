@@ -1,6 +1,6 @@
 # Phase 1: Critical Analysis for Proper Foundation
 
-**Date:** 2025-10-25  
+**Date:** 2025-10-25
 **Status:** Analysis for completeness
 
 ---
@@ -26,8 +26,8 @@
 ### 🔴 CRITICAL: Missing Core Features
 
 #### 1. **Freshness Condition Validation** (HIGH PRIORITY)
-**Current:** We parse `if x # Q then ...` but don't validate it  
-**Problem:** Can't properly check scope/binding without this  
+**Current:** We parse `if x # Q then ...` but don't validate it
+**Problem:** Can't properly check scope/binding without this
 **Impact:** Can't define theories like `NewReplCalc` correctly
 
 **What's needed:**
@@ -61,8 +61,8 @@ equations {
 ---
 
 #### 2. **Variable Scoping and Bound Variables** (HIGH PRIORITY)
-**Current:** We track variable types but not scopes  
-**Problem:** Can't handle binders or freshness properly  
+**Current:** We track variable types but not scopes
+**Problem:** Can't handle binders or freshness properly
 **Impact:** Can't distinguish free vs bound variables
 
 **What's needed:**
@@ -88,8 +88,8 @@ impl TypeChecker {
 ---
 
 #### 3. **Runtime AST Types** (HIGH PRIORITY)
-**Current:** `mettail-runtime` is empty  
-**Problem:** Generated code has nowhere to go  
+**Current:** `mettail-runtime` is empty
+**Problem:** Generated code has nowhere to go
 **Impact:** Can't actually instantiate or manipulate terms
 
 **What's needed:**
@@ -114,8 +114,8 @@ pub trait Parser<T: Term> {
 ---
 
 #### 4. **Better Error Messages with Spans** (MEDIUM-HIGH PRIORITY)
-**Current:** Errors are just strings  
-**Problem:** Hard to debug macro usage  
+**Current:** Errors are just strings
+**Problem:** Hard to debug macro usage
 **Impact:** Poor developer experience
 
 **What's needed:**
@@ -151,8 +151,8 @@ impl ValidationError {
 ### 🟡 IMPORTANT: Quality Improvements
 
 #### 5. **Category Validation in Grammar Rules** (MEDIUM PRIORITY)
-**Current:** We check exports, but not all category references  
-**Problem:** Could reference undefined categories in grammar  
+**Current:** We check exports, but not all category references
+**Problem:** Could reference undefined categories in grammar
 **Impact:** Runtime errors instead of compile-time errors
 
 **What's needed:**
@@ -175,8 +175,8 @@ terms {
 ---
 
 #### 6. **Comprehensive Testing Infrastructure** (MEDIUM PRIORITY)
-**Current:** A few examples, basic tests  
-**Problem:** Not systematic enough  
+**Current:** A few examples, basic tests
+**Problem:** Not systematic enough
 **Impact:** Bugs slip through
 
 **What's needed:**
@@ -206,8 +206,8 @@ mettail-macros/tests/
 ---
 
 #### 7. **Documentation and Examples** (MEDIUM PRIORITY)
-**Current:** Minimal documentation  
-**Problem:** Hard to understand for users/contributors  
+**Current:** Minimal documentation
+**Problem:** Hard to understand for users/contributors
 **Impact:** Adoption and maintenance
 
 **What's needed:**
@@ -223,7 +223,7 @@ mettail-macros/tests/
 ### 🟢 NICE-TO-HAVE: Future Enhancements
 
 #### 8. **Pattern Matching in Equations** (LOW PRIORITY)
-**Current:** Only constructor application  
+**Current:** Only constructor application
 **Future:** Need patterns like `(Plus A B)` matching any Plus term
 
 **Defer to:** Phase 2
@@ -231,7 +231,7 @@ mettail-macros/tests/
 ---
 
 #### 9. **Rewrite Rule Execution** (LOW PRIORITY)
-**Current:** Only equation checking  
+**Current:** Only equation checking
 **Future:** Need to actually apply rewrites
 
 **Defer to:** Phase 2
@@ -239,7 +239,7 @@ mettail-macros/tests/
 ---
 
 #### 10. **Performance Optimization** (LOW PRIORITY)
-**Current:** Basic implementation  
+**Current:** Basic implementation
 **Future:** Optimize type-checking, parsing
 
 **Defer to:** Phase 3
@@ -363,7 +363,7 @@ mettail-macros/tests/
 
 ### 4. Testing Strategy
 **Question:** How thorough should testing be?
-- **Proposal:** 
+- **Proposal:**
   - Each validator function has unit tests
   - Each example has integration test
   - Add `trybuild` for compile-fail tests

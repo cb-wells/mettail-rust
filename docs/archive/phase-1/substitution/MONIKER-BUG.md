@@ -2,7 +2,7 @@
 
 You're absolutely right - we're **generating** the right types (`Scope<Binder<String>, Box<Expr>>`), but we're not actually **using** moniker's functionality yet because:
 
-1. ✅ We generate `#[derive(mettail_runtime::BoundTerm)]` 
+1. ✅ We generate `#[derive(mettail_runtime::BoundTerm)]`
 2. ✅ We generate `Scope<Binder<String>, Box<Body>>` for binders
 3. ❌ **But**: We're generating it as a tuple with 2 fields instead of 1 `Scope` field
 

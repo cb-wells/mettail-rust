@@ -1,28 +1,29 @@
-use crate::ast::{TheoryDef, RewriteRule, Expr};
-use super::{generate_ascent_pattern};
+use super::generate_ascent_pattern;
 use super::rhs::generate_ascent_rhs;
 use crate::ascent::congruence::extract_category;
+use crate::ast::{Expr, RewriteRule, TheoryDef};
 use proc_macro2::TokenStream;
 use quote::quote;
-use syn::Ident;
 use std::collections::HashMap;
+use syn::Ident;
 
 /// Generate Ascent clauses for rewrite rules (for equational matching)
 /// This is the new approach that allows duplicate variables to use eq_cat() relations
 pub fn generate_rewrite_clauses(theory: &TheoryDef) -> Vec<TokenStream> {
     use crate::ascent::congruence;
-    
+
     let mut all_clauses = Vec::new();
-    
+
     // Find which categories are covered by collection congruences
-    let collection_cong_categories = congruence::find_collection_congruence_element_categories(theory);
-    
+    let collection_cong_categories =
+        congruence::find_collection_congruence_element_categories(theory);
+
     for (_rule_idx, rule) in theory.rewrites.iter().enumerate() {
         // Skip congruence rules (handled elsewhere)
         if rule.premise.is_some() {
             continue;
         }
-        
+
         // Check if this base rewrite's LHS involves a collection pattern for a category
         // that's covered by a collection congruence
         let is_covered_by_congruence = if congruence::contains_collection_pattern(&rule.left) {
@@ -33,10 +34,12 @@ pub fn generate_rewrite_clauses(theory: &TheoryDef) -> Vec<TokenStream> {
             // For example:
             // - (PPar {(PIn ...), (POut ...)}) => ... should be SKIPPED (root is PPar collection)
             // - (PAmb M (PPar {...})) => ... should NOT be skipped (root is PAmb, not a collection)
-            
+
             if let Expr::Apply { constructor, .. } = &rule.left {
                 // Check if this constructor has a collection field
-                if let Some(elem_cat) = congruence::get_constructor_collection_element_type(constructor, theory) {
+                if let Some(elem_cat) =
+                    congruence::get_constructor_collection_element_type(constructor, theory)
+                {
                     // Root is a collection constructor
                     // Check if this element category is covered by a collection congruence
                     collection_cong_categories.contains(&elem_cat)
@@ -51,16 +54,16 @@ pub fn generate_rewrite_clauses(theory: &TheoryDef) -> Vec<TokenStream> {
         } else {
             false
         };
-        
+
         if is_covered_by_congruence {
             // Skip this rule - it will be handled by congruence-driven projection
             continue;
         }
-        
+
         // OLD PATH: For non-collection patterns or uncovered categories
         all_clauses.push(generate_rewrite_clause(rule, theory));
     }
-    
+
     all_clauses
 }
 
@@ -76,33 +79,35 @@ pub fn generate_rewrite_clauses(theory: &TheoryDef) -> Vec<TokenStream> {
 ///     if !p.contains_free(&x),
 ///     let t = p.substitute(&x, &Name::NQuote((**q).clone()));
 fn generate_rewrite_clause(rule: &RewriteRule, theory: &TheoryDef) -> TokenStream {
-    let category = extract_category(&rule.left, theory).expect("Failed to extract category from rewrite rule LHS");
+    let category = extract_category(&rule.left, theory)
+        .expect("Failed to extract category from rewrite rule LHS");
     let cat_lower = quote::format_ident!("{}", category.to_string().to_lowercase());
     let rw_rel = quote::format_ident!("rw_{}", category.to_string().to_lowercase());
-    
+
     // Track variable occurrences for duplicate detection
     let mut var_occurrences: HashMap<String, Vec<usize>> = HashMap::new();
     let mut occurrence_idx = 0;
     collect_variable_occurrences(&rule.left, &mut var_occurrences, &mut occurrence_idx);
-    
+
     // Identify which variables appear multiple times (need equational matching)
     let duplicate_vars: std::collections::HashSet<String> = var_occurrences
         .into_iter()
         .filter(|(_, occurrences)| occurrences.len() > 1)
         .map(|(var_name, _)| var_name)
         .collect();
-    
+
     // Generate pattern matching clauses
     let mut bindings: HashMap<String, TokenStream> = HashMap::new();
     let mut variable_categories: HashMap<String, Ident> = HashMap::new();
     let mut equational_checks: Vec<TokenStream> = Vec::new();
     let mut clauses = Vec::new();
-    
+
     // Start with proc(s) clause
     clauses.push(quote! { #cat_lower(s) });
-    
+
     // Generate pattern matching with category tracking
-    let lhs_category = extract_category(&rule.left, theory).expect("Failed to extract category from rewrite rule LHS");
+    let lhs_category = extract_category(&rule.left, theory)
+        .expect("Failed to extract category from rewrite rule LHS");
     generate_ascent_pattern(
         &rule.left,
         &quote::format_ident!("s"),
@@ -114,29 +119,39 @@ fn generate_rewrite_clause(rule: &RewriteRule, theory: &TheoryDef) -> TokenStrea
         &duplicate_vars,
         &mut equational_checks,
     );
-    
+
     // Add equational checks for duplicate variables
     clauses.extend(equational_checks);
-    
+
     // Add freshness checks
     for condition in &rule.conditions {
         let var_name = condition.var.to_string();
         let term_name = condition.term.to_string();
-        
-        let var_binding = bindings.get(&var_name)
-            .unwrap_or_else(|| panic!("Freshness variable '{}' not bound. Available bindings: {:?}", var_name, bindings.keys().collect::<Vec<_>>()));
-        let term_binding = bindings.get(&term_name)
-            .unwrap_or_else(|| panic!("Freshness term '{}' not bound. Available bindings: {:?}", term_name, bindings.keys().collect::<Vec<_>>()));
-        
+
+        let var_binding = bindings.get(&var_name).unwrap_or_else(|| {
+            panic!(
+                "Freshness variable '{}' not bound. Available bindings: {:?}",
+                var_name,
+                bindings.keys().collect::<Vec<_>>()
+            )
+        });
+        let term_binding = bindings.get(&term_name).unwrap_or_else(|| {
+            panic!(
+                "Freshness term '{}' not bound. Available bindings: {:?}",
+                term_name,
+                bindings.keys().collect::<Vec<_>>()
+            )
+        });
+
         clauses.push(quote! {
             if is_fresh(&#var_binding, &#term_binding)
         });
     }
-    
+
     // Generate RHS
     let rhs = generate_ascent_rhs(&rule.right, &bindings, theory);
     clauses.push(quote! { let t = (#rhs).normalize() });
-    
+
     quote! {
         #rw_rel(s, t) <--
             #(#clauses),*;
@@ -152,26 +167,32 @@ fn collect_variable_occurrences(
     match expr {
         Expr::Var(var) => {
             let var_name = var.to_string();
-            occurrences.entry(var_name).or_insert_with(Vec::new).push(*idx);
+            occurrences
+                .entry(var_name)
+                .or_insert_with(Vec::new)
+                .push(*idx);
             *idx += 1;
-        }
+        },
         Expr::Apply { args, .. } => {
             for arg in args {
                 collect_variable_occurrences(arg, occurrences, idx);
             }
-        }
+        },
         Expr::Subst { term, .. } => {
             collect_variable_occurrences(term, occurrences, idx);
-        }
+        },
         Expr::CollectionPattern { elements, rest, .. } => {
             for elem in elements {
                 collect_variable_occurrences(elem, occurrences, idx);
             }
             if let Some(rest_var) = rest {
                 let var_name = rest_var.to_string();
-                occurrences.entry(var_name).or_insert_with(Vec::new).push(*idx);
+                occurrences
+                    .entry(var_name)
+                    .or_insert_with(Vec::new)
+                    .push(*idx);
                 *idx += 1;
             }
-        }
+        },
     }
 }

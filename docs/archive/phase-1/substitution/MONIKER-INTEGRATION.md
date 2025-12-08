@@ -10,11 +10,11 @@
 
 Moniker uses a hybrid approach that's perfect for MeTTaIL:
 
-- **Free variables**: `Var::Free(FreeVar { unique_id, pretty_name })`  
+- **Free variables**: `Var::Free(FreeVar { unique_id, pretty_name })`
   - Has a globally unique ID for equality checking
   - Has an optional name for pretty-printing
-  
-- **Bound variables**: `Var::Bound(BoundVar { scope, binder, pretty_name })`  
+
+- **Bound variables**: `Var::Bound(BoundVar { scope, binder, pretty_name })`
   - Uses De Bruijn indices (`scope` = depth, `binder` = index)
   - Automatically avoids capture
 
@@ -106,13 +106,13 @@ pub use moniker::{
 pub enum GrammarItem {
     Terminal(String),
     NonTerminal(Ident),
-    
+
     /// Binder declaration: (Bind x Cat)
     Binder {
         var: Ident,        // Variable name (e.g., x)
         category: Ident,   // What type it binds (e.g., Name)
     },
-    
+
     /// Bound variable usage: (x)Term
     BoundVar {
         var: Ident,        // Which binder this refers to
@@ -199,7 +199,7 @@ theory! {
     rewrites {
         // Communication: x!(Q) | for(y){P} => P[Q/y]
         comm:
-            (PPar 
+            (PPar
                 (POutput x (NQuote Q))
                 (PInput scope))
             => {
@@ -244,7 +244,7 @@ impl Proc {
             Proc::PPar(left, right) => {
                 if let (Proc::POutput(x, q), Proc::PInput(scope)) = (&**left, &**right) {
                     let (binder, p) = scope.clone().unbind();
-                    
+
                     // Check if names match
                     if binder.0.pretty_name.as_ref() == x.pretty_name() {
                         // Perform substitution
@@ -268,12 +268,12 @@ impl Proc {
 #[test]
 fn test_rho_communication() {
     use mettail_runtime::FreeVar;
-    
+
     // Create: @0!(5)
     let five = Proc::PZero;  // Simplified for example
     let zero_name = Name::NQuote(Box::new(five.clone()));
     let output = Proc::POutput(zero_name, Box::new(five));
-    
+
     // Create: for(x){*x}
     let x = FreeVar::fresh_named("x");
     let body = Proc::PDrop(Name::Var(Var::Free(x.clone())));
@@ -281,13 +281,13 @@ fn test_rho_communication() {
         Binder(x.clone()),
         Box::new(body)
     ));
-    
+
     // Create: @0!(5) | for(x){*x}
     let parallel = Proc::PPar(
         Box::new(output),
         Box::new(input)
     );
-    
+
     // Rewrite: should get *@5
     let result = parallel.rewrite_comm().unwrap();
     // Assert result matches expected
