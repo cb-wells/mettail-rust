@@ -2,8 +2,8 @@
 
 ## Status: ✅ COMPLETE
 
-**Date**: Fixed by accessing moniker's `unsafe_body` and `unsafe_pattern` fields directly  
-**Solution**: Use `scope.inner().unsafe_body` instead of `scope.clone().unbind()`  
+**Date**: Fixed by accessing moniker's `unsafe_body` and `unsafe_pattern` fields directly
+**Solution**: Use `scope.inner().unsafe_body` instead of `scope.clone().unbind()`
 **Result**: All binding congruences now work correctly!
 
 ## Summary
@@ -13,11 +13,11 @@ The binding congruence issue has been **completely resolved**. The problem was t
 ## Test Results
 
 All 6 congruence tests pass:
-- ✅ `amb_congruence` - Regular congruence  
-- ✅ `par_congruence` - Collection congruence  
-- ✅ `new_congruence` - **Direct binding congruence**  
-- ✅ `nested_amb_new` - **Nested binding congruence**  
-- ✅ `new_with_rest` - **Binding congruence with rest patterns**  
+- ✅ `amb_congruence` - Regular congruence
+- ✅ `par_congruence` - Collection congruence
+- ✅ `new_congruence` - **Direct binding congruence**
+- ✅ `nested_amb_new` - **Nested binding congruence**
+- ✅ `new_with_rest` - **Binding congruence with rest patterns**
 - ✅ `new_in_collection` - **Collection binding congruence**
 
 ## The Problem
@@ -26,11 +26,11 @@ From `BINDING-CONGRUENCE-BLOCKED.md`, we discovered that `unbind()` creates fres
 
 ```rust
 // First unbind
-let (binder1, body1) = scope.clone().unbind();  
+let (binder1, body1) = scope.clone().unbind();
 // body1: ... Free(FreeVar { unique_id: UniqueId(3) ...
 
 // Second unbind (same scope!)
-let (binder2, body2) = scope.clone().unbind();  
+let (binder2, body2) = scope.clone().unbind();
 // body2: ... Free(FreeVar { unique_id: UniqueId(4) ...  // DIFFERENT!
 
 // Bodies equal? false
@@ -108,7 +108,7 @@ let body_name = (* #field_name).inner().unsafe_body.as_ref().clone()
 ```rust
 // Use from_parts_unsafe to avoid rebinding
 let scope_tmp = mettail_runtime::Scope::from_parts_unsafe(
-    binder_var.clone(), 
+    binder_var.clone(),
     Box::new(body_rewritten.clone())
 )
 ```
@@ -140,7 +140,7 @@ The `unsafe_` prefix is a **semantic warning**, not Rust `unsafe`:
 
 ```rust
 // 1. Extract body preserving Bound variables
-let body = scope.inner().unsafe_body.as_ref().clone();  
+let body = scope.inner().unsafe_body.as_ref().clone();
 // body: { ... Bound(x), ... } with stable structure
 
 // 2. Pass through Datalog
@@ -148,7 +148,7 @@ proc(body)                              // body has Bound vars
 rw_proc(body, body_rewritten)          // Both have same Bound structure
 
 // 3. Reconstruct without rebinding
-Scope::from_parts_unsafe(binder, Box::new(body_rewritten))  
+Scope::from_parts_unsafe(binder, Box::new(body_rewritten))
 // Preserves Bound vars exactly
 ```
 
@@ -181,8 +181,8 @@ They mean: "You need to understand binding semantics to use this correctly."
 
 ## Performance Impact
 
-✅ **Faster**: No fresh ID generation on every access  
-✅ **Simpler**: Fewer allocations (no unbinding/rebinding)  
+✅ **Faster**: No fresh ID generation on every access
+✅ **Simpler**: Fewer allocations (no unbinding/rebinding)
 ✅ **Correct**: Enables Datalog fixpoint to work properly
 
 ## What Now Works
@@ -207,7 +207,7 @@ new(x, {a[{in(b,p), state}], b[r], obs}) ~> new(x, {b[{a[{p, state}], r}], obs})
 
 Now works for:
 - ✅ Ambient calculus with `new(x, P)`
-- ✅ Lambda calculus with `λx. M`  
+- ✅ Lambda calculus with `λx. M`
 - ✅ Pi calculus with `ν(x) P`
 - ✅ Any process calculus with restriction/binding
 

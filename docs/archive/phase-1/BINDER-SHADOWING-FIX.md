@@ -116,7 +116,7 @@ Exhaustive at depth 1 (showing x0):
 Random at depth 10 (showing x0, x1, x2, ...):
   [0] Binders: x0(1) x1(2) x2(2)
       for(@(*a)->x0){*@(for(@(for(b->x1){0})->x1){a!(0)|for(@(@(0)!(0|0))->x2){*x2}})}|a!(0)
-  
+
   [1] Binders: x0(3) x1(6) x2(2)
       @(a!(0))!(for(@(for(@(a!(0|0|0))->x0){for(@(a!(0))->x1){...}})
 ```

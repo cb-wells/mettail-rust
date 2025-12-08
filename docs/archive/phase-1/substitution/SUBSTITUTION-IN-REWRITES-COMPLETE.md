@@ -1,6 +1,6 @@
 # Substitution in Rewrite Rules - Complete ✅
 
-**Date:** 2025-10-26  
+**Date:** 2025-10-26
 **Status:** DONE
 
 ---
@@ -70,14 +70,14 @@ Implemented sophisticated type-checking for substitution:
 Expr::Subst { term, var, replacement } => {
     let term_type = infer_type(term, context)?;
     let replacement_type = infer_type(replacement, context)?;
-    
+
     // Variable and replacement must have same type
     if let Some(var_type) = context.get(var) {
         check_type(replacement_type, var_type)?;
     } else {
         context.insert(var, replacement_type);
     }
-    
+
     // Result has same type as term
     Ok(term_type)
 }
@@ -106,7 +106,7 @@ theory! {
     },
     rewrites {
         // Communication: for(x){P} | y!(Q) => P[@Q/x] | 0
-        if x # Q then (PPar (PInput x P) (POutput y Q)) 
+        if x # Q then (PPar (PInput x P) (POutput y Q))
             => (PPar (subst P x (NQuote Q)) PZero)
     }
 }
@@ -140,7 +140,7 @@ All existing tests still pass! ✅
 // P:Proc, x:Name, @Q:Name => Proc
 (subst P x (NQuote Q))  ✅
 
-// E:Expr, y:Var, z:Var => Expr  
+// E:Expr, y:Var, z:Var => Expr
 (subst E y z)  ✅
 ```
 
@@ -156,7 +156,7 @@ All existing tests still pass! ✅
 This implementation handles **syntax, parsing, and validation** of substitution in rewrites. What's not implemented:
 
 - ❌ **Rewrite application/evaluation** - Actually running rewrites on terms
-- ❌ **Pattern matching** - Matching LHS against concrete terms  
+- ❌ **Pattern matching** - Matching LHS against concrete terms
 - ❌ **Rewrite strategies** - How/when to apply rewrites
 
 These are for future phases - Phase 1 was about getting the **foundation** right, which is now complete!
@@ -209,7 +209,7 @@ So `subst` in rewrites is syntax-level, while `.substitute()` is the runtime ope
 
 All major features implemented:
 1. ✅ Type-Checking
-2. ✅ Equations  
+2. ✅ Equations
 3. ✅ Parser Generation (basic)
 4. ✅ Binders & Variables
 5. ✅ Substitution

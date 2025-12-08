@@ -1,15 +1,15 @@
 # RhoCalc Performance Analysis
 
-**Date**: November 9, 2025  
-**Execution Time**: 18.5 seconds  
+**Date**: November 9, 2025
+**Execution Time**: 18.5 seconds
 **Status**: 🔴 TOO SLOW
 
 ---
 
 ## Current Performance
 
-**Test case**: 7 parallel processes with 3 communication pairs  
-**Time**: 18.5 seconds  
+**Test case**: 7 parallel processes with 3 communication pairs
+**Time**: 18.5 seconds
 **Result**: 9 paths to normal forms (correct)
 
 ---
@@ -20,7 +20,7 @@
 
 **Line 227-228**:
 ```rust
-proc(elem.clone()) <-- proc(t), if let Proc::PPar(bag) = t, 
+proc(elem.clone()) <-- proc(t), if let Proc::PPar(bag) = t,
     for elem in bag.iter().map(|(e, _count)| e);
 ```
 
@@ -30,12 +30,12 @@ proc(elem.clone()) <-- proc(t), if let Proc::PPar(bag) = t,
 - These new facts trigger MORE iterations (recursive explosion)
 
 **Example**:
-- Start: 1 fact `proc({a, b, c})` 
+- Start: 1 fact `proc({a, b, c})`
 - After deconstruction: 4 facts: `proc({a,b,c})`, `proc(a)`, `proc(b)`, `proc(c)`
 - Next iteration: Each of these 4 facts checked for more deconstruction
 - If any result is a collection, exponential growth continues
 
-**Impact**: 
+**Impact**:
 - With 7 top-level processes in the test case
 - Each rewrite creates new terms
 - Each new term is deconstructed → more facts
@@ -57,7 +57,7 @@ proc(elem.clone()) <-- proc(t), if let Proc::PPar(bag) = t,
 
 **Example**:
 - If `eq_proc(P1, P2)` and `eq_proc(Q1, Q2)`
-- Then check `POutput(P1, Q1)` ≡ `POutput(P2, Q2)` 
+- Then check `POutput(P1, Q1)` ≡ `POutput(P2, Q2)`
 - For M output constructors with 2 arguments, this is O(M × N²)
 
 **Impact**:
@@ -100,9 +100,9 @@ rw_proc(s, t1) <-- rw_proc(s, t0), eq_proc(t0, t1);
 **Lines 269-278**: Extract inputs and outputs for matching
 
 ```rust
-pinput_proj_r0_p0(parent, chan, x, p, elem) <-- 
-    proc(parent), 
-    if let Proc::PPar(ref bag_field) = parent, 
+pinput_proj_r0_p0(parent, chan, x, p, elem) <--
+    proc(parent),
+    if let Proc::PPar(ref bag_field) = parent,
     for (elem, _count) in bag_field.iter(),
     if let Proc::PInput(ref f0, ref f1) = elem, ...
 ```
@@ -137,7 +137,7 @@ path(p, r) <-- rw_proc(p, q), path(q, r);  // Transitivity
 - With K rewrites, this can generate O(K²) paths
 - Most paths are redundant for final result
 
-**Impact**: 
+**Impact**:
 - Moderate - paths are computed but not the primary bottleneck
 - With deep rewrite chains, can slow down
 
@@ -229,7 +229,7 @@ proc(elem) <-- proc(t), if let Proc::PPar(bag) = t, for elem in bag.iter();
 - Don't add elements as separate `proc` facts
 - Only track top-level terms
 
-**Impact**: 
+**Impact**:
 - Eliminates the N×M explosion
 - Reduces proc facts by 80-90%
 - **Expected speedup: 5-10x**
@@ -245,7 +245,7 @@ proc(elem) <-- proc(t), if let Proc::PPar(bag) = t, for elem in bag.iter();
 
 **Don't generate congruence for ALL constructors.**
 
-**Current**: 
+**Current**:
 - Congruence for `PDrop`, `POutput`, `NQuote`
 - O(N²) cost for each
 
@@ -261,7 +261,7 @@ eq_proc(PDrop(n1), PDrop(n2)) <-- eq_name(n1, n2);
 - Reduces eq_proc facts by 50-80%
 - **Expected speedup: 2-3x**
 
-**Trade-off**: 
+**Trade-off**:
 - Less complete equivalence relation
 - But rewrites still work (they use pattern matching, not equations)
 
@@ -356,9 +356,9 @@ cargo run --bin rhocalc
 
 ## Summary
 
-**Main bottleneck**: Eager collection deconstruction causing fact explosion  
-**Root cause**: Positive feedback loop (more facts → more checks → more facts)  
-**Quick fix**: Remove eager deconstruction, rely on indexed projection  
-**Expected speedup**: 5-10x (18.5s → 2-3s)  
+**Main bottleneck**: Eager collection deconstruction causing fact explosion
+**Root cause**: Positive feedback loop (more facts → more checks → more facts)
+**Quick fix**: Remove eager deconstruction, rely on indexed projection
+**Expected speedup**: 5-10x (18.5s → 2-3s)
 **Implementation**: Simple - remove one line from ascent_gen.rs
 

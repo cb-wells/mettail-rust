@@ -1,6 +1,6 @@
 # Phase 6: Indexed Projection Automation - COMPLETE ✅
 
-**Date**: November 9, 2025  
+**Date**: November 9, 2025
 **Status**: ✅ **PRODUCTION READY**
 
 ## Executive Summary
@@ -11,7 +11,7 @@ Phase 6 successfully implemented **fully automatic, order-independent collection
 
 Users can now write rewrite rules like:
 ```
-(PPar {(PInput chan x P), (POutput chan Q), ...rest}) 
+(PPar {(PInput chan x P), (POutput chan Q), ...rest})
     => (PPar {(subst P x (NQuote Q)), ...rest});
 ```
 
@@ -111,7 +111,7 @@ relation poutput_proj_r0_p1(Proc, Name, Proc, Proc);
 //                          ^parent ^join ^body ^original
 
 // 2. EXTRACTION RULES
-pinput_proj_r0_p0(parent.clone(), cap_chan.clone(), binder_x.clone(), 
+pinput_proj_r0_p0(parent.clone(), cap_chan.clone(), binder_x.clone(),
                   deref_p.clone(), elem.clone()) <--
     proc(parent),
     if let Proc::PPar(ref bag_field) = parent,
@@ -121,7 +121,7 @@ pinput_proj_r0_p0(parent.clone(), cap_chan.clone(), binder_x.clone(),
     let (binder_x, body_x) = (*f1).clone().unbind(),
     let deref_p = (*body_x).clone();
 
-poutput_proj_r0_p1(parent.clone(), cap_chan.clone(), cap_q.clone(), 
+poutput_proj_r0_p1(parent.clone(), cap_chan.clone(), cap_q.clone(),
                    elem.clone()) <--
     proc(parent),
     if let Proc::PPar(ref bag_field) = parent,
@@ -180,7 +180,7 @@ rw_proc(parent.clone(), result) <--
 
 **Challenge 4: Type Mismatches**
 - **Problem**: Expected `Proc` found `&Proc`, `Box::new(&value)` errors
-- **Solution**: 
+- **Solution**:
   - All bindings use `.clone()` to ensure owned values
   - `generate_ascent_rhs` uses bindings as-is (already have `.clone()` if needed)
   - Binder variables stored as `Binder<String>` (not extracted `FreeVar`)
@@ -203,22 +203,22 @@ rw_proc(parent.clone(), result) <--
 ```rust
 pub fn generate_rewrite_clauses(theory: &TheoryDef) -> Vec<TokenStream> {
     let mut all_clauses = Vec::new();
-    
+
     for (rule_idx, rule) in theory.rewrites.iter().enumerate() {
         if rule.premise.is_some() {
             continue; // Skip congruence rules
         }
-        
+
         // Check if this rule requires indexed projection approach
         if requires_indexed_projection(rule, theory) {
             // NEW PATH: Generate indexed projection-based rewrite
             if let Some(spec) = analyze_collection_pattern(&rule.left, theory) {
                 let relations = generate_projection_relations(rule_idx, &spec);
                 all_clauses.extend(relations);
-                
+
                 let extractions = generate_extraction_rules(rule_idx, &spec, theory);
                 all_clauses.extend(extractions);
-                
+
                 let rewrite = generate_join_rewrite(rule_idx, &spec, rule, theory);
                 all_clauses.push(rewrite);
             } else {
@@ -229,7 +229,7 @@ pub fn generate_rewrite_clauses(theory: &TheoryDef) -> Vec<TokenStream> {
             all_clauses.push(generate_rewrite_clause(rule, theory));
         }
     }
-    
+
     all_clauses
 }
 ```
@@ -247,7 +247,7 @@ Rewrite: {a!(0), b!(0), for(a->x0){*x0}} ~> {*@(0), b!(0)}
 Time: 9ms
 ```
 
-**Performance**: 
+**Performance**:
 - Order-independent ✅
 - Efficient (9ms for small example) ✅
 - Leverages Ascent's hash join ✅
@@ -266,19 +266,19 @@ Extended `generate_equation_pattern` in `ascent_gen.rs` to handle `CollectionPat
 ```rust
 Expr::CollectionPattern { constructor, elements, rest } => {
     // For equations like: (PPar {P}) == P
-    
+
     // Generate:
     // if let Proc::PPar(ref bag) = p0,
     // if bag.len() == 1,
     // let p = bag.iter().nth(0).unwrap().0.clone(),
-    
+
     // Then RHS: let p1 = p.clone();
 }
 ```
 
 ### Supported Patterns
 
-✅ Fixed-size collections: `(PPar {P})`, `(PPar {P, Q})`  
+✅ Fixed-size collections: `(PPar {P})`, `(PPar {P, Q})`
 ⏳ Rest patterns: `(PPar {P, ...rest})` (TODO - more complex)
 
 ### Use Cases
@@ -293,7 +293,7 @@ Expr::CollectionPattern { constructor, elements, rest } => {
 
 ### Linter Status: ✅ CLEAN
 
-**Before**: 
+**Before**:
 - 5 `non_snake_case` warnings for variables `P`, `Q`, `deref_P`, etc.
 - Yellow warning highlighting in IDE
 
@@ -393,12 +393,12 @@ Expr::CollectionPattern { constructor, elements, rest } => {
 
 Phase 6 represents a **major milestone** for MeTTaIL:
 
-✅ **Fully automatic** - No manual intervention needed  
-✅ **Order-independent** - Correct semantics for AC operations  
-✅ **Efficient** - Leverages Ascent's optimized joins  
-✅ **Type-safe** - Handles binders, collections, rest patterns correctly  
-✅ **Clean code** - No linter warnings, professional quality  
-✅ **Production ready** - Tested and working on real examples  
+✅ **Fully automatic** - No manual intervention needed
+✅ **Order-independent** - Correct semantics for AC operations
+✅ **Efficient** - Leverages Ascent's optimized joins
+✅ **Type-safe** - Handles binders, collections, rest patterns correctly
+✅ **Clean code** - No linter warnings, professional quality
+✅ **Production ready** - Tested and working on real examples
 
 **MeTTaIL now provides state-of-the-art support for rewriting modulo associativity-commutativity**, with automatic optimization and correct handling of complex binding structures.
 

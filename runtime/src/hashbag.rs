@@ -18,14 +18,14 @@
 //! assert_eq!(bag.len(), 3);
 //! ```
 
-use std::collections::HashMap;
-use std::hash::{Hash, BuildHasherDefault, Hasher};
-use std::cmp::Ordering;
-use std::fmt;
 use rustc_hash::FxHasher;
+use std::cmp::Ordering;
+use std::collections::HashMap;
+use std::fmt;
+use std::hash::{BuildHasherDefault, Hash, Hasher};
 
 use crate::{BoundTerm, Var};
-use moniker::{ScopeState, OnFreeFn, OnBoundFn};
+use moniker::{OnBoundFn, OnFreeFn, ScopeState};
 
 /// A multiset (bag) - unordered collection with duplicates.
 ///
@@ -72,6 +72,7 @@ impl<T: Clone + Hash + Eq> HashBag<T> {
     /// assert_eq!(bag.count(&"a"), 2);
     /// assert_eq!(bag.len(), 3);
     /// ```
+    #[allow(clippy::should_implement_trait)]
     pub fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
         let mut bag = Self::new();
         for item in iter {
@@ -244,17 +245,16 @@ impl<T: Clone + Hash + Eq> HashBag<T> {
     /// assert_eq!(elements, vec!["a", "a", "b"]);
     /// ```
     pub fn iter_elements(&self) -> impl Iterator<Item = &T> {
-        self.counts.iter().flat_map(|(k, &count)| {
-            std::iter::repeat(k).take(count)
-        })
+        self.counts
+            .iter()
+            .flat_map(|(k, &count)| std::iter::repeat_n(k, count))
     }
 }
 
 // PartialEq: compare by element counts (order-independent)
 impl<T: Clone + Hash + Eq> PartialEq for HashBag<T> {
     fn eq(&self, other: &Self) -> bool {
-        self.total_count == other.total_count && 
-        self.counts == other.counts
+        self.total_count == other.total_count && self.counts == other.counts
     }
 }
 
@@ -265,12 +265,12 @@ impl<T: Clone + Hash + Eq + fmt::Debug> Hash for HashBag<T> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         // Hash total count first
         self.total_count.hash(state);
-        
+
         // Collect and sort entries for deterministic hashing
         // We use Debug format for sorting since we can't assume T: Ord
         let mut entries: Vec<_> = self.counts.iter().collect();
         entries.sort_by_key(|(k, _)| format!("{:?}", k));
-        
+
         for (elem, &count) in entries {
             elem.hash(state);
             count.hash(state);
@@ -296,7 +296,7 @@ impl<T: Clone + Hash + Eq + Ord> Ord for HashBag<T> {
                 v1.sort();
                 v2.sort();
                 v1.cmp(&v2)
-            }
+            },
             ord => ord,
         }
     }
@@ -327,7 +327,8 @@ where
         // Check term equality for each element (alpha-equivalence aware)
         // For each unique element in self, find matching elements in other
         for (elem1, count1) in self.iter() {
-            let count2 = other.iter()
+            let count2 = other
+                .iter()
                 .filter(|(elem2, _)| elem1.term_eq(elem2))
                 .map(|(_, c)| c)
                 .sum::<usize>();
@@ -337,45 +338,72 @@ where
         }
         true
     }
-    
+
     fn close_term(&mut self, state: ScopeState, on_free: &impl OnFreeFn<N>) {
         // Close each unique element
         // We need to rebuild the map because closing might change element identity
         let old_counts = std::mem::take(&mut self.counts);
         self.counts = HashMap::default();
-        
+
         for (mut elem, count) in old_counts {
             elem.close_term(state, on_free);
             self.counts.insert(elem, count);
         }
     }
-    
+
     fn open_term(&mut self, state: ScopeState, on_bound: &impl OnBoundFn<N>) {
         // Open each unique element
         let old_counts = std::mem::take(&mut self.counts);
         self.counts = HashMap::default();
-        
+
         for (mut elem, count) in old_counts {
             elem.open_term(state, on_bound);
             self.counts.insert(elem, count);
         }
     }
-    
+
     fn visit_vars(&self, on_var: &mut impl FnMut(&Var<N>)) {
         for (elem, _) in self.iter() {
             elem.visit_vars(on_var);
         }
     }
-    
+
     fn visit_mut_vars(&mut self, on_var: &mut impl FnMut(&mut Var<N>)) {
         // Need to rebuild the map since we need mutable access to keys
         let old_counts = std::mem::take(&mut self.counts);
         self.counts = HashMap::default();
-        
+
         for (mut elem, count) in old_counts {
             elem.visit_mut_vars(on_var);
             self.counts.insert(elem, count);
         }
+    }
+}
+
+/// Display implementation for HashBag
+///
+/// Formats as `{elem1, elem1, elem2}` with elements repeated according to their count.
+/// Elements are sorted for deterministic output.
+impl<T: Clone + Hash + Eq + Ord + fmt::Display> fmt::Display for HashBag<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{{")?;
+
+        // Collect and sort elements for deterministic output
+        let mut items: Vec<(&T, &usize)> = self.counts.iter().collect();
+        items.sort_by(|a, b| a.0.cmp(b.0));
+
+        let mut first = true;
+        for (elem, &count) in items {
+            for _ in 0..count {
+                if !first {
+                    write!(f, ", ")?;
+                }
+                write!(f, "{}", elem)?;
+                first = false;
+            }
+        }
+
+        write!(f, "}}")
     }
 }
 
@@ -396,7 +424,7 @@ mod tests {
         bag.insert("a");
         bag.insert("a");
         bag.insert("b");
-        
+
         assert_eq!(bag.count(&"a"), 2);
         assert_eq!(bag.count(&"b"), 1);
         assert_eq!(bag.count(&"c"), 0);
@@ -410,18 +438,18 @@ mod tests {
         bag.insert("a");
         bag.insert("a");
         bag.insert("b");
-        
+
         assert!(bag.remove(&"a"));
         assert_eq!(bag.count(&"a"), 1);
         assert_eq!(bag.len(), 2);
-        
+
         assert!(bag.remove(&"a"));
         assert_eq!(bag.count(&"a"), 0);
         assert_eq!(bag.len(), 1);
-        
+
         assert!(!bag.remove(&"a"));
         assert_eq!(bag.len(), 1);
-        
+
         assert!(bag.remove(&"b"));
         assert!(bag.is_empty());
     }
@@ -430,7 +458,7 @@ mod tests {
     fn contains_check() {
         let mut bag = HashBag::new();
         bag.insert("a");
-        
+
         assert!(bag.contains(&"a"));
         assert!(!bag.contains(&"b"));
     }
@@ -441,12 +469,12 @@ mod tests {
         bag1.insert("a");
         bag1.insert("b");
         bag1.insert("c");
-        
+
         let mut bag2 = HashBag::new();
         bag2.insert("c");
         bag2.insert("a");
         bag2.insert("b");
-        
+
         assert_eq!(bag1, bag2);
     }
 
@@ -455,10 +483,10 @@ mod tests {
         let mut bag1 = HashBag::new();
         bag1.insert("a");
         bag1.insert("a");
-        
+
         let mut bag2 = HashBag::new();
         bag2.insert("a");
-        
+
         assert_ne!(bag1, bag2);
     }
 
@@ -468,10 +496,10 @@ mod tests {
         bag.insert("a");
         bag.insert("a");
         bag.insert("b");
-        
+
         let mut items: Vec<_> = bag.iter().collect();
         items.sort();
-        
+
         assert_eq!(items, vec![(&"a", 2), (&"b", 1)]);
     }
 
@@ -481,17 +509,17 @@ mod tests {
         bag.insert("a");
         bag.insert("a");
         bag.insert("b");
-        
+
         let mut elements: Vec<_> = bag.iter_elements().copied().collect();
         elements.sort();
-        
+
         assert_eq!(elements, vec!["a", "a", "b"]);
     }
 
     #[test]
     fn from_iter_construction() {
         let bag = HashBag::from_iter(vec!["a", "b", "a", "c", "a"]);
-        
+
         assert_eq!(bag.count(&"a"), 3);
         assert_eq!(bag.count(&"b"), 1);
         assert_eq!(bag.count(&"c"), 1);
@@ -501,7 +529,7 @@ mod tests {
     #[test]
     fn collect_from_iterator() {
         let bag: HashBag<_> = vec!["x", "y", "x"].into_iter().collect();
-        
+
         assert_eq!(bag.count(&"x"), 2);
         assert_eq!(bag.count(&"y"), 1);
     }
@@ -509,21 +537,21 @@ mod tests {
     #[test]
     fn hash_is_deterministic() {
         use std::collections::hash_map::DefaultHasher;
-        
+
         let mut bag1 = HashBag::new();
         bag1.insert("a");
         bag1.insert("b");
-        
+
         let mut bag2 = HashBag::new();
         bag2.insert("b");
         bag2.insert("a");
-        
+
         let mut hasher1 = DefaultHasher::new();
         let mut hasher2 = DefaultHasher::new();
-        
+
         bag1.hash(&mut hasher1);
         bag2.hash(&mut hasher2);
-        
+
         assert_eq!(hasher1.finish(), hasher2.finish());
     }
 
@@ -531,44 +559,16 @@ mod tests {
     fn ord_by_count_then_elements() {
         let mut bag1 = HashBag::new();
         bag1.insert(1);
-        
+
         let mut bag2 = HashBag::new();
         bag2.insert(1);
         bag2.insert(2);
-        
+
         assert!(bag1 < bag2); // bag1 has fewer elements
-        
+
         let mut bag3 = HashBag::new();
         bag3.insert(0);
-        
+
         assert!(bag3 < bag1); // Same count, but bag3 has smaller element
     }
 }
-
-/// Display implementation for HashBag
-///
-/// Formats as `{elem1, elem1, elem2}` with elements repeated according to their count.
-/// Elements are sorted for deterministic output.
-impl<T: Clone + Hash + Eq + Ord + fmt::Display> fmt::Display for HashBag<T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{{")?;
-        
-        // Collect and sort elements for deterministic output
-        let mut items: Vec<(&T, &usize)> = self.counts.iter().collect();
-        items.sort_by(|a, b| a.0.cmp(b.0));
-        
-        let mut first = true;
-        for (elem, &count) in items {
-            for _ in 0..count {
-                if !first {
-                    write!(f, ", ")?;
-                }
-                write!(f, "{}", elem)?;
-                first = false;
-            }
-        }
-        
-        write!(f, "}}")
-    }
-}
-

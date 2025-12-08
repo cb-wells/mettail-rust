@@ -73,7 +73,7 @@ let lambda = Expr::ELam(Scope::new(
 In moniker:
 - `Var<String>` can be `Var::Free(FreeVar<String>)` or `Var::Bound(BoundVar<String>)`
 - When we create `Scope::new(Binder(x), body)`, it automatically closes free vars in body
-- `Var::Free(x)` in body becomes `Var::Bound(@0.0)` 
+- `Var::Free(x)` in body becomes `Var::Bound(@0.0)`
 - When we `unbind()`, it opens back to fresh `Var::Free(x')`
 
 This gives us automatic capture-avoidance!

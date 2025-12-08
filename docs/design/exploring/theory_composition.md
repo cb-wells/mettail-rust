@@ -1,7 +1,7 @@
 # Theory Parameterization & Composition Design
 
-**Status:** Design Phase  
-**Priority:** Important but deferred to Phase 1.5/2  
+**Status:** Design Phase
+**Priority:** Important but deferred to Phase 1.5/2
 **Complexity:** High
 
 ---
@@ -87,14 +87,14 @@ Theory ParMonoid(cm: CommutativeMonoid) {
 theory! {
     name: ParMonoid,
     params: (cm: CommutativeMonoid),
-    
+
     // At macro expansion, we just record the structure
     extends: cm,
-    
+
     exports {
         Elem => Proc;  // Rename instruction
     },
-    
+
     replacements {
         Zero => PZero;  // Replacement instruction
     }
@@ -104,16 +104,16 @@ theory! {
 impl ParMonoid {
     pub fn new(cm_instance: Box<dyn Theory>) -> Self {
         let mut theory = ParMonoid::empty();
-        
+
         // Inherit from cm
         theory.inherit_from(&cm_instance);
-        
+
         // Apply renames
         theory.rename_category("Elem", "Proc");
-        
+
         // Apply replacements
         theory.replace_rule("Zero", Rule { /* new def */ });
-        
+
         theory
     }
 }
@@ -137,9 +137,9 @@ impl ParMonoid {
 theory! {
     name: ParMonoid,
     params: (cm: CommutativeMonoid),
-    
+
     extends: cm,
-    
+
     exports {
         Elem => Proc;
     }
@@ -283,24 +283,24 @@ pub struct Replacement {
 ```rust
 theory! {
     name: ParMonoid,
-    
+
     // Parameters (already supported)
     params: (cm: CommutativeMonoid),
-    
+
     // Base theory to extend (NEW)
     extends: cm,
-    
+
     // Exports with optional renames (ENHANCED)
     exports {
         Elem => Proc;    // Rename from base
         NewCat;          // Add new category
     },
-    
+
     // Terms (current - no change)
     terms {
         PZero . Proc ::= "0" ;
     },
-    
+
     // Replacements (NEW)
     replacements {
         // Replace rule at index 0 with new definition
@@ -308,7 +308,7 @@ theory! {
         // Replace rules at indices 0 and 1
         [0, 1] Plus.Elem => PPar.Proc ::= "(" Proc "|" Proc ")" ;
     },
-    
+
     // Equations (current - no change)
     equations {
         (LHS) == (RHS) ;
@@ -322,12 +322,12 @@ theory! {
 theory! {
     name: ParMonoid,
     params: (cm: CommutativeMonoid),
-    
+
     body: cm {  // Explicit "extend cm and add..."
         exports {
             Elem => Proc;
         },
-        
+
         replacements {
             Zero => PZero;
         }
@@ -357,7 +357,7 @@ theory! {
 pub trait CommutativeMonoid: Theory {
     // Must have these exports
     type Elem;
-    
+
     // Must have these operations
     fn zero() -> Self::Elem;
     fn plus(a: Self::Elem, b: Self::Elem) -> Self::Elem;
@@ -544,7 +544,7 @@ theory! {
 
 **For Phase 1:** Skip theory parameterization entirely. Focus on:
 1. Type-checking
-2. Parser generation  
+2. Parser generation
 3. Equation support
 4. Basic examples
 
@@ -572,6 +572,6 @@ This allows us to build a solid foundation before tackling the complex compositi
 
 ---
 
-**Status:** Design complete, implementation deferred to Phase 1.5  
+**Status:** Design complete, implementation deferred to Phase 1.5
 **Next:** Continue Phase 1 foundation work (type-checker, parser gen)
 

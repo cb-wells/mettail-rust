@@ -1,5 +1,5 @@
 //! Runtime support for MeTTaIL-generated code
-//! 
+//!
 //! This crate provides:
 //! - Variable binding support (via moniker wrappers)
 //! - Collection types (HashBag for associative-commutative operations)

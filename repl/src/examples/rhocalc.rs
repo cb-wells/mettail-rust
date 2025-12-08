@@ -171,7 +171,8 @@ pub static FRESH_NAMES: Example = Example {
 pub static CONTRACT: Example = Example {
     name: "contract",
     description: "Contract net: broadcast request, collect responses",
-    source: "{req!(0) | for(req->x){{resp1!(*x) | resp2!(*x)}} | for(resp1->a){*a} | for(resp2->b){*b}}",
+    source:
+        "{req!(0) | for(req->x){{resp1!(*x) | resp2!(*x)}} | for(resp1->a){*a} | for(resp2->b){*b}}",
     category: ExampleCategory::Advanced,
     theory: TheoryName::RhoCalculus,
 };
@@ -270,4 +271,3 @@ pub static SELF_COMM: Example = Example {
     category: ExampleCategory::EdgeCase,
     theory: TheoryName::RhoCalculus,
 };
-

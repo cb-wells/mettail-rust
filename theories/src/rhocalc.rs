@@ -1,14 +1,20 @@
+#![allow(
+    non_local_definitions,
+    clippy::crate_in_macro_def,
+    clippy::empty_line_after_outer_attr
+)]
+
 use mettail_macros::theory;
 
 // RhoCalc Theory Definition
 theory! {
     name: RhoCalc,
-    
+
     exports {
         Proc
         Name
     },
-    
+
     terms {
         PZero . Proc ::= "0" ;
         PDrop . Proc ::= "*" "(" Name ")" ;
@@ -22,15 +28,15 @@ theory! {
         PVar . Proc ::= Var;
         NVar . Name ::= Var;
     },
-    
+
     equations {
         (NQuote (PDrop N)) == N ;
     },
-        
+
     rewrites {
         (PPar {(PInput N x P), (POutput N Q)})
             => (PPar {(subst P x (NQuote Q))});
-        
+
         (PDrop (NQuote P)) => P;
 
         if S => T then (PPar {S, ...rest}) => (PPar {T, ...rest});

@@ -1,6 +1,6 @@
 # Rewrite Rules Implementation - Complete ✅
 
-**Date:** 2025-10-26  
+**Date:** 2025-10-26
 **Status:** DONE
 
 ---
@@ -38,7 +38,7 @@ Added `parse_rewrites` and `parse_rewrite_rule` functions to parse:
 rewrites {
     // Simple rewrite
     (PPar PZero P) => P
-    
+
     // Rewrite with freshness condition
     if x # Q then (PPar (PInput x P) (POutput y Q)) => (PPar P PZero)
 }

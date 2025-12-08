@@ -1,6 +1,6 @@
 # Session Summary: Equational Rewrite Engine & Performance Analysis
 
-**Date**: November 2025  
+**Date**: November 2025
 **Status**: Major milestone completed ✅
 
 ---
@@ -25,7 +25,7 @@ for(@(0) x){P} | @(0|0)!(Q)  // Should match if @(0) == @(0|0)
 1. **Duplicate Variable Detection**
    - Track variables appearing multiple times in LHS
    - Generate `eq_cat()` checks instead of syntactic equality
-   
+
 2. **Explicit Category Tracking**
    - Eliminated heuristic-based type inference
    - Track variable categories during pattern matching
@@ -49,10 +49,10 @@ rw_proc(s, t) <--
     let (chan, x_scope) = s_f0_f0_scope.clone().unbind(),
     let (x, p) = x_scope.unbind(),
     if let Proc::POutput(chan2, q) = &**s_f1,
-    
+
     // Equational matching (NEW!)
     eq_name((**chan).clone(), (**chan2).clone()),
-    
+
     if mettail_runtime::is_fresh(&x.0, &**q),
     let t = p.substitute_name(&x.0, &Name::NQuote((**q).clone()));
 ```
@@ -61,7 +61,7 @@ rw_proc(s, t) <--
 
 #### Current Performance
 - **Small terms (depth ≤3)**: ~1 second
-- **Medium terms (depth 4-5)**: ~10 seconds  
+- **Medium terms (depth 4-5)**: ~10 seconds
 - **Complex terms (depth 6+)**: 60-80 seconds
 
 #### Root Cause Identified
@@ -78,7 +78,7 @@ rw_proc(s, t) <--
    ```
    if S => T then (PPar P S) => (PPar P T)
    ```
-   
+
 3. **Result**: For term `a|b|c|d|e`, Ascent generates thousands of equivalent representations
 
 #### Proposed Solution: Collection Types

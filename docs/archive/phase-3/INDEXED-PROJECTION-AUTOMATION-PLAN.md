@@ -1,8 +1,8 @@
 # Automated Indexed Projection: Implementation Plan
 
 ## Status: Ready to Implement
-**Prototype**: ✅ Verified working in `rhocalc.rs`  
-**Performance**: ✅ 10.8ms, order-independent  
+**Prototype**: ✅ Verified working in `rhocalc.rs`
+**Performance**: ✅ 10.8ms, order-independent
 **Correctness**: ✅ Handles N>2 elements correctly
 
 ---
@@ -73,13 +73,13 @@ New struct to capture projection info:
 struct ProjectionSpec {
     /// The collection field being matched
     collection_field_idx: usize,
-    
+
     /// Nested patterns within the collection
     element_patterns: Vec<ElementPattern>,
-    
+
     /// Variables shared across patterns (join keys)
     shared_variables: Vec<String>,
-    
+
     /// Rest variable binding, if present
     rest_variable: Option<String>,
 }
@@ -87,13 +87,13 @@ struct ProjectionSpec {
 struct ElementPattern {
     /// The nested constructor (e.g., PInput, POutput)
     constructor: Ident,
-    
+
     /// Position in the collection pattern
     pattern_idx: usize,
-    
+
     /// Variables to capture
     captures: Vec<(String, Ident)>,  // (var_name, category)
-    
+
     /// Which captures are join keys
     join_key_indices: Vec<usize>,
 }
@@ -110,7 +110,7 @@ fn analyze_collection_pattern(
         Expr::CollectionPattern { elements, rest, .. } => {
             let mut element_patterns = Vec::new();
             let mut all_vars = HashMap::new();
-            
+
             // Analyze each element pattern
             for (idx, elem) in elements.iter().enumerate() {
                 if let Expr::Apply { constructor, args } = elem {
@@ -121,7 +121,7 @@ fn analyze_collection_pattern(
                         captures: captures.clone(),
                         join_key_indices: vec![], // Filled later
                     });
-                    
+
                     // Track variable occurrences
                     for (var, _) in &captures {
                         all_vars.entry(var.clone())
@@ -130,13 +130,13 @@ fn analyze_collection_pattern(
                     }
                 }
             }
-            
+
             // Find shared variables (appear in multiple patterns)
             let shared_variables: Vec<String> = all_vars.iter()
                 .filter(|(_, indices)| indices.len() > 1)
                 .map(|(var, _)| var.clone())
                 .collect();
-            
+
             // Mark which captures are join keys
             for pattern in &mut element_patterns {
                 for (i, (var, _)) in pattern.captures.iter().enumerate() {
@@ -145,7 +145,7 @@ fn analyze_collection_pattern(
                     }
                 }
             }
-            
+
             Some(ProjectionSpec {
                 collection_field_idx: 0, // Computed by caller
                 element_patterns,
@@ -175,33 +175,33 @@ fn generate_projection_relations(
     theory: &TheoryDef,
 ) -> Vec<TokenStream> {
     let mut relations = Vec::new();
-    
+
     for elem_pattern in &spec.element_patterns {
         let rel_name = format_ident!(
-            "{}_proj_{}_{}", 
+            "{}_proj_{}_{}",
             elem_pattern.constructor.to_string().to_lowercase(),
             rule_idx,
             elem_pattern.pattern_idx
         );
-        
+
         // Build relation signature: (Parent, JoinKey1, JoinKey2, ..., Capture1, Capture2, ..., OriginalElem)
         let mut field_types = vec![
             quote! { #category },  // Parent term
         ];
-        
+
         // Add join key types (shared variables)
         for var in &spec.shared_variables {
             let var_category = get_variable_category(var, &elem_pattern.captures);
             field_types.push(quote! { #var_category });
         }
-        
+
         // Add other capture types
         for (var, cat) in &elem_pattern.captures {
             if !spec.shared_variables.contains(var) {
                 field_types.push(quote! { #cat });
             }
         }
-        
+
         // Add original element (for reconstruction)
         let element_cat = &grammar_rule.items.iter()
             .find_map(|item| match item {
@@ -210,12 +210,12 @@ fn generate_projection_relations(
             })
             .expect("Collection field not found");
         field_types.push(quote! { #element_cat });
-        
+
         relations.push(quote! {
             relation #rel_name(#(#field_types),*);
         });
     }
-    
+
     relations
 }
 ```
@@ -234,47 +234,47 @@ fn generate_extraction_rules(
     let mut rules = Vec::new();
     let cat_lower = format_ident!("{}", category.to_string().to_lowercase());
     let label = &grammar_rule.label;
-    
+
     // Find the collection field
     let collection_field_name = format_ident!("bag_field");
-    
+
     for elem_pattern in &spec.element_patterns {
         let rel_name = format_ident!(
-            "{}_proj_{}_{}", 
+            "{}_proj_{}_{}",
             elem_pattern.constructor.to_string().to_lowercase(),
             rule_idx,
             elem_pattern.pattern_idx
         );
-        
+
         // Generate pattern matching for nested constructor
         let elem_var = format_ident!("elem");
         let mut capture_vars = Vec::new();
         let mut capture_exprs = Vec::new();
-        
+
         for (var_name, _) in &elem_pattern.captures {
             let var_ident = format_ident!("{}", var_name);
             capture_vars.push(var_ident.clone());
-            
+
             // Generate extraction expression (may need unbinding, dereferencing, etc.)
             let extraction = generate_capture_extraction(var_name, elem_pattern, theory);
             capture_exprs.push(extraction);
         }
-        
+
         // Build relation fact with join keys first, then other captures
         let mut fact_args = vec![
             quote! { parent.clone() },
         ];
-        
+
         // Add join keys in order
         for shared_var in &spec.shared_variables {
             if let Some((var_name, _)) = elem_pattern.captures.iter()
-                .find(|(v, _)| v == shared_var) 
+                .find(|(v, _)| v == shared_var)
             {
                 let var_ident = format_ident!("{}", var_name);
                 fact_args.push(quote! { #var_ident.clone() });
             }
         }
-        
+
         // Add non-join captures
         for (var_name, _) in &elem_pattern.captures {
             if !spec.shared_variables.contains(var_name) {
@@ -282,13 +282,13 @@ fn generate_extraction_rules(
                 fact_args.push(quote! { #var_ident.clone() });
             }
         }
-        
+
         // Add original element
         fact_args.push(quote! { #elem_var.clone() });
-        
+
         let elem_constructor = &elem_pattern.constructor;
         let element_category = get_element_category(grammar_rule);
-        
+
         rules.push(quote! {
             #rel_name(#(#fact_args),*) <--
                 #cat_lower(parent),
@@ -298,7 +298,7 @@ fn generate_extraction_rules(
                 #(#capture_exprs),*;
         });
     }
-    
+
     rules
 }
 ```
@@ -315,45 +315,45 @@ fn generate_join_rewrite(
 ) -> TokenStream {
     let mut join_clauses = Vec::new();
     let parent_var = format_ident!("parent");
-    
+
     // Create variables for shared join keys
     let join_key_vars: Vec<_> = spec.shared_variables.iter()
         .map(|v| format_ident!("{}", v))
         .collect();
-    
+
     // Generate join clause for each projection
     for elem_pattern in &spec.element_patterns {
         let rel_name = format_ident!(
-            "{}_proj_{}_{}", 
+            "{}_proj_{}_{}",
             elem_pattern.constructor.to_string().to_lowercase(),
             rule_idx,
             elem_pattern.pattern_idx
         );
-        
+
         let mut join_args = vec![parent_var.clone()];
         join_args.extend(join_key_vars.clone());
-        
+
         // Add capture variables
         for (var_name, _) in &elem_pattern.captures {
             if !spec.shared_variables.contains(var_name) {
                 join_args.push(format_ident!("{}", var_name));
             }
         }
-        
+
         // Add element variable
         let elem_var = format_ident!("elem_{}", elem_pattern.pattern_idx);
         join_args.push(elem_var);
-        
+
         join_clauses.push(quote! {
             #rel_name(#(#join_args),*)
         });
     }
-    
+
     // Generate rest construction
     let elem_vars: Vec<_> = (0..spec.element_patterns.len())
         .map(|i| format_ident!("elem_{}", i))
         .collect();
-    
+
     let rest_construction = if let Some(rest_var) = &spec.rest_variable {
         let rest_ident = format_ident!("{}", rest_var);
         quote! {
@@ -367,10 +367,10 @@ fn generate_join_rewrite(
     } else {
         quote! {}
     };
-    
+
     // Generate RHS construction (delegate to existing code)
     let rhs_code = generate_ascent_rhs(&rule.rhs, &mut HashMap::new(), theory);
-    
+
     quote! {
         rw_proc(#parent_var.clone(), result) <--
             #(#join_clauses),*,
@@ -391,34 +391,34 @@ fn generate_join_rewrite(
 ```rust
 pub fn generate_rewrite_rules(theory: &TheoryDef) -> Vec<TokenStream> {
     let mut all_rules = Vec::new();
-    
+
     for (idx, rule) in theory.rewrites.iter().enumerate() {
         if requires_indexed_projection(rule) {
             // NEW PATH: Generate indexed projection approach
             let spec = analyze_collection_pattern(&rule.lhs, theory)
                 .expect("Failed to analyze collection pattern");
-            
+
             let (category, grammar_rule) = find_constructor_info(&rule.lhs, theory);
-            
+
             // Generate projection relations
             let relations = generate_projection_relations(idx, &spec, category, grammar_rule, theory);
             all_rules.extend(relations);
-            
+
             // Generate extraction rules
             let extractions = generate_extraction_rules(idx, &spec, category, &format_ident!("s"), grammar_rule, theory);
             all_rules.extend(extractions);
-            
+
             // Generate join-based rewrite
             let rewrite = generate_join_rewrite(idx, &spec, rule, category, theory);
             all_rules.push(rewrite);
-            
+
         } else {
             // EXISTING PATH: Use current generation logic
             let rewrite = generate_ascent_rewrite_rule(idx, rule, theory);
             all_rules.push(rewrite);
         }
     }
-    
+
     all_rules
 }
 ```
@@ -570,23 +570,23 @@ fn bench_100_elements(b: &mut Bencher) { ... }
 ## Risk Analysis
 
 ### Risk 1: Complex Capture Extraction
-**Issue**: Extracting captures from nested patterns (binders, boxes) is complex  
-**Mitigation**: Reuse existing `generate_ascent_pattern()` logic where possible  
+**Issue**: Extracting captures from nested patterns (binders, boxes) is complex
+**Mitigation**: Reuse existing `generate_ascent_pattern()` logic where possible
 **Fallback**: Generate simplified extraction for MVP, optimize later
 
 ### Risk 2: Multiple Join Keys
-**Issue**: Patterns with >1 shared variable need multi-column joins  
-**Mitigation**: Ascent supports multi-column joins naturally  
+**Issue**: Patterns with >1 shared variable need multi-column joins
+**Mitigation**: Ascent supports multi-column joins naturally
 **Test**: Add dedicated test case
 
 ### Risk 3: Performance Regression
-**Issue**: Projection overhead might hurt small collections  
-**Mitigation**: Profile and optimize projection generation  
+**Issue**: Projection overhead might hurt small collections
+**Mitigation**: Profile and optimize projection generation
 **Fallback**: Add heuristic to use old approach for N≤2 elements
 
 ### Risk 4: Code Complexity
-**Issue**: Code generation is already complex  
-**Mitigation**: Break into small, well-tested functions  
+**Issue**: Code generation is already complex
+**Mitigation**: Break into small, well-tested functions
 **Fallback**: Keep manual approach as escape hatch
 
 ---
@@ -604,7 +604,7 @@ fn bench_100_elements(b: &mut Bencher) { ... }
 ## Timeline Estimate
 
 - **Phase 6.1** (Detection): 3-4 hours
-- **Phase 6.2** (Generation): 6-8 hours  
+- **Phase 6.2** (Generation): 6-8 hours
 - **Phase 6.3** (Integration): 2-3 hours
 - **Phase 6.4** (Testing): 3-4 hours
 - **Phase 6.5** (Documentation): 2 hours

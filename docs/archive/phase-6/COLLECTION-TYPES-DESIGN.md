@@ -74,14 +74,14 @@ PPar . Proc ::= HashBag(Proc) sep "|" ;
 theory! {
     name: RhoCalc,
     exports { Proc, Name }
-    
+
     terms {
         PZero . Proc ::= "0" ;
-        
+
         // Collection-based parallel composition
         // Format: CollectionType(ElementType) sep "separator" delim "outer"
         PPar . Proc ::= HashBag(Proc) sep "|" ;
-        
+
         // Other constructors unchanged
         PInput . Proc ::= "for" "(" Name <Name> ")" "{" Proc "}" ;
         POutput . Proc ::= Name "!" "(" Proc ")" ;
@@ -144,10 +144,10 @@ equations {
     // ❌ NOT NEEDED - implicit in HashBag:
     // (PPar P Q) == (PPar Q P)                      // Commutativity
     // (PPar P (PPar Q R)) == (PPar (PPar P Q) R)   // Associativity
-    
+
     // ✅ STILL NEEDED - identity elements:
     // Empty bag normalizes to zero (auto-generated if PZero exists)
-    
+
     // ✅ Other equations work as before:
     (PDrop (NQuote P)) == P ;  // Reflection
 }
@@ -165,7 +165,7 @@ Pattern matching over collections (Phase 4):
 ```rust
 rewrites {
     // Extract matching elements from bag
-    if x # Q then 
+    if x # Q then
         (PPar [PInput chan x P, POutput chan Q, ...rest])
         => (PPar [subst P x (NQuote Q), ...rest])
 }
@@ -199,7 +199,7 @@ pub enum GrammarItem {
     Terminal(String),
     NonTerminal(Ident),
     Binder { category: Ident },
-    
+
     // NEW: Collection specification
     Collection {
         coll_type: CollectionType,
@@ -223,22 +223,22 @@ impl GrammarItem {
             "HashBag" => CollectionType::HashBag,
             "HashSet" => CollectionType::HashSet,
             "Vec" => CollectionType::Vec,
-            _ => return Err(syn::Error::new(coll_type_ident.span(), 
+            _ => return Err(syn::Error::new(coll_type_ident.span(),
                 "expected HashBag, HashSet, or Vec")),
         };
-        
+
         // Parse (ElementType)
         let content;
         syn::parenthesized!(content in input);
         let element_type = content.parse::<Ident>()?;
-        
+
         // Parse sep "separator"
         let sep_kw = input.parse::<Ident>()?;
         if sep_kw != "sep" {
             return Err(syn::Error::new(sep_kw.span(), "expected 'sep'"));
         }
         let separator: syn::LitStr = input.parse()?;
-        
+
         // Optional: delim "open" "close"
         let delimiters = if input.peek(Ident) && input.peek2(syn::LitStr) {
             let delim_kw = input.parse::<Ident>()?;
@@ -251,7 +251,7 @@ impl GrammarItem {
         } else {
             None
         };
-        
+
         Ok(GrammarItem::Collection {
             coll_type,
             element_type,
@@ -272,7 +272,7 @@ use std::hash::{Hash, BuildHasherDefault};
 use rustc_hash::FxHasher;
 
 /// Multiset (bag) - unordered collection with duplicates
-/// 
+///
 /// Uses HashMap to track element counts efficiently.
 /// Equality is based on element counts (order-independent).
 #[derive(Clone, Debug)]
@@ -288,7 +288,7 @@ impl<T: Clone + Hash + Eq> HashBag<T> {
             total_count: 0,
         }
     }
-    
+
     pub fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
         let mut bag = Self::new();
         for item in iter {
@@ -296,12 +296,12 @@ impl<T: Clone + Hash + Eq> HashBag<T> {
         }
         bag
     }
-    
+
     pub fn insert(&mut self, item: T) {
         *self.counts.entry(item).or_insert(0) += 1;
         self.total_count += 1;
     }
-    
+
     pub fn remove(&mut self, item: &T) -> bool {
         if let Some(count) = self.counts.get_mut(item) {
             *count -= 1;
@@ -314,28 +314,28 @@ impl<T: Clone + Hash + Eq> HashBag<T> {
             false
         }
     }
-    
+
     pub fn contains(&self, item: &T) -> bool {
         self.counts.contains_key(item)
     }
-    
+
     pub fn count(&self, item: &T) -> usize {
         self.counts.get(item).copied().unwrap_or(0)
     }
-    
+
     pub fn len(&self) -> usize {
         self.total_count
     }
-    
+
     pub fn is_empty(&self) -> bool {
         self.total_count == 0
     }
-    
+
     /// Iterator over (element, count) pairs
     pub fn iter(&self) -> impl Iterator<Item = (&T, usize)> {
         self.counts.iter().map(|(k, &v)| (k, v))
     }
-    
+
     /// Iterator that yields each element `count` times
     pub fn iter_elements(&self) -> impl Iterator<Item = &T> {
         self.counts.iter().flat_map(|(k, &count)| {
@@ -347,7 +347,7 @@ impl<T: Clone + Hash + Eq> HashBag<T> {
 // PartialEq: compare by element counts
 impl<T: Clone + Hash + Eq> PartialEq for HashBag<T> {
     fn eq(&self, other: &Self) -> bool {
-        self.total_count == other.total_count && 
+        self.total_count == other.total_count &&
         self.counts == other.counts
     }
 }
@@ -359,11 +359,11 @@ impl<T: Clone + Hash + Eq> Hash for HashBag<T> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         // Hash count first
         self.total_count.hash(state);
-        
+
         // Collect and sort entries for deterministic hashing
         let mut entries: Vec<_> = self.counts.iter().collect();
         entries.sort_by_key(|(k, _)| format!("{:?}", k));
-        
+
         for (elem, &count) in entries {
             elem.hash(state);
             count.hash(state);
@@ -417,26 +417,26 @@ where
         }
         true
     }
-    
+
     fn close_term(&mut self, state: ScopeState, on_free: &impl OnFreeFn<N>) {
         // Close each unique element
         for (elem, _) in self.counts.iter_mut() {
             elem.close_term(state, on_free);
         }
     }
-    
+
     fn open_term(&mut self, state: ScopeState, on_bound: &impl OnBoundFn<N>) {
         for (elem, _) in self.counts.iter_mut() {
             elem.open_term(state, on_bound);
         }
     }
-    
+
     fn visit_vars(&self, on_var: &mut impl FnMut(&Var<N>)) {
         for (elem, _) in self.iter() {
             elem.visit_vars(on_var);
         }
     }
-    
+
     fn visit_mut_vars(&mut self, on_var: &mut impl FnMut(&mut Var<N>)) {
         for (elem, _) in self.counts.iter_mut() {
             elem.visit_mut_vars(on_var);
@@ -465,8 +465,8 @@ impl<T: Clone + Hash + Eq> FromIterator<T> for HashBag<T> {
 
 ### Overview
 
-**Total Duration**: 10-12 days  
-**Phases**: 5 major milestones  
+**Total Duration**: 10-12 days
+**Phases**: 5 major milestones
 **Approach**: Bottom-up (runtime → AST → codegen → parser → rewrites)
 
 ### Phase 1: Runtime Foundation (Days 1-2)
@@ -480,17 +480,17 @@ impl<T: Clone + Hash + Eq> FromIterator<T> for HashBag<T> {
    - [ ] Methods: `new`, `insert`, `remove`, `contains`, `count`, `len`, `is_empty`
    - [ ] Iterators: `iter()` (element, count), `iter_elements()` (flattened)
    - [ ] Trait implementations: `Clone`, `Debug`, `Default`, `FromIterator`
-   
+
 2. **Trait Implementations** (Day 1-2)
    - [ ] `PartialEq` + `Eq` - multiset equality
    - [ ] `Hash` - deterministic hashing
    - [ ] `PartialOrd` + `Ord` - lexicographic ordering
    - [ ] `BoundTerm<N>` - integration with `moniker` for substitution
-   
+
 3. **HashSet & Vec Wrappers** (Day 2)
    - [ ] Newtype wrappers if needed for trait consistency
    - [ ] Same trait implementations as `HashBag`
-   
+
 4. **Testing** (Day 2)
    - [ ] Unit tests for all operations
    - [ ] Property tests (commutativity, associativity automatic)
@@ -511,20 +511,20 @@ impl<T: Clone + Hash + Eq> FromIterator<T> for HashBag<T> {
    - [ ] Add `CollectionType` enum to `ast.rs`
    - [ ] Extend `GrammarItem` with `Collection` variant
    - [ ] Update `GrammarRule` to handle collection items
-   
+
 2. **Parsing Collection Specs** (Day 3)
    - [ ] Parse `HashBag(Cat) sep "sep"` syntax
    - [ ] Parse optional `delim "open" "close"`
    - [ ] Validate element type exists in theory
    - [ ] Error messages for malformed specs
-   
+
 3. **Validation** (Day 4)
    - [ ] Check element category is valid
    - [ ] Check separator is not empty
    - [ ] Check delimiters are not empty if specified
    - [ ] Check collection constructor has exactly one item
    - [ ] Warn if collection used with binders (unsupported in Phase 1-3)
-   
+
 4. **Testing** (Day 4)
    - [ ] Parse various collection specs
    - [ ] Test error cases (invalid category, empty sep, etc.)
@@ -550,7 +550,7 @@ impl<T: Clone + Hash + Eq> FromIterator<T> for HashBag<T> {
      ```
    - [ ] Handle `HashBag`, `HashSet`, `Vec` types
    - [ ] Ensure `#[derive(Clone, Debug, PartialEq, Eq, Hash, Ord)]` works
-   
+
 2. **Display Generation** (`display_gen.rs`) (Day 5-6)
    - [ ] Detect collection fields in enum variants
    - [ ] Generate display with separator
@@ -562,7 +562,7 @@ impl<T: Clone + Hash + Eq> FromIterator<T> for HashBag<T> {
      ```
    - [ ] Handle delimiters if specified
    - [ ] Handle empty collections (normalize to zero constructor if exists)
-   
+
 3. **Substitution Generation** (`subst_gen.rs`) (Day 6)
    - [ ] Detect collection fields
    - [ ] Generate recursive substitution
@@ -577,7 +577,7 @@ impl<T: Clone + Hash + Eq> FromIterator<T> for HashBag<T> {
      }
      ```
    - [ ] Test substitution preserves multiset structure
-   
+
 4. **Auto-Normalization** (Day 7)
    - [ ] Detect zero constructor (e.g., `PZero`)
    - [ ] Generate normalization in constructors/destructors
@@ -586,7 +586,7 @@ impl<T: Clone + Hash + Eq> FromIterator<T> for HashBag<T> {
          pub fn normalize(self) -> Self {
              match self {
                  Proc::PPar(bag) if bag.is_empty() => Proc::PZero,
-                 Proc::PPar(bag) if bag.len() == 1 => 
+                 Proc::PPar(bag) if bag.len() == 1 =>
                      bag.iter_elements().next().unwrap().clone(),
                  _ => self,
              }
@@ -594,7 +594,7 @@ impl<T: Clone + Hash + Eq> FromIterator<T> for HashBag<T> {
      }
      ```
    - [ ] Optionally auto-normalize in `substitute` and rewrites
-   
+
 5. **Testing** (Day 7)
    - [ ] Generate code for test theories
    - [ ] Verify enum variants correct
@@ -625,18 +625,18 @@ impl<T: Clone + Hash + Eq> FromIterator<T> for HashBag<T> {
      ```
    - [ ] Handle delimiters if specified
    - [ ] Generate at appropriate precedence tier
-   
+
 2. **Precedence Handling** (Day 8)
    - [ ] Collection separator gets lowest precedence (per user request)
    - [ ] Place collection rules at `TierN` (lowest)
    - [ ] Other operators parse at higher tiers
    - [ ] Test: `a | b * c` parses as `bag[a, (b * c)]`
-   
+
 3. **Empty Collection Handling** (Day 9)
    - [ ] Parse empty delimited collections: `[]`, `{}`
    - [ ] Generate: `HashBag::new()` or normalize to zero
    - [ ] Test empty collection parsing
-   
+
 4. **Testing** (Day 9)
    - [ ] Parse `a | b | c` → `HashBag([a, b, c])`
    - [ ] Parse `[a, b, c]` if delimiters specified
@@ -686,7 +686,7 @@ For rewrite rules to work with collections, we need to support **partial matchin
 2. **Parser Extension**: Recognize `...rest` in equation/rewrite LHS
    - Parse `{P, Q, ...rest}` in `parse_expr`
    - Validate rest appears at most once per collection
-   
+
 3. **Ascent Generation**: Generate Ascent clauses for partial matching
    ```rust
    // For: ({P, ...rest}) => P
@@ -700,7 +700,7 @@ For rewrite rules to work with collections, we need to support **partial matchin
        let t = p;
    ```
 
-4. **Congruence for Rest Patterns**: 
+4. **Congruence for Rest Patterns**:
    - Collections with rest patterns DON'T get automatic congruence
    - User must explicitly write structural rules
    - This prevents infinite rewrite chains
@@ -712,13 +712,13 @@ For rewrite rules to work with collections, we need to support **partial matchin
    - [ ] Test equality in Ascent: `proc(PPar([a,b]))`, `proc(PPar([b,a]))` → same fact
    - [ ] Test `eqrel` with collections
    - [ ] Measure performance improvement
-   
+
 2. **Equation Generation** (`ascent_gen.rs`) (Day 10)
    - [ ] Detect collection constructors
    - [ ] Skip generating AC equations (they're implicit)
    - [ ] Generate identity equations if zero constructor exists
    - [ ] Test generated Ascent code compiles
-   
+
 3. **Rest Pattern Implementation** (Day 11) **← NEW**
    - [ ] Extend `Expr` AST with `CollectionPattern`
    - [ ] Extend parser to recognize `...rest` syntax
@@ -727,27 +727,27 @@ For rewrite rules to work with collections, we need to support **partial matchin
    - [ ] Test: `({P, ...rest}) => P` extracts one element
    - [ ] Test: `({P, Q, ...rest}) => P` with multiple elements
    - [ ] Test: empty rest (`...rest` binds to empty HashBag)
-   
+
 4. **Rewrite Compatibility** (Day 11-12)
    - [ ] Test existing rewrites still work
    - [ ] Collections in rewrite patterns (basic support)
    - [ ] Rest patterns in rhocalc structural rules
    - [ ] Ensure freshness checks work
    - [ ] Ensure substitution in RHS works
-   
+
 5. **Benchmark Suite** (Day 12)
    - [ ] Create rhocalc with collection-based `PPar`
    - [ ] Benchmark: depth-3, depth-6, depth-9 terms
    - [ ] Compare: binary PPar vs. HashBag PPar
    - [ ] Measure: rewrites/second, memory usage
    - [ ] Target: 100x speedup
-   
+
 5. **Migration Example** (Day 12)
    - [ ] Convert `rhocalc.rs` to use collections
    - [ ] Document changes needed
    - [ ] Create migration guide
    - [ ] Verify all tests pass
-   
+
 6. **Documentation** (Day 12)
    - [ ] Update README with collection types
    - [ ] Write collection types tutorial
@@ -767,7 +767,7 @@ For rewrite rules to work with collections, we need to support **partial matchin
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn hashbag_insert_count() {
         let mut bag = HashBag::new();
@@ -778,22 +778,22 @@ mod tests {
         assert_eq!(bag.count(&"b"), 1);
         assert_eq!(bag.len(), 3);
     }
-    
+
     #[test]
     fn hashbag_equality_order_independent() {
         let mut bag1 = HashBag::new();
         bag1.insert("a");
         bag1.insert("b");
         bag1.insert("c");
-        
+
         let mut bag2 = HashBag::new();
         bag2.insert("c");
         bag2.insert("a");
         bag2.insert("b");
-        
+
         assert_eq!(bag1, bag2);
     }
-    
+
     #[test]
     fn hashbag_remove() {
         let mut bag = HashBag::new();
@@ -849,14 +849,14 @@ fn rhocalc_with_collections() {
     mettail_runtime::clear_var_cache();
     let parser = rhocalc::ProcParser::new();
     let proc = parser.parse(rdx_str).unwrap();
-    
+
     // Verify it's a PPar with HashBag
     if let Proc::PPar(bag) = proc {
         assert_eq!(bag.len(), 3);
     } else {
         panic!("Expected PPar");
     }
-    
+
     // Verify display
     let displayed = format!("{}", proc);
     let reparsed = parser.parse(&displayed).unwrap();
@@ -884,7 +884,7 @@ fn benchmark_hashbag_ppar(c: &mut Criterion) {
     c.bench_function("HashBag PPar depth 6", |b| {
         b.iter(|| {
             // Generate depth-6 term with HashBag PPar
-            // Run rewrites  
+            // Run rewrites
             // Measure time
         });
     });
@@ -909,9 +909,9 @@ criterion_main!(benches);
 - Depth 9: < 10 seconds (**30x+ faster**)
 
 ### Success Criteria
-✅ **100x speedup** for depth-6 terms  
-✅ **Linear scaling** with term size (not exponential)  
-✅ **Memory usage** < 100MB for large programs  
+✅ **100x speedup** for depth-6 terms
+✅ **Linear scaling** with term size (not exponential)
+✅ **Memory usage** < 100MB for large programs
 ✅ **Zero regressions** for non-collection theories
 
 ---
@@ -993,7 +993,7 @@ PPar . Proc ::= HashBag(Proc) sep "|" ;
 
 ---
 
-**Status**: Ready to begin implementation  
-**Start Date**: TBD  
-**Expected Completion**: 10-12 days from start  
+**Status**: Ready to begin implementation
+**Start Date**: TBD
+**Expected Completion**: 10-12 days from start
 **Target Performance**: 100x speedup for complex terms

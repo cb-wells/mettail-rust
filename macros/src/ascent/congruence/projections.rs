@@ -1,15 +1,27 @@
-use crate::ast::{TheoryDef, Expr, GrammarItem};
+#![allow(
+    clippy::cmp_owned,
+    clippy::too_many_arguments,
+    clippy::needless_borrow,
+    clippy::for_kv_map,
+    clippy::let_and_return,
+    clippy::unused_enumerate_index,
+    clippy::expect_fun_call,
+    clippy::collapsible_match,
+    clippy::unwrap_or_default,
+    clippy::unnecessary_filter_map
+)]
+
 use super::analysis::{
-    CollectionCongruenceInfo,
-    ElementPatternInfo,
-    CaptureInfo,
-    find_base_rewrites_for_category,
-    extract_element_patterns_from_base_rewrite,
-    extract_variable_categories,
+    extract_element_patterns_from_base_rewrite, extract_variable_categories,
+    find_base_rewrites_for_category, CaptureInfo, CollectionCongruenceInfo, ElementPatternInfo,
 };
-use super::regular::{RegularCongruencePattern, extract_regular_congruence_pattern, find_regular_congruences_for_category};
+use super::regular::{
+    extract_regular_congruence_pattern, find_regular_congruences_for_category,
+    RegularCongruencePattern,
+};
+use crate::ast::{Expr, GrammarItem, TheoryDef};
 use proc_macro2::TokenStream;
-use quote::{quote, format_ident};
+use quote::{format_ident, quote};
 use syn::Ident;
 
 /// Generate projection relation declaration
@@ -35,13 +47,14 @@ pub fn generate_binding_proj_population(
     _binder_idx: usize,
 ) -> TokenStream {
     let cat_lower = format_ident!("{}", parent_cat.to_string().to_lowercase());
-    
+
     // Count non-terminal fields
-    let field_count = rule.items
+    let field_count = rule
+        .items
         .iter()
         .filter(|item| matches!(item, crate::ast::GrammarItem::NonTerminal(_)))
         .count();
-    
+
     if field_count == 1 {
         // Simple case: only the scope field (common for PNew)
         // IMPORTANT: Access unsafe_body field directly instead of unbind() to avoid fresh IDs
@@ -76,26 +89,24 @@ pub fn generate_congruence_projections(
     theory: &TheoryDef,
 ) -> (Vec<TokenStream>, Vec<Vec<ElementPatternInfo>>) {
     let mut projections = Vec::new();
-    
+
     // Find all base rewrites that involve this element category
     let base_rewrites = find_base_rewrites_for_category(&cong_info.element_category, theory);
-    
+
     // Find all regular congruences on this element category
-    let regular_congruences = find_regular_congruences_for_category(&cong_info.element_category, theory);
-    
+    let regular_congruences =
+        find_regular_congruences_for_category(&cong_info.element_category, theory);
+
     // Generate projections for base rewrites
     let mut updated_base_patterns: Vec<Vec<ElementPatternInfo>> = Vec::new();
-    
+
     for (base_idx, base_rule) in base_rewrites.iter().enumerate() {
         // Extract element patterns from the base rewrite's LHS
-        let element_patterns = extract_element_patterns_from_base_rewrite(
-            &base_rule.left,
-            cong_info,
-            theory
-        );
-        
+        let element_patterns =
+            extract_element_patterns_from_base_rewrite(&base_rule.left, cong_info, theory);
+
         let mut updated_patterns_for_base = Vec::new();
-        
+
         // Generate projection for each element pattern
         // Pass the base_rule so we can access the full LHS for nested pattern matching
         for (pat_idx, pattern) in element_patterns.iter().enumerate() {
@@ -105,7 +116,7 @@ pub fn generate_congruence_projections(
                 pat_idx,
                 cong_info,
                 pattern,
-                &base_rule.left,  // Pass the full LHS for nested pattern extraction
+                &base_rule.left, // Pass the full LHS for nested pattern extraction
                 theory,
             );
             projections.extend(proj);
@@ -113,26 +124,21 @@ pub fn generate_congruence_projections(
         }
         updated_base_patterns.push(updated_patterns_for_base);
     }
-    
+
     // Generate projections for regular congruences
     for (reg_idx, reg_cong) in regular_congruences.iter().enumerate() {
         if let Some(pattern) = extract_regular_congruence_pattern(reg_cong, theory) {
             let proj = generate_regular_congruence_projection(
-                cong_idx,
-                reg_idx,
-                cong_info,
-                &pattern,
-                theory,
+                cong_idx, reg_idx, cong_info, &pattern, theory,
             );
             projections.extend(proj);
         }
     }
-    
+
     (projections, updated_base_patterns)
 }
 
-
-/// Generate projection relation and population rule for a base rewrite pattern  
+/// Generate projection relation and population rule for a base rewrite pattern
 /// Returns (generated code, updated pattern with captures)
 fn generate_base_rewrite_projection(
     cong_idx: usize,
@@ -140,14 +146,14 @@ fn generate_base_rewrite_projection(
     pat_idx: usize,
     cong_info: &CollectionCongruenceInfo,
     pattern: &ElementPatternInfo,
-    base_lhs: &Expr,  // Full LHS of the base rewrite for nested pattern matching
+    base_lhs: &Expr, // Full LHS of the base rewrite for nested pattern matching
     theory: &TheoryDef,
 ) -> (Vec<TokenStream>, ElementPatternInfo) {
-    use std::collections::HashMap;
     use crate::ascent::rewrites;
-    
+    use std::collections::HashMap;
+
     let mut result = Vec::new();
-    
+
     // Generate relation name: constructor_proj_c{cong}_b{base}_p{pattern}
     let rel_name = format_ident!(
         "{}_proj_c{}_b{}_p{}",
@@ -156,24 +162,24 @@ fn generate_base_rewrite_projection(
         base_idx,
         pat_idx
     );
-    
+
     let parent_cat = &cong_info.parent_category;
     let parent_cat_lower = format_ident!("{}", parent_cat.to_string().to_lowercase());
     let elem_cat = &cong_info.element_category;
     let collection_constructor = &cong_info.constructor;
-    
+
     // For nested patterns, generate full pattern matching using existing logic
     if pattern.is_nested {
         // Get the expression to match - either from the pattern itself or from base_lhs
         let pattern_expr = pattern.expr.as_ref().unwrap_or(base_lhs);
-        
+
         // Use the rewrite_gen pattern matching to extract variables from nested structure
         let mut bindings: HashMap<String, TokenStream> = HashMap::new();
         let mut variable_categories: HashMap<String, Ident> = HashMap::new();
         let mut clauses = Vec::new();
         let mut equational_checks = Vec::new();
-        let duplicate_vars = std::collections::HashSet::new();  // No duplicates in single pattern
-        
+        let duplicate_vars = std::collections::HashSet::new(); // No duplicates in single pattern
+
         // Generate pattern matching clauses for the element expression
         let elem_ident = format_ident!("elem");
         rewrites::generate_ascent_pattern(
@@ -187,26 +193,27 @@ fn generate_base_rewrite_projection(
             &duplicate_vars,
             &mut equational_checks,
         );
-        
+
         // Build relation signature from bindings
         let mut field_types = vec![quote! { #parent_cat }];
         let mut rel_fields = vec![quote! { parent.clone() }];
         let mut binding_vars = Vec::new();
-        
+
         // We need to infer categories from the pattern expression
         // Extract variables and their categories from the expression
         let var_categories = extract_variable_categories(pattern_expr, theory);
-        
+
         // Also build a map for RHS reconstruction and detect rest variables
         let mut rhs_bindings = HashMap::new();
-        let mut nested_rest_vars = Vec::new();  // Rest variables from nested patterns
-        
+        let mut nested_rest_vars = Vec::new(); // Rest variables from nested patterns
+
         for (var_name, binding_ts) in &bindings {
             let var_ident = format_ident!("{}", var_name.to_lowercase());
             // Try to get category from variable_categories (for duplicates) or infer from var_categories
-            let cat = variable_categories.get(var_name)
+            let cat = variable_categories
+                .get(var_name)
                 .or_else(|| var_categories.get(var_name));
-            
+
             if let Some(cat) = cat {
                 // This is a regular capture variable
                 field_types.push(quote! { #cat });
@@ -222,41 +229,46 @@ fn generate_base_rewrite_projection(
                 let rest_binding_with_clone = quote! { (#binding_ts).clone() };
                 binding_vars.push((var_ident.clone(), binding_ts.clone()));
                 nested_rest_vars.push(var_name.clone());
-                
+
                 // For RHS reconstruction, use the cloned version
                 rhs_bindings.insert(var_name.clone(), rest_binding_with_clone);
-                continue;  // Skip the general rhs_bindings insert below
+                continue; // Skip the general rhs_bindings insert below
             }
-            
+
             // For RHS reconstruction, include ALL variables (including rest)
             rhs_bindings.insert(var_name.clone(), quote! { #var_ident.clone() });
         }
         field_types.push(quote! { #elem_cat });
         rel_fields.push(quote! { elem.clone() });
-        
+
         // Add rest bag to signature if rest variable present
         if let Some(rest_var) = &pattern.rest_var {
             field_types.push(quote! { mettail_runtime::HashBag<#elem_cat> });
             let rest_ident = format_ident!("rest_{}", rest_var.to_string().to_lowercase());
             rel_fields.push(quote! { #rest_ident.clone() });
         }
-        
+
         let rel_decl = quote! {
             relation #rel_name(#(#field_types),*);
         };
-        
+
         // Generate let bindings for captured variables (excluding rest)
         let rest_var_name = pattern.rest_var.as_ref().map(|v| v.to_string());
-        let capture_bindings: Vec<_> = binding_vars.iter()
+        let capture_bindings: Vec<_> = binding_vars
+            .iter()
             .filter(|(var_ident, _)| {
                 // Exclude rest variable from capture bindings
-                Some(var_ident.to_string().as_str()) != rest_var_name.as_deref().map(|s| s.to_lowercase()).as_deref()
+                Some(var_ident.to_string().as_str())
+                    != rest_var_name
+                        .as_deref()
+                        .map(|s| s.to_lowercase())
+                        .as_deref()
             })
             .map(|(var_ident, binding)| {
                 quote! { let #var_ident = #binding }
             })
             .collect();
-        
+
         // Generate rest bag computation if needed
         let rest_computation = if let Some(rest_var) = &pattern.rest_var {
             let rest_ident = format_ident!("rest_{}", rest_var.to_string().to_lowercase());
@@ -270,7 +282,7 @@ fn generate_base_rewrite_projection(
         } else {
             quote! {}
         };
-        
+
         let population_rule = quote! {
             #rel_name(#(#rel_fields),*) <--
                 #parent_cat_lower(parent),
@@ -280,44 +292,47 @@ fn generate_base_rewrite_projection(
                 #(#capture_bindings),*
                 #rest_computation;
         };
-        
+
         // Build updated pattern with extracted captures
         // Use the order from bindings to ensure consistent ordering with projection signature
         // Include both regular captures and rest variables (rest variables have no category in variable_categories)
-        let updated_captures: Vec<CaptureInfo> = bindings.keys()
+        let updated_captures: Vec<CaptureInfo> = bindings
+            .keys()
             .filter_map(|var_name| {
                 // Try to get category - if found, it's a regular capture; if not, it's a rest variable
-                let cat_opt = variable_categories.get(var_name)
+                let cat_opt = variable_categories
+                    .get(var_name)
                     .or_else(|| var_categories.get(var_name));
-                
+
                 if let Some(cat) = cat_opt {
                     // Regular capture
                     Some(CaptureInfo {
                         var_name: var_name.clone(),
                         category: cat.clone(),
-                        field_idx: 0,  // Not used for nested patterns
-                        is_binder: false,  // TODO: detect binders properly
+                        field_idx: 0,     // Not used for nested patterns
+                        is_binder: false, // TODO: detect binders properly
                     })
                 } else {
                     // Rest variable - include it with elem_cat as placeholder (actual type is HashBag<elem_cat>)
                     // Use field_idx = usize::MAX as a marker that this is a rest variable
                     Some(CaptureInfo {
                         var_name: var_name.clone(),
-                        category: elem_cat.clone(),  // Placeholder - actual type is HashBag<elem_cat>
-                        field_idx: usize::MAX,  // Marker for rest variable
+                        category: elem_cat.clone(), // Placeholder - actual type is HashBag<elem_cat>
+                        field_idx: usize::MAX,      // Marker for rest variable
                         is_binder: false,
                     })
                 }
-            }).collect();
-        
+            })
+            .collect();
+
         let mut updated_pattern = pattern.clone();
         updated_pattern.captures = updated_captures;
-        
+
         result.push(rel_decl);
         result.push(population_rule);
         return (result, updated_pattern);
     }
-    
+
     // Build relation signature: (Parent, Capture1, Capture2, ..., Element, Rest?)
     let mut field_types = vec![quote! { #parent_cat }];
     for capture in &pattern.captures {
@@ -329,27 +344,28 @@ fn generate_base_rewrite_projection(
         }
     }
     field_types.push(quote! { #elem_cat });
-    
+
     // Add rest bag to signature if rest variable present
     if pattern.rest_var.is_some() {
         field_types.push(quote! { mettail_runtime::HashBag<#elem_cat> });
     }
-    
+
     // Generate relation declaration
     let rel_decl = quote! {
         relation #rel_name(#(#field_types),*);
     };
-    
+
     // Generate population rule
-    let parent_cat_lower = format_ident!("{}", cong_info.parent_category.to_string().to_lowercase());
+    let parent_cat_lower =
+        format_ident!("{}", cong_info.parent_category.to_string().to_lowercase());
     let collection_constructor = &cong_info.constructor;
     let parent_cat = &cong_info.parent_category;
     let elem_constructor = &pattern.constructor;
     let elem_cat = &pattern.category;
-    
+
     // Generate field pattern matching and capture extraction
     let (field_patterns, capture_bindings) = generate_field_extraction(pattern);
-    
+
     // Generate relation tuple
     let mut rel_fields = vec![quote! { parent.clone() }];
     for capture in &pattern.captures {
@@ -357,13 +373,13 @@ fn generate_base_rewrite_projection(
         rel_fields.push(quote! { #cap_name.clone() });
     }
     rel_fields.push(quote! { elem.clone() });
-    
+
     // Add rest bag to relation tuple if present
     if let Some(rest_var) = &pattern.rest_var {
         let rest_ident = format_ident!("rest_{}", rest_var.to_string().to_lowercase());
         rel_fields.push(quote! { #rest_ident.clone() });
     }
-    
+
     // Generate rest bag computation if needed
     let rest_computation = if let Some(rest_var) = &pattern.rest_var {
         let rest_ident = format_ident!("rest_{}", rest_var.to_string().to_lowercase());
@@ -377,7 +393,7 @@ fn generate_base_rewrite_projection(
     } else {
         quote! {}
     };
-    
+
     // Generate the population rule with conditional capture bindings
     let population_rule = if pattern.captures.is_empty() {
         // No captures - simpler pattern without bindings
@@ -401,7 +417,7 @@ fn generate_base_rewrite_projection(
                 #rest_computation;
         }
     };
-    
+
     result.push(rel_decl);
     result.push(population_rule);
     (result, pattern.clone())
@@ -411,33 +427,34 @@ fn generate_base_rewrite_projection(
 fn generate_field_extraction(pattern: &ElementPatternInfo) -> (TokenStream, TokenStream) {
     let mut field_patterns = Vec::new();
     let mut capture_bindings = Vec::new();
-    
+
     // Group captures by field index
-    let mut field_to_captures: std::collections::HashMap<usize, Vec<&CaptureInfo>> = 
+    let mut field_to_captures: std::collections::HashMap<usize, Vec<&CaptureInfo>> =
         std::collections::HashMap::new();
-    
+
     for capture in &pattern.captures {
-        field_to_captures.entry(capture.field_idx)
+        field_to_captures
+            .entry(capture.field_idx)
             .or_insert_with(Vec::new)
             .push(capture);
     }
-    
+
     // Get all unique field indices and sort
     let mut field_indices: Vec<usize> = field_to_captures.keys().copied().collect();
     field_indices.sort();
-    
+
     // Generate patterns and bindings for each field
     for (pattern_idx, &field_idx) in field_indices.iter().enumerate() {
         let field_name = format_ident!("f{}", pattern_idx);
         field_patterns.push(quote! { ref #field_name });
-        
+
         let captures_for_field = &field_to_captures[&field_idx];
-        
+
         // Check if this is a binder field (has a binder capture)
         if let Some(binder_capture) = captures_for_field.iter().find(|c| c.is_binder) {
             // This is a scope field - access unsafe fields directly to preserve bound variables
             let binder_name = format_ident!("cap_{}", binder_capture.var_name.to_lowercase());
-            
+
             // Find the body capture (should be at the same field index, non-binder)
             if let Some(body_capture) = captures_for_field.iter().find(|c| !c.is_binder) {
                 let body_name = format_ident!("cap_{}", body_capture.var_name.to_lowercase());
@@ -464,10 +481,10 @@ fn generate_field_extraction(pattern: &ElementPatternInfo) -> (TokenStream, Toke
             }
         }
     }
-    
+
     let field_pattern = quote! { #(#field_patterns),* };
     let bindings = quote! { #(#capture_bindings),* };
-    
+
     (field_pattern, bindings)
 }
 
@@ -482,42 +499,44 @@ fn generate_regular_congruence_projection(
     theory: &TheoryDef,
 ) -> Vec<TokenStream> {
     let mut result = Vec::new();
-    
+
     let rel_name = format_ident!(
         "{}_proj_c{}_r{}",
         pattern.constructor.to_string().to_lowercase(),
         cong_idx,
         reg_idx
     );
-    
+
     let parent_cat = &cong_info.parent_category;
     let parent_cat_lower = format_ident!("{}", parent_cat.to_string().to_lowercase());
     let collection_constructor = &cong_info.constructor;
     let elem_constructor = &pattern.constructor;
     let elem_cat = &pattern.category;
-    
+
     // Build relation signature based on whether it's a binding constructor
     let mut field_types = vec![quote! { #parent_cat }];
-    
-    let grammar_rule = theory.terms.iter()
+
+    let grammar_rule = theory
+        .terms
+        .iter()
         .find(|r| r.label == pattern.constructor)
         .expect("Constructor not found");
-    
+
     // Add binder field if this is a binding constructor
     if pattern.is_binding {
         field_types.push(quote! { mettail_runtime::Binder<String> });
     }
-    
+
     // Add the rewrite field (the body that can be rewritten)
     field_types.push(quote! { #elem_cat });
-    
+
     // Add the original element
     field_types.push(quote! { #elem_cat });
-    
+
     let rel_decl = quote! {
         relation #rel_name(#(#field_types),*);
     };
-    
+
     // Generate extraction based on whether it's a binding constructor
     let extraction = if pattern.is_binding {
         // Binding constructor: extract scope and access unsafe fields directly to preserve bound variables
@@ -531,7 +550,12 @@ fn generate_regular_congruence_projection(
         let field_idx = pattern.rewrite_field_idx;
         // Generate field pattern with the rewrite field
         let mut field_pats = Vec::new();
-        for i in 0..grammar_rule.items.iter().filter(|item| !matches!(item, GrammarItem::Terminal(_))).count() {
+        for i in 0..grammar_rule
+            .items
+            .iter()
+            .filter(|item| !matches!(item, GrammarItem::Terminal(_)))
+            .count()
+        {
             if i == field_idx {
                 field_pats.push(quote! { ref rewrite_field_box });
             } else {
@@ -539,28 +563,28 @@ fn generate_regular_congruence_projection(
                 field_pats.push(quote! { #other_field });
             }
         }
-        
+
         quote! {
             if let #elem_cat::#elem_constructor(#(#field_pats),*) = elem,
             let rewrite_field = (**rewrite_field_box).clone()
         }
     };
-    
+
     let rel_fields: Vec<TokenStream> = if pattern.is_binding {
         vec![
             quote! { parent.clone() },
             quote! { binder_var.clone() },
             quote! { rewrite_field.clone() },
-            quote! { elem.clone() }
+            quote! { elem.clone() },
         ]
     } else {
         vec![
             quote! { parent.clone() },
             quote! { rewrite_field.clone() },
-            quote! { elem.clone() }
+            quote! { elem.clone() },
         ]
     };
-    
+
     let population_rule = quote! {
         #rel_name(#(#rel_fields),*) <--
             #parent_cat_lower(parent),
@@ -568,7 +592,7 @@ fn generate_regular_congruence_projection(
             for (elem, _count) in bag_field.iter(),
             #extraction;
     };
-    
+
     result.push(rel_decl);
     result.push(population_rule);
     result

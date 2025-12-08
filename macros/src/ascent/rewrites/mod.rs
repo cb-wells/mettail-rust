@@ -1,5 +1,5 @@
 //! Rewrite rule generation for Ascent
-//! 
+//!
 //! Handles:
 //! - Base rewrite rules (no premise)
 //! - Pattern matching for LHS
@@ -10,14 +10,13 @@ use crate::ast::TheoryDef;
 use proc_macro2::TokenStream;
 use quote::quote;
 
-mod patterns;
 mod clauses;
+mod patterns;
 pub mod rhs;
 
 // Re-export key functions
-pub use patterns::generate_ascent_pattern;
 pub use clauses::generate_rewrite_clauses;
-pub use rhs::{generate_ascent_rhs, generate_rhs_construction};
+pub use patterns::generate_ascent_pattern;
 
 /// Generate freshness checking functions
 pub fn generate_freshness_functions(_theory: &TheoryDef) -> TokenStream {
@@ -27,7 +26,7 @@ pub fn generate_freshness_functions(_theory: &TheoryDef) -> TokenStream {
             T: mettail_runtime::BoundTerm<String>
         {
             use mettail_runtime::BoundTerm;
-            
+
             let mut is_fresh = true;
             term.visit_vars(&mut |v| {
                 if let mettail_runtime::Var::Free(fv) = v {
@@ -36,7 +35,7 @@ pub fn generate_freshness_functions(_theory: &TheoryDef) -> TokenStream {
                     }
                 }
             });
-            
+
             is_fresh
         }
     }

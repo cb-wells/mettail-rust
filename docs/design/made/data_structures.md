@@ -1,8 +1,8 @@
 # Data Structures in MeTTaIL: Design Document
 
-**Status:** Design Phase  
-**Date:** November 3, 2025  
-**Author:** System Architecture Review  
+**Status:** Design Phase
+**Date:** November 3, 2025
+**Author:** System Architecture Review
 
 ---
 
@@ -60,11 +60,11 @@ PPar . Proc ::= multiset<Proc> ;  // HashBag of processes
 ```rust
 fn generate_variant(rule: &GrammarRule) -> TokenStream {
     let label = &rule.label;
-    
+
     if !rule.bindings.is_empty() {
         return generate_binder_variant(rule);
     }
-    
+
     let fields: Vec<_> = rule.items
         .iter()
         .filter_map(|item| match item {
@@ -72,12 +72,12 @@ fn generate_variant(rule: &GrammarRule) -> TokenStream {
             _ => None,
         })
         .collect();
-    
+
     // Generate tuple variant with Box<T> fields
     let boxed_fields: Vec<TokenStream> = fields.iter().map(|f| {
         quote! { Box<#f> }
     }).collect();
-    
+
     quote! { #label(#(#boxed_fields),*) }
 }
 ```
@@ -153,7 +153,7 @@ pub enum GrammarItem {
     Terminal(String),
     NonTerminal(Ident),
     Binder { category: Ident },
-    
+
     // NEW: Data structure types
     DataStructure {
         kind: DataStructureKind,
@@ -175,18 +175,18 @@ pub enum DataStructureKind {
 theory! {
     name: RhoCalc,
     exports { Proc, Name }
-    
+
     terms {
         PZero . Proc ::= "0" ;
-        
+
         // NEW SYNTAX: multiset<Type> for multiset fields
         PPar . Proc ::= multiset<Proc> ;
-        
+
         // Could also support:
         // PList . Proc ::= list<Proc> ;        // Vec<Proc>
         // PSet . Proc ::= set<Name> ;          // HashSet<Name>
         // PMap . Proc ::= map<Name, Proc> ;    // HashMap<Name, Proc>
-        
+
         // ... other constructors
     }
 }
@@ -205,7 +205,7 @@ while !input.peek(Token![;]) {
         // Could be binder <Name> or type parameter
         let _ = input.parse::<Token![<]>()?;
         let next = input.parse::<Ident>()?;
-        
+
         if input.peek(Token![>]) {
             // Binder: <Name>
             let _ = input.parse::<Token![>]>()?;
@@ -217,7 +217,7 @@ while !input.peek(Token![;]) {
         }
     } else if input.peek(Ident) {
         let ident = input.parse::<Ident>()?;
-        
+
         // Check if it's a data structure keyword
         let ident_str = ident.to_string();
         match ident_str.as_str() {
@@ -226,14 +226,14 @@ while !input.peek(Token![;]) {
                 let _ = input.parse::<Token![<]>()?;
                 let elem_type = input.parse::<Ident>()?;
                 let _ = input.parse::<Token![>]>()?;
-                
+
                 let kind = match ident_str.as_str() {
                     "multiset" => DataStructureKind::Multiset,
                     "list" => DataStructureKind::List,
                     "set" => DataStructureKind::Set,
                     _ => panic!("Unsupported data structure"),
                 };
-                
+
                 items.push(GrammarItem::DataStructure {
                     kind,
                     element_type: elem_type,
@@ -275,7 +275,7 @@ hashbag = "0.1"  # Or implement our own
 // In codegen.rs
 fn generate_variant(rule: &GrammarRule) -> TokenStream {
     let label = &rule.label;
-    
+
     // Check for data structures
     let fields: Vec<TokenStream> = rule.items
         .iter()
@@ -289,7 +289,7 @@ fn generate_variant(rule: &GrammarRule) -> TokenStream {
             _ => None,
         })
         .collect();
-    
+
     if fields.is_empty() {
         quote! { #label }
     } else {
@@ -370,19 +370,19 @@ Support **both** syntaxes with automatic conversion:
 // In lalrpop_gen.rs
 fn generate_rule_alternative(rule: &GrammarRule) -> String {
     let label = &rule.label;
-    
+
     // Check if this rule uses data structures
     let has_multiset = rule.items.iter().any(|item| {
-        matches!(item, GrammarItem::DataStructure { 
-            kind: DataStructureKind::Multiset, .. 
+        matches!(item, GrammarItem::DataStructure {
+            kind: DataStructureKind::Multiset, ..
         })
     });
-    
+
     if has_multiset {
         // Generate special multiset parsing rule
         return generate_multiset_alternative(rule);
     }
-    
+
     // Standard generation
     // ...
 }
@@ -390,15 +390,15 @@ fn generate_rule_alternative(rule: &GrammarRule) -> String {
 fn generate_multiset_alternative(rule: &GrammarRule) -> String {
     let label = &rule.label;
     let category = &rule.category;
-    
+
     // For PPar with multiset<Proc>:
     // Option 1: Parse delimited list
     format!(
-        r#""par" "{{" <elems:Comma<{}>> "}}" => 
+        r#""par" "{{" <elems:Comma<{}>> "}}" =>
             {}::{}(elems.into_iter().map(Box::new).collect())"#,
         category, category, label
     )
-    
+
     // Option 2: Parse infix | as multiset builder
     // This is more complex - needs custom action
 }
@@ -417,7 +417,7 @@ impl Proc {
     /// Helper: construct PPar from two processes (for backward compatibility)
     pub fn par(left: Proc, right: Proc) -> Self {
         let mut bag = hashbag::HashBag::new();
-        
+
         // Flatten if left is already PPar
         match left {
             Proc::PPar(mut sub_bag) => {
@@ -431,7 +431,7 @@ impl Proc {
                 bag.insert(Box::new(other));
             }
         }
-        
+
         // Flatten if right is already PPar
         match right {
             Proc::PPar(mut sub_bag) => {
@@ -445,7 +445,7 @@ impl Proc {
                 bag.insert(Box::new(other));
             }
         }
-        
+
         Proc::PPar(bag)
     }
 }
@@ -511,7 +511,7 @@ Provide operators for multiset manipulation:
 ```rust
 rewrites {
     // Match: extract two elements
-    if x # Q then 
+    if x # Q then
         let in = extract (PPar bag) with (PInput chan x P)
         let out = extract bag with (POutput chan Q)
         in is_some and out is_some
@@ -546,7 +546,7 @@ pub fn try_rewrite_rule_0(term: &Proc) -> Option<Proc> {
         for input_proc in bag.iter() {
             if let Proc::PInput(chan, scope_field) = &(**input_proc) {
                 let (binder, body) = scope_field.clone().unbind();
-                
+
                 // Try to find matching POutput
                 for output_proc in bag.iter() {
                     if let Proc::POutput(chan2, q) = &(**output_proc) {
@@ -554,22 +554,22 @@ pub fn try_rewrite_rule_0(term: &Proc) -> Option<Proc> {
                         if chan != chan2 {
                             continue;
                         }
-                        
+
                         // Freshness check
                         if !is_fresh(&binder, &(**q)) {
                             continue;
                         }
-                        
+
                         // Found a match! Construct result
                         let mut result_bag = bag.clone();
                         result_bag.remove(input_proc);
                         result_bag.remove(output_proc);
-                        
+
                         let substituted = (*body).clone()
                             .substitute_name(&binder.0, &Name::NQuote(q.clone()));
-                        
+
                         result_bag.insert(Box::new(substituted));
-                        
+
                         return Some(Proc::PPar(result_bag));
                     }
                 }
@@ -741,11 +741,11 @@ fn validate_theory(theory: &TheoryDef) -> Result<(), ValidationError> {
     // Check for obsolete equations
     for rule in &theory.terms {
         let has_multiset = rule.items.iter().any(|item| {
-            matches!(item, GrammarItem::DataStructure { 
-                kind: DataStructureKind::Multiset, .. 
+            matches!(item, GrammarItem::DataStructure {
+                kind: DataStructureKind::Multiset, ..
             })
         });
-        
+
         if has_multiset {
             // Check if equations reference this constructor
             for eq in &theory.equations {
@@ -758,7 +758,7 @@ fn validate_theory(theory: &TheoryDef) -> Result<(), ValidationError> {
             }
         }
     }
-    
+
     Ok(())
 }
 ```
@@ -1148,7 +1148,7 @@ PPar . Proc ::= multiset<Proc> @backend("hashbag") ;
 1. **Process Calculi Implementations**
    - Rholang: Uses multisets for parallel composition
    - Pict: Hash-based process storage
-   
+
 2. **Data Structures**
    - "Purely Functional Data Structures" (Okasaki) - persistent bags
    - "Hash Array Mapped Tries" - efficient persistent maps
@@ -1165,9 +1165,9 @@ PPar . Proc ::= multiset<Proc> @backend("hashbag") ;
 
 ---
 
-**Status:** Ready for implementation  
-**Estimated Effort:** 8-12 weeks (full multiset support)  
-**Risk Level:** Medium (major refactor but well-scoped)  
+**Status:** Ready for implementation
+**Estimated Effort:** 8-12 weeks (full multiset support)
+**Risk Level:** Medium (major refactor but well-scoped)
 **Impact:** High (enables efficient process calculus execution)
 
 

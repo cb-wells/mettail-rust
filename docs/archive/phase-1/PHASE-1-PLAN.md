@@ -4,7 +4,7 @@
 
 **Concrete Target:** Define Rho Calculus as a MeTTaIL theory with communication rewrite rules involving substitution, and successfully test it. ✅ **ACHIEVED!**
 
-**Timeline:** 4 weeks  
+**Timeline:** 4 weeks
 **Status:** ✅ **COMPLETE** (100%) - **Substitution bugs fixed, all tests passing**
 
 **Final Achievement:** Full cross-category substitution with correct recursion into all fields. The Rho Calculus communication rule `for(chan x){P} | chan!(Q) => P[@Q/x]` works correctly with proper capture-avoiding substitution.
@@ -40,7 +40,7 @@ theory! {
         (PPar P Q) == (PPar Q P)             // Commutativity
         (PPar P (PPar Q R)) == (PPar (PPar P Q) R)  // Associativity
         (PPar P PZero) == P                   // Identity
-        
+
         // Quote-drop cancellation
         if x # P then (PDrop (NQuote (PInput x P))) == P
         if x # P then (PDrop (NQuote (POutput x P))) == P
@@ -174,7 +174,7 @@ terms {
 ```rust
 rewrites {
     // Communication: for(x){P} | y!(Q) => P[@Q/x] | 0
-    if x # Q then (PPar (PInput x P) (POutput y Q)) 
+    if x # Q then (PPar (PInput x P) (POutput y Q))
         => (PPar (subst P x (NQuote Q)) PZero)
 }
 ```
@@ -546,7 +546,7 @@ nom = "7.1"  # For parser combinators
 
 1. **Parser library?** nom vs hand-rolled combinators?
    - **Proposal:** Use `nom` for proven, fast combinators
-   
+
 2. **Equation checking?** Runtime vs compile-time?
    - **Proposal:** Runtime for Phase 1, optimize later
 

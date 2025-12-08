@@ -1,7 +1,7 @@
 # Collection Types - Session Summary
 
-**Date**: November 9, 2025  
-**Session Goal**: Implement collection types (HashBag/HashSet/Vec) for MeTTaIL  
+**Date**: November 9, 2025
+**Session Goal**: Implement collection types (HashBag/HashSet/Vec) for MeTTaIL
 **Status**: **Phases 1-4 COMPLETE** 🎉 Ready for Phase 5 (Rest Patterns)
 
 ---
@@ -14,7 +14,7 @@
 - **Critical**: `BoundTerm<N>` integration for variable binding (required HashMap reconstruction)
 - 23/23 tests passing
 
-### ✅ Phase 2: AST & Grammar Extension  
+### ✅ Phase 2: AST & Grammar Extension
 - Extended `GrammarItem` with `Collection` variant
 - Added `CollectionType` enum (HashBag, HashSet, Vec)
 - Syntax: `HashBag(Proc) sep "|" delim "{" "}"`
@@ -39,7 +39,7 @@
 
 ## Key Technical Decisions
 
-1. **HashBag over Binary Cons**: 
+1. **HashBag over Binary Cons**:
    - AC operations become O(1) equality checks instead of exponential congruence
    - Target: 100x speedup for rhocalc
 
@@ -111,7 +111,7 @@ let fields: Vec<(String, Option<&syn::Ident>)> = rule.items
 ### Passing ✅
 - **Runtime**: 23/23 tests
 - **AST**: Collection parsing works
-- **Codegen**: All generators handle collections  
+- **Codegen**: All generators handle collections
 - **LALRPOP**: Parser compiles and works
 - **Display**: `{0, 0}` prints correctly
 - **Substitution**: Recursive subst works
@@ -129,7 +129,7 @@ let fields: Vec<(String, Option<&syn::Ident>)> = rule.items
 
 ### Current (Binary PPar)
 - Depth 3: ~1 second
-- Depth 6: 60-80 seconds  
+- Depth 6: 60-80 seconds
 - Depth 9: >5 minutes
 
 ### Target (HashBag PPar)
@@ -192,7 +192,7 @@ let fields: Vec<(String, Option<&syn::Ident>)> = rule.items
 
 **Immediate** (Phase 5, Day 10):
 1. Add `CollectionPattern` variant to `Expr` enum
-2. Extend parser to recognize `{..., ...rest}` syntax  
+2. Extend parser to recognize `{..., ...rest}` syntax
 3. Write validation for rest patterns
 4. Add parsing unit tests
 

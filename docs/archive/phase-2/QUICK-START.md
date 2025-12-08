@@ -1,7 +1,7 @@
 # Quick Start: Continuing Phase 2 Work
 
 ## Current Status
-✅ **Parsing tests passing:** 6/6 Rho Calculus tests  
+✅ **Parsing tests passing:** 6/6 Rho Calculus tests
 ⏳ **Next:** Precedence handling & pretty-printing
 
 ## Run Tests

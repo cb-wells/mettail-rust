@@ -26,7 +26,7 @@ Without rest patterns, we can't write rules that match "a bag containing at leas
 // Extract one element
 ({P, ...rest}) => P
 
-// Extract multiple specific elements  
+// Extract multiple specific elements
 ({P, Q, ...rest}) => (PPar P Q)
 
 // Match exact collection (no rest)
@@ -59,7 +59,7 @@ pub enum Expr {
     Var(Ident),
     Apply { constructor: Ident, args: Vec<Expr> },
     Subst { term: Box<Expr>, var: Ident, replacement: Box<Expr> },
-    
+
     // NEW: Collection pattern with rest
     CollectionPattern {
         constructor: Ident,      // PPar, etc.
@@ -81,10 +81,10 @@ fn parse_expr(input: ParseStream) -> SynResult<Expr> {
         // Collection pattern: {P, Q, ...rest}
         let content;
         syn::braced!(content in input);
-        
+
         let mut elements = Vec::new();
         let mut rest = None;
-        
+
         while !content.is_empty() {
             // Check for rest pattern
             if content.peek(Token![...]) {
@@ -95,16 +95,16 @@ fn parse_expr(input: ParseStream) -> SynResult<Expr> {
                 }
                 break;
             }
-            
+
             elements.push(parse_expr(&content)?);
-            
+
             if content.peek(Token![,]) {
                 let _ = content.parse::<Token![,]>()?;
             } else {
                 break;
             }
         }
-        
+
         // Infer constructor from context (or require explicit annotation)
         // For now, we'll need to look this up during validation
         return Ok(Expr::CollectionPattern {
@@ -113,7 +113,7 @@ fn parse_expr(input: ParseStream) -> SynResult<Expr> {
             rest,
         });
     }
-    
+
     // ... existing code for Apply, Var, etc.
 }
 ```
@@ -135,23 +135,23 @@ fn validate_collection_pattern(
                 name: constructor.to_string(),
                 span: constructor.span(),
             })?;
-        
+
         let has_collection = rule.items.iter().any(|item| {
             matches!(item, GrammarItem::Collection { .. })
         });
-        
+
         if !has_collection {
             return Err(ValidationError::InvalidCollectionPattern {
                 constructor: constructor.to_string(),
                 span: constructor.span(),
             });
         }
-        
+
         // 2. Validate element patterns recursively
         for elem in elements {
             validate_expr(elem, theory)?;
         }
-        
+
         // 3. Check rest variable doesn't shadow
         if let Some(rest_var) = rest {
             // Add to context, check for duplicates
@@ -177,12 +177,12 @@ fn generate_collection_pattern_matching(
     if let Expr::CollectionPattern { constructor, elements, rest } = pattern {
         let cat = extract_category_from_constructor(constructor);
         let cat_lower = format_ident!("{}", cat.to_string().to_lowercase());
-        
+
         // Match the constructor
         clauses.push(quote! {
             if let #cat::#constructor(bag) = #source_var
         });
-        
+
         // Check minimum size
         let min_size = elements.len();
         if min_size > 0 {
@@ -190,14 +190,14 @@ fn generate_collection_pattern_matching(
                 if bag.len() >= #min_size
             });
         }
-        
+
         // Generate matching for each specific element
         for (i, elem_pattern) in elements.iter().enumerate() {
             match elem_pattern {
                 Expr::Var(var_name) => {
                     // Bind variable to an element from the bag
                     let var_ident = format_ident!("{}", var_name.to_string());
-                    
+
                     if i == 0 {
                         // First element: take any one
                         clauses.push(quote! {
@@ -212,7 +212,7 @@ fn generate_collection_pattern_matching(
                                 .unwrap().0.clone()
                         });
                     }
-                    
+
                     bindings.insert(var_name.to_string(), quote! { #var_ident });
                 }
                 Expr::Apply { constructor: c, args } => {
@@ -224,7 +224,7 @@ fn generate_collection_pattern_matching(
                 _ => panic!("Invalid pattern in collection"),
             }
         }
-        
+
         // Bind rest variable if present
         if let Some(rest_var) = rest {
             let rest_ident = format_ident!("{}", rest_var.to_string());
@@ -236,17 +236,17 @@ fn generate_collection_pattern_matching(
                     None
                 }
             }).collect();
-            
+
             clauses.push(quote! {
                 let mut #rest_ident = bag.clone()
             });
-            
+
             for var in remove_vars {
                 clauses.push(quote! {
                     #rest_ident.remove(&#var)
                 });
             }
-            
+
             bindings.insert(rest_var.to_string(), quote! { #rest_ident });
         }
     }
@@ -265,14 +265,14 @@ Expr::CollectionPattern { constructor, elements, rest } => {
     let elem_constructions: Vec<TokenStream> = elements.iter().map(|e| {
         generate_equation_rhs(e, bindings, theory, true)
     }).collect();
-    
+
     let mut bag_construction = quote! {
         {
             let mut bag = mettail_runtime::HashBag::new();
             #(bag.insert(#elem_constructions);)*
         }
     };
-    
+
     // If rest is present, merge it in
     if let Some(rest_var) = rest {
         let rest_ident = format_ident!("{}", rest_var.to_string());
@@ -284,7 +284,7 @@ Expr::CollectionPattern { constructor, elements, rest } => {
             }
         };
     }
-    
+
     quote! {
         #constructor(#bag_construction)
     }
@@ -325,7 +325,7 @@ theory! {
     rewrites {
         // Extract one element
         ({P, ...rest}) => P ;
-        
+
         // Extract two elements
         ({P, Q, ...rest}) => ({P, Q}) ;
     }
@@ -339,7 +339,7 @@ fn test_rest_pattern_rewrite() {
         bag.insert(Proc::POne);
         bag
     });
-    
+
     // Apply rewrite - should extract one element
     let result = apply_rewrites(proc);
     // Should be either PZero or POne
@@ -360,7 +360,7 @@ theory! {
         PInput . Proc ::= "for" "(" Name "->" <Name> ")" "{" Proc "}" ;
         POutput . Proc ::= Name "!" "(" Proc ")" ;
         PDrop . Proc ::= "*" Name ;
-        
+
         NQuote . Name ::= "@" "(" Proc ")" ;
         NVar . Name ::= Var ;
     }
@@ -370,7 +370,7 @@ theory! {
     }
     rewrites {
         // COMM rule with rest patterns
-        ({(Output chan Q), (Input chan x P), ...rest}) => 
+        ({(Output chan Q), (Input chan x P), ...rest}) =>
             ({(subst P x (Quote Q)), ...rest}) ;
     }
 }
@@ -387,10 +387,10 @@ theory! {
 
 1. **Nested Patterns**: Should we support `({(PPar P Q), ...rest})`?
    - **Decision**: Phase 2 - start with variables only
-   
+
 2. **Multiple Rests**: Should we allow `{...rest1, P, ...rest2}`?
    - **Decision**: No - ambiguous and rarely needed
-   
+
 3. **Empty Rest**: Should `{P}` be sugar for `{P, ...∅}`?
    - **Decision**: Yes - makes patterns more natural
 
@@ -409,7 +409,7 @@ equations {
 }
 
 rewrites {
-    (PPar (Output chan Q) (PPar (Input chan x P) R)) => 
+    (PPar (Output chan Q) (PPar (Input chan x P) R)) =>
         (PPar (subst P x (Quote Q)) R) ;
 }
 ```
@@ -421,7 +421,7 @@ PPar . Proc ::= HashBag(Proc) sep "|" delim "{" "}" ;
 equations {}  // AC is automatic!
 
 rewrites {
-    ({(Output chan Q), (Input chan x P), ...rest}) => 
+    ({(Output chan Q), (Input chan x P), ...rest}) =>
         ({(subst P x (Quote Q)), ...rest}) ;
 }
 ```

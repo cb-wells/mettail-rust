@@ -1,13 +1,12 @@
-use crate::registry::TheoryRegistry;
-use crate::state::ReplState;
 use crate::examples::{Example, ExampleCategory, TheoryName};
 use crate::pretty::format_term_pretty;
-use crate::theory::Theory;
+use crate::registry::TheoryRegistry;
+use crate::state::ReplState;
 use anyhow::Result;
-use std::time::Instant;
 use colored::Colorize;
 use rustyline::error::ReadlineError;
 use rustyline::{DefaultEditor, Result as RustyResult};
+use std::time::Instant;
 
 /// The main REPL
 pub struct Repl {
@@ -30,44 +29,44 @@ impl Repl {
     pub fn name_str(&self) -> Option<&str> {
         self.state.theory_name().map(|name| name.as_str())
     }
-    
+
     /// Run the REPL
     pub fn run(&mut self) -> Result<()> {
         self.print_banner();
-        
+
         loop {
             let prompt = self.make_prompt();
             match self.editor.readline(&prompt) {
                 Ok(line) => {
                     self.editor.add_history_entry(&line)?;
-                    
+
                     let line = line.trim();
                     if line.is_empty() {
                         continue;
                     }
-                    
+
                     if let Err(e) = self.handle_command(line) {
                         eprintln!("{} {}", "Error:".red().bold(), e);
                     }
-                }
+                },
                 Err(ReadlineError::Interrupted) => {
                     println!("^C");
                     continue;
-                }
+                },
                 Err(ReadlineError::Eof) => {
                     println!("exit");
                     break;
-                }
+                },
                 Err(err) => {
                     eprintln!("{} {:?}", "Error:".red().bold(), err);
                     break;
-                }
+                },
             }
         }
-        
+
         Ok(())
     }
-    
+
     fn print_banner(&self) {
         println!("{}", "╔════════════════════════════════════════════════════════════╗".cyan());
         println!("{}", "║                   MeTTaIL Term Explorer                    ║".cyan());
@@ -77,7 +76,7 @@ impl Repl {
         println!("Type {} for available commands.", "'help'".green());
         println!();
     }
-    
+
     fn make_prompt(&self) -> String {
         if let Some(theory_name) = self.state.theory_name() {
             format!("{}> ", theory_name.as_str().green())
@@ -85,7 +84,7 @@ impl Repl {
             "mettail> ".to_string()
         }
     }
-    
+
     fn handle_command(&mut self, line: &str) -> Result<()> {
         let parts: Vec<&str> = line.split_whitespace().collect();
         if parts.is_empty() {
@@ -94,7 +93,7 @@ impl Repl {
 
         // let theory_name = self.name_str().unwrap_or_default();
         // let theory = self.registry.get(theory_name)?;
-        
+
         match parts[0] {
             "help" => self.cmd_help(),
             "load" => self.cmd_load(&parts[1..]),
@@ -110,19 +109,21 @@ impl Repl {
             "quit" | "exit" => {
                 println!("Goodbye!");
                 std::process::exit(0);
-            }
+            },
             _ => {
                 // Check if it's a term input
-                if line.starts_with("term:") {
-                    let term_str = line["term:".len()..].trim();
-                    self.cmd_parse_term(term_str)
+                if let Some(term_str) = line.strip_prefix("term:") {
+                    self.cmd_parse_term(term_str.trim())
                 } else {
-                    anyhow::bail!("Unknown command: '{}'. Type 'help' for available commands.", parts[0])
+                    anyhow::bail!(
+                        "Unknown command: '{}'. Type 'help' for available commands.",
+                        parts[0]
+                    )
                 }
-            }
+            },
         }
     }
-    
+
     fn cmd_help(&self) -> Result<()> {
         println!();
         println!("{}", "Available commands:".bold());
@@ -149,45 +150,48 @@ impl Repl {
         println!();
         Ok(())
     }
-    
+
     fn cmd_load(&mut self, args: &[&str]) -> Result<()> {
         if args.is_empty() {
             anyhow::bail!("Usage: load <theory-name>");
         }
-        
+
         let theory_name = args[0];
-        
+
         if !self.registry.contains(theory_name) {
-            anyhow::bail!("Theory '{}' not found. Use 'list-theories' to see available theories.", theory_name);
+            anyhow::bail!(
+                "Theory '{}' not found. Use 'list-theories' to see available theories.",
+                theory_name
+            );
         }
-        
+
         println!("Loading theory: {}", theory_name.green());
-        
+
         // Get the theory from the registry (for display info)
         let theory = self.registry.get(theory_name)?;
-        
+
         // Print theory info
         println!("  ✓ {} categories", theory.categories().len());
         println!("  ✓ {} constructors", theory.constructor_count());
         println!("  ✓ {} equations", theory.equation_count());
         println!("  ✓ {} rewrite rules", theory.rewrite_count());
         println!();
-        
+
         // Store the theory name in state
         self.state.load_theory(theory.name());
-        
+
         println!("{} Theory loaded successfully!", "✓".green());
         println!("Use {} to parse and execute a term.", "'term: <expr>'".cyan());
         println!();
-        
+
         Ok(())
     }
-    
+
     fn cmd_list_theories(&self) -> Result<()> {
         println!();
         println!("{}", "Available theories:".bold());
         println!();
-        
+
         let theories = self.registry.list();
         if theories.is_empty() {
             println!("  {}", "No theories available.".yellow());
@@ -197,11 +201,11 @@ impl Repl {
                 println!("  - {}", theory.green());
             }
         }
-        
+
         println!();
         Ok(())
     }
-    
+
     fn cmd_info(&self) -> Result<()> {
         if let Some(theory_name) = self.state.theory_name() {
             let theory = self.registry.get(theory_name.as_str())?;
@@ -217,13 +221,14 @@ impl Repl {
         }
         Ok(())
     }
-    
+
     fn cmd_parse_term(&mut self, term_str: &str) -> Result<()> {
         // Get the loaded theory name
-        let theory_name = self.state.theory_name()
+        let theory_name = self
+            .state
+            .theory_name()
             .ok_or_else(|| anyhow::anyhow!("No theory loaded. Use 'load <theory>' first."))?;
 
-            
         // Get the theory from the registry
         let theory = self.registry.get(theory_name.as_str())?;
 
@@ -261,16 +266,30 @@ impl Repl {
 
         Ok(())
     }
-    
+
     fn cmd_equations(&self) -> Result<()> {
-        let results = self.state.ascent_results()
+        let results = self
+            .state
+            .ascent_results()
             .ok_or_else(|| anyhow::anyhow!("No term loaded. Use 'term: <expr>' first."))?;
 
         let equivalences = results.equivalences.clone();
         println!();
         println!("{}", "Equivalence Classes:".bold());
         for equ_class in equivalences {
-            let terms = equ_class.term_ids.iter().map(|id| results.all_terms.iter().find(|t| t.term_id == *id).unwrap().display.as_str()).collect::<Vec<_>>();
+            let terms = equ_class
+                .term_ids
+                .iter()
+                .map(|id| {
+                    results
+                        .all_terms
+                        .iter()
+                        .find(|t| t.term_id == *id)
+                        .unwrap()
+                        .display
+                        .as_str()
+                })
+                .collect::<Vec<_>>();
             println!("  {}", terms.join(" == "));
         }
         println!();
@@ -278,33 +297,44 @@ impl Repl {
     }
 
     fn cmd_rewrites(&self) -> Result<()> {
-        let results = self.state.ascent_results()
+        let results = self
+            .state
+            .ascent_results()
             .ok_or_else(|| anyhow::anyhow!("No term loaded. Use 'term: <expr>' first."))?;
-        
-        let current_id = self.state.current_graph_id()
+
+        let current_id = self
+            .state
+            .current_graph_id()
             .ok_or_else(|| anyhow::anyhow!("No current term"))?;
-        
+
         // Find rewrites from the current term
-        let available_rewrites: Vec<_> = results.rewrites.iter()
+        let available_rewrites: Vec<_> = results
+            .rewrites
+            .iter()
             .filter(|r| r.from_id == current_id)
             .collect();
-        
+
         println!();
         if available_rewrites.is_empty() {
-            println!("{} No rewrites available from current term (it's a normal form).", "✓".green());
+            println!(
+                "{} No rewrites available from current term (it's a normal form).",
+                "✓".green()
+            );
         } else {
             println!("{} available from current term:", "Rewrites".bold());
             println!();
             for (idx, rewrite) in available_rewrites.iter().enumerate() {
                 // Find the target term display
-                let target_display = results.all_terms.iter()
+                let target_display = results
+                    .all_terms
+                    .iter()
                     .find(|t| t.term_id == rewrite.to_id)
                     .map(|t| t.display.as_str())
                     .unwrap_or("<unknown>");
-                
+
                 // Pretty print the target
                 let formatted = format_term_pretty(target_display);
-                
+
                 println!("  {}) {}", idx.to_string().cyan(), "→".yellow());
                 // Indent each line of the formatted output
                 for line in formatted.lines() {
@@ -316,13 +346,15 @@ impl Repl {
         println!();
         Ok(())
     }
-    
+
     fn cmd_normal_forms(&self) -> Result<()> {
-        let results = self.state.ascent_results()
+        let results = self
+            .state
+            .ascent_results()
             .ok_or_else(|| anyhow::anyhow!("No term loaded. Use 'term: <expr>' first."))?;
-        
+
         let normal_forms = results.normal_forms();
-        
+
         println!();
         if normal_forms.is_empty() {
             println!("{} No normal forms computed.", "Warning:".yellow());
@@ -341,45 +373,56 @@ impl Repl {
         println!();
         Ok(())
     }
-    
+
     fn cmd_apply(&mut self, args: &[&str]) -> Result<()> {
         if args.is_empty() {
             anyhow::bail!("Usage: apply <rewrite-number>");
         }
-        
-        let idx: usize = args[0].parse()
+
+        let idx: usize = args[0]
+            .parse()
             .map_err(|_| anyhow::anyhow!("Invalid number: {}", args[0]))?;
-        
-        let theory_name = self.state.theory_name()
+
+        let theory_name = self
+            .state
+            .theory_name()
             .ok_or_else(|| anyhow::anyhow!("No theory loaded"))?;
-        
+
         let theory = self.registry.get(theory_name.as_str())?;
-        
-        let results = self.state.ascent_results()
+
+        let results = self
+            .state
+            .ascent_results()
             .ok_or_else(|| anyhow::anyhow!("No term loaded"))?;
-        
-        let current_id = self.state.current_graph_id()
+
+        let current_id = self
+            .state
+            .current_graph_id()
             .ok_or_else(|| anyhow::anyhow!("No current term"))?;
-        
+
         // Find available rewrites
-        let available_rewrites: Vec<_> = results.rewrites.iter()
+        let available_rewrites: Vec<_> = results
+            .rewrites
+            .iter()
             .filter(|r| r.from_id == current_id)
             .collect();
-        
+
         if idx >= available_rewrites.len() {
             anyhow::bail!("Rewrite {} not found. Use 'rewrites' to see available rewrites.", idx);
         }
-        
+
         let rewrite = available_rewrites[idx];
-        
+
         // Find the target term
-        let target_info = results.all_terms.iter()
+        let target_info = results
+            .all_terms
+            .iter()
             .find(|t| t.term_id == rewrite.to_id)
             .ok_or_else(|| anyhow::anyhow!("Target term not found"))?;
-        
+
         // Parse the target term and update its ID to match what's in the graph
         let target_term = theory.parse_term(&target_info.display)?;
-        
+
         println!();
         println!("{}", "Applied rewrite →".yellow());
         let formatted = format_term_pretty(&target_info.display);
@@ -387,40 +430,49 @@ impl Repl {
             println!("  {}", line.green());
         }
         println!();
-        
+
         // Update state - pass the target_id so we can track position in the graph
-        self.state.set_term_with_id(target_term, results.clone(), rewrite.to_id)?;
-        
+        self.state
+            .set_term_with_id(target_term, results.clone(), rewrite.to_id)?;
+
         Ok(())
     }
-    
+
     fn cmd_goto(&mut self, args: &[&str]) -> Result<()> {
         if args.is_empty() {
             anyhow::bail!("Usage: goto <normal-form-number>");
         }
-        
-        let idx: usize = args[0].parse()
+
+        let idx: usize = args[0]
+            .parse()
             .map_err(|_| anyhow::anyhow!("Invalid number: {}", args[0]))?;
-        
-        let theory_name = self.state.theory_name()
+
+        let theory_name = self
+            .state
+            .theory_name()
             .ok_or_else(|| anyhow::anyhow!("No theory loaded"))?;
-        
+
         let theory = self.registry.get(theory_name.as_str())?;
-        
-        let results = self.state.ascent_results()
+
+        let results = self
+            .state
+            .ascent_results()
             .ok_or_else(|| anyhow::anyhow!("No term loaded"))?;
-        
+
         let normal_forms = results.normal_forms();
-        
+
         if idx >= normal_forms.len() {
-            anyhow::bail!("Normal form {} not found. Use 'normal-forms' to see available normal forms.", idx);
+            anyhow::bail!(
+                "Normal form {} not found. Use 'normal-forms' to see available normal forms.",
+                idx
+            );
         }
-        
+
         let target_info = &normal_forms[idx];
-        
+
         // Parse the target term
         let target_term = theory.parse_term(&target_info.display)?;
-        
+
         println!();
         println!("{}", "Navigated to normal form:".bold());
         let formatted = format_term_pretty(&target_info.display);
@@ -428,39 +480,44 @@ impl Repl {
             println!("  {}", line.green());
         }
         println!();
-        
+
         // Update state with the correct graph ID
-        self.state.set_term_with_id(target_term, results.clone(), target_info.term_id)?;
-        
+        self.state
+            .set_term_with_id(target_term, results.clone(), target_info.term_id)?;
+
         Ok(())
     }
-    
+
     fn cmd_example(&mut self, args: &[&str]) -> Result<()> {
         if args.is_empty() {
             anyhow::bail!("Usage: example <name>\nUse 'list-examples' to see available examples.");
         }
-        
+
         let example_name = args[0];
-        
-        let example = Example::by_name(example_name)
-            .ok_or_else(|| anyhow::anyhow!("Example '{}' not found. Use 'list-examples' to see available examples.", example_name))?;
-        
+
+        let example = Example::by_name(example_name).ok_or_else(|| {
+            anyhow::anyhow!(
+                "Example '{}' not found. Use 'list-examples' to see available examples.",
+                example_name
+            )
+        })?;
+
         println!();
         println!("{} {}", "Example:".bold(), example.name.cyan());
         println!("{} {}", "Description:".bold(), example.description);
         println!();
-        
+
         // Parse and load the example
         self.cmd_parse_term(example.source)?;
-        
+
         Ok(())
     }
-    
+
     fn cmd_list_examples(&self, theory_name: &TheoryName) -> Result<()> {
         println!();
         println!("{}", "Available Examples:".bold());
         println!();
-        
+
         // Group by category
         for &category in &[
             ExampleCategory::Simple,
@@ -480,11 +537,10 @@ impl Repl {
                 println!();
             }
         }
-        
+
         println!("Use {} to load an example.", "example <name>".green());
         println!();
-        
+
         Ok(())
     }
 }
-

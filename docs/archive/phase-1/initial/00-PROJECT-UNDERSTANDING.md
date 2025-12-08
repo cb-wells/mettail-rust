@@ -113,16 +113,16 @@ use mettail::theory;
 theory! {
     name: ParMonoid,
     params: (cm: CommutativeMonoid),
-    
+
     exports {
         Elem => Proc;
     }
-    
+
     replacements {
         Zero.Proc => PZero.Proc ::= "0";
         Plus.Proc => PPar.Proc ::= "(" Proc "|" Proc ")";
     }
-    
+
     rewrites {
         RPar1: let Src ~> Tgt in
                (PPar Src Q) ~> (PPar Tgt Q);

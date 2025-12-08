@@ -1,6 +1,6 @@
 # Ascent Parallel Execution Issue
 
-**Date**: November 9, 2025  
+**Date**: November 9, 2025
 **Status**: 🔴 INCOMPATIBLE - Requires Code Generation Changes
 
 ---
@@ -41,7 +41,7 @@ macro_rules! eqrel_binary_rel_ind_common {
 }
 ```
 
-**Serial mode** uses `eqrel_ind::EqRelIndCommon`  
+**Serial mode** uses `eqrel_ind::EqRelIndCommon`
 **Parallel mode** uses `ceqrel_ind::CEqRelIndCommon` (concurrent eqrel)
 
 ### Iterator Type Difference
@@ -68,7 +68,7 @@ Compare to serial `eqrel_ind.rs`:
 ```rust
 impl<'a, T: Clone + Hash + Eq> RelIndexRead<'a> for EqRelInd0<'a, T> {
    type Value = (&'a T,);  // Single reference
-   
+
    fn index_get(&'a self, key: &Self::Key) -> Option<Self::IteratorType> {
       // ... returns iterator over (&T,)
    }
@@ -144,7 +144,7 @@ Wrap the generated patterns to handle both cases:
 
 ```rust
 // Generate explicit dereferences
-eq_name(n1, n2), 
+eq_name(n1, n2),
 let n1 = (*n1).clone(),
 let n2 = (*n2).clone()
 ```
@@ -220,7 +220,7 @@ let mut prog = ascent_run! {
 
 - `/ascent-byods-rels-0.8.0/src/eqrel_binary.rs` - Macro that switches types
 - `/ascent-byods-rels-0.8.0/src/ceqrel_ind.rs` - Parallel eqrel implementation
-- `/ascent-byods-rels-0.8.0/src/eqrel_ind.rs` - Serial eqrel implementation  
+- `/ascent-byods-rels-0.8.0/src/eqrel_ind.rs` - Serial eqrel implementation
 - `mettail-macros/src/ascent_gen.rs` - Our equation generation
 - `mettail-macros/src/rewrite_gen.rs` - Our rewrite generation
 

@@ -201,7 +201,7 @@ Allow theories to specify precedence:
 terms {
     @precedence(10, left)
     PPar . Proc ::= Proc "|" Proc ;
-    
+
     @precedence(20, left)
     PSeq . Proc ::= Proc ";" Proc ;
 }
@@ -221,6 +221,6 @@ Cache parse results for better IDE performance.
 
 ---
 
-**Status:** Design complete, basic implementation done  
+**Status:** Design complete, basic implementation done
 **Next:** Test with real theories
 

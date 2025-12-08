@@ -184,10 +184,10 @@ mod tests {
     fn test_my_feature() {
         // Arrange
         let input = ...;
-        
+
         // Act
         let result = my_function(input);
-        
+
         // Assert
         assert_eq!(result, expected);
     }
@@ -205,7 +205,7 @@ fn test_simple_theory_compiles() {
         exports { T },
         terms { T ::= A | B(T) },
     }
-    
+
     let term = T::B(Box::new(T::A));
     assert_eq!(format!("{}", term), "B(A)");
 }
@@ -264,7 +264,7 @@ If rust-analyzer shows false errors, see `design/ide_linting.md`.
 
 ```rust
 /// Public API documentation (shows in docs)
-/// 
+///
 /// # Examples
 /// ```
 /// let term = Proc::PZero;

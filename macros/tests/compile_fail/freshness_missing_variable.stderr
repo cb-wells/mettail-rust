@@ -1,0 +1,5 @@
+error: expected `;`
+  --> tests/compile_fail/freshness_missing_variable.rs:17:5
+   |
+17 |     }
+   |     ^

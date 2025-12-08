@@ -1,6 +1,6 @@
-use crate::theory::{AscentResults, Rewrite, Term, TermInfo, Theory};
-use anyhow::Result; 
 use crate::examples::TheoryName;
+use crate::theory::{AscentResults, Rewrite, Term, TermInfo, Theory};
+use anyhow::Result;
 use std::fmt;
 
 // Import the theory definition from the theories crate
@@ -41,7 +41,7 @@ impl Theory for RhoCalculusTheory {
 
     fn run_ascent(&self, term: Box<dyn Term>) -> Result<AscentResults> {
         use ascent::*;
-        
+
         // Downcast to RhoTerm
         let rho_term = term
             .as_any()
@@ -53,13 +53,17 @@ impl Theory for RhoCalculusTheory {
         // Run Ascent with the generated source
         let prog = ascent_run! {
             include_source!(rhocalc_source);
-            
+
             proc(initial_proc.clone());
         };
 
         // Extract results
         let all_procs: Vec<Proc> = prog.proc.iter().map(|(p,)| p.clone()).collect();
-        let rewrites: Vec<(Proc, Proc)> = prog.rw_proc.iter().map(|(from, to)| (from.clone(), to.clone())).collect();
+        let rewrites: Vec<(Proc, Proc)> = prog
+            .rw_proc
+            .iter()
+            .map(|(from, to)| (from.clone(), to.clone()))
+            .collect();
 
         // Build term info
         let mut term_infos = Vec::new();

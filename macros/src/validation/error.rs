@@ -1,8 +1,8 @@
 use proc_macro2::{Span, TokenStream};
-use quote::{quote, quote_spanned};
-use syn::spanned::Spanned;
+use quote::quote_spanned;
 
 /// Validation error with span information for better compile-time diagnostics
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum ValidationError {
     UnknownCategory {
@@ -65,62 +65,54 @@ impl ValidationError {
             ValidationError::ArityMismatch { span, .. } => *span,
         }
     }
-    
+
     /// Get the error message
     pub fn message(&self) -> String {
         match self {
             ValidationError::UnknownCategory { name, .. } => {
                 format!("Unknown category: '{}'", name)
-            }
+            },
             ValidationError::UnknownConstructor { name, .. } => {
                 format!("Unknown constructor '{}' in equation", name)
-            }
+            },
             ValidationError::CategoryNotExported { category, rule, .. } => {
-                format!(
-                    "Rule '{}' has category '{}' which is not exported",
-                    rule, category
-                )
-            }
+                format!("Rule '{}' has category '{}' which is not exported", rule, category)
+            },
             ValidationError::UndefinedCategoryReference { category, rule, .. } => {
-                format!(
-                    "Rule '{}' references category '{}' which is not exported",
-                    rule, category
-                )
-            }
+                format!("Rule '{}' references category '{}' which is not exported", rule, category)
+            },
             ValidationError::FreshnessVariableNotInEquation { var, .. } => {
                 format!(
                     "Freshness condition references variable '{}' which does not appear in equation",
                     var
                 )
-            }
+            },
             ValidationError::FreshnessTermNotInEquation { var, term, .. } => {
                 format!(
                     "Freshness condition '{}' # '{}': term variable '{}' does not appear in equation",
                     var, term, term
                 )
-            }
+            },
             ValidationError::FreshnessSelfReference { var, .. } => {
                 format!(
                     "Invalid freshness condition: '{}' # '{}' (variable cannot be fresh in itself)",
                     var, var
                 )
-            }
+            },
             ValidationError::TypeError { expected, found, context, .. } => {
-                format!(
-                    "Type mismatch in {}: expected '{}', found '{}'",
-                    context, expected, found
-                )
-            }
+                format!("Type mismatch in {}: expected '{}', found '{}'", context, expected, found)
+            },
             ValidationError::ArityMismatch { constructor, expected, found, .. } => {
                 format!(
                     "Arity mismatch for constructor '{}': expected {} args, found {}",
                     constructor, expected, found
                 )
-            }
+            },
         }
     }
-    
+
     /// Convert to a compile_error! token stream
+    #[allow(dead_code)]
     pub fn to_compile_error(&self) -> TokenStream {
         let span = self.span();
         let msg = self.message();

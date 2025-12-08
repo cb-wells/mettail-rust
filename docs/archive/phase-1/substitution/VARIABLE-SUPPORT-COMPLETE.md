@@ -17,7 +17,7 @@ We've successfully implemented variable support in MeTTaIL, making `Var` a built
 
 **After**: Allow non-terminals to reference:
 1. Exported categories, OR
-2. Defined (result) categories, OR  
+2. Defined (result) categories, OR
 3. Built-in types like `Var`
 
 ```rust
@@ -72,7 +72,7 @@ pub enum #cat_name { ... }
 
 ### 3. Parser Generation Updates (`mettail-macros/src/parser_gen.rs`)
 
-**Key Changes**: 
+**Key Changes**:
 1. Skip parser generation for rules that reference `Var` (placeholder for future implementation)
 2. Skip parser generation for rules without terminals (can't be parsed unambiguously)
 
@@ -97,18 +97,18 @@ if !has_terminal {
 ```rust
 theory! {
     name: LambdaCalc,
-    
+
     exports {
         Expr
     },
-    
+
     terms {
         // Variable - uses Var<String> from moniker
         EVar . Expr ::= Var ;
-        
+
         // Lambda with binder
         ELam . Expr ::= "\\" <Var> "." Expr ;
-        
+
         // Application
         EApp . Expr ::= Expr Expr ;
     }
@@ -174,7 +174,7 @@ All tests pass successfully:
 
 **Library tests** (`mettail-macros`):
 - 19 unit tests pass
-- 1 compile-fail integration test passes  
+- 1 compile-fail integration test passes
 - 2 ignored tests (unused old tests)
 
 **Example tests**:
@@ -189,9 +189,9 @@ All tests pass successfully:
 ```
 Created variable expression: EVar(Free(FreeVar { unique_id: UniqueId(1), pretty_name: Some("x") }))
 
-Created lambda: ELam(Scope { 
-    unsafe_pattern: Binder(FreeVar { unique_id: UniqueId(0), pretty_name: Some("x") }), 
-    unsafe_body: EVar(Bound(BoundVar { scope: ScopeOffset(0), binder: BinderIndex(0), pretty_name: Some("x") })) 
+Created lambda: ELam(Scope {
+    unsafe_pattern: Binder(FreeVar { unique_id: UniqueId(0), pretty_name: Some("x") }),
+    unsafe_body: EVar(Bound(BoundVar { scope: ScopeOffset(0), binder: BinderIndex(0), pretty_name: Some("x") }))
 })
 ```
 

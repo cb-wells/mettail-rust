@@ -48,7 +48,7 @@ path(p.clone(),r.clone()) <-- rw_proc(p,q),path(q.clone(),r);
   ```rust
   // Linear rule (BETTER - what we should use):
   reachable(x, z) <-- reachable(x, y), edge(y, z);
-  
+
   // Non-linear rule (WORSE - what we're currently using):
   reachable(x, z) <-- reachable(x, y), reachable(y, z);
   ```

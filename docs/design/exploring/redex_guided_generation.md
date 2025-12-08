@@ -13,7 +13,7 @@ Current term generation (both exhaustive and random) produces terms without cons
 
 Generated terms at depth 2:
 - `0` - normal form
-- `*a` - normal form  
+- `*a` - normal form
 - `a!(0)` - normal form
 - `for(a->x0){0}` - normal form
 - `{0, 0}` - normal form
@@ -41,7 +41,7 @@ A **redex pattern** is a template that matches the LHS of a rewrite rule.
 Pattern: {for(chan->x){P}, chan!(Q)}
 Generates: {for(a->x0){*x0}, a!(*b)}
 
-// Drop redex  
+// Drop redex
 Pattern: *@(P)
 Generates: *@(a!(0))
 
@@ -67,10 +67,10 @@ fn generate_redex_at_depth(
 ) -> Term {
     // 1. Parse the LHS pattern
     let pattern = extract_pattern(rule.left);
-    
+
     // 2. Identify "holes" (pattern variables)
     let holes = find_pattern_variables(pattern);
-    
+
     // 3. Generate random terms for each hole
     let mut substitutions = HashMap::new();
     for hole in holes {
@@ -78,7 +78,7 @@ fn generate_redex_at_depth(
         let term = generate_random_at_depth(vars, hole_depth, max_collection_width, rng);
         substitutions.insert(hole, term);
     }
-    
+
     // 4. Substitute and return
     instantiate_pattern(pattern, substitutions)
 }
@@ -111,16 +111,16 @@ fn generate_with_redex(
     rng: &mut R
 ) -> Term {
     let max_attempts = 1000;
-    
+
     for _ in 0..max_attempts {
         let term = generate_random_at_depth(vars, depth, max_collection_width, rng);
-        
+
         // Check if term contains at least min_redexes
         if count_redexes(term) >= min_redexes {
             return term;
         }
     }
-    
+
     // Fallback: use pattern-based generation
     generate_redex_at_depth(vars, depth, max_collection_width, pick_rule(rng), rng)
 }
@@ -158,10 +158,10 @@ fn generate_with_injected_redexes(
 ) -> Term {
     // 1. Generate a random "skeleton" term
     let mut term = generate_random_at_depth(vars, depth, max_collection_width, rng);
-    
+
     // 2. Find positions where redexes can be injected
     let positions = find_injection_points(term, depth);
-    
+
     // 3. Pick random positions and inject redexes
     for _ in 0..num_redexes {
         if let Some(pos) = positions.choose(rng) {
@@ -170,7 +170,7 @@ fn generate_with_injected_redexes(
             term = inject_at_position(term, pos, redex);
         }
     }
-    
+
     term
 }
 ```
@@ -201,14 +201,14 @@ fn generate_redex_term(
 ) -> Term {
     // 1. Pick a random rewrite rule
     let rule = pick_rule(rng);
-    
+
     // 2. Allocate depth budget
     let redex_depth = rng.gen_range(0..=depth);
     let context_depth = depth - redex_depth;
-    
+
     // 3. Generate the redex
     let redex = instantiate_pattern(rule.left, vars, redex_depth, rng);
-    
+
     // 4. Optionally wrap in context
     if context_depth > 0 && rng.gen_bool(0.5) {
         wrap_in_context(redex, vars, context_depth, rng)
@@ -220,7 +220,7 @@ fn generate_redex_term(
 fn wrap_in_context(term: Term, vars: &[String], depth: usize, rng: &mut R) -> Term {
     // Choose a constructor that can contain the term
     let constructor = pick_compatible_constructor(term.category(), rng);
-    
+
     match constructor {
         ParallelComposition => {
             // {term, random_other_terms}
@@ -263,7 +263,7 @@ fn wrap_in_context(term: Term, vars: &[String], depth: usize, rng: &mut R) -> Te
        holes: Vec<(Ident, Category)>, // Variable name -> type
        constraints: Vec<Constraint>,   // Freshness, equality, etc.
    }
-   
+
    fn analyze_rewrite_rule(rule: &RewriteRule) -> RedexPattern;
    ```
 
@@ -283,7 +283,7 @@ fn wrap_in_context(term: Term, vars: &[String], depth: usize, rng: &mut R) -> Te
        rng: &mut R
    ) -> Term {
        let mut bindings = HashMap::new();
-       
+
        // Generate terms for each hole
        for (var, category) in &pattern.holes {
            let hole_depth = allocate_depth(depth, rng);
@@ -292,10 +292,10 @@ fn wrap_in_context(term: Term, vars: &[String], depth: usize, rng: &mut R) -> Te
            );
            bindings.insert(var, term);
        }
-       
+
        // Apply constraints
        enforce_constraints(&mut bindings, &pattern.constraints);
-       
+
        // Substitute into pattern
        substitute_pattern(pattern, bindings)
    }
@@ -318,7 +318,7 @@ fn wrap_in_context(term: Term, vars: &[String], depth: usize, rng: &mut R) -> Te
        Collection { element_type: Category },
        Binder { body_type: Category },
    }
-   
+
    fn can_wrap(constructor: &ConstructorKind, term_category: Category) -> bool;
    ```
 
@@ -337,7 +337,7 @@ impl Category {
         depth: usize,
         max_collection_width: usize
     ) -> Self;
-    
+
     /// Generate a term with specific rule as redex
     pub fn generate_with_redex_from_rule(
         vars: &[String],
@@ -345,7 +345,7 @@ impl Category {
         max_collection_width: usize,
         rule_index: usize
     ) -> Self;
-    
+
     /// Generate a term with multiple redexes
     pub fn generate_with_multiple_redexes(
         vars: &[String],
@@ -353,7 +353,7 @@ impl Category {
         max_collection_width: usize,
         num_redexes: usize
     ) -> Self;
-    
+
     /// Generate a term and report which redexes it contains
     pub fn generate_with_redex_metadata(
         vars: &[String],
@@ -397,7 +397,7 @@ Track which rules are being tested:
 ```rust
 let stats = generate_test_suite(100);
 // Rule 0 (communication): 45 terms
-// Rule 1 (drop): 30 terms  
+// Rule 1 (drop): 30 terms
 // Rule 2 (open): 25 terms
 ```
 

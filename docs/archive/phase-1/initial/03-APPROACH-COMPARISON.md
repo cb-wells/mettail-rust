@@ -30,11 +30,11 @@ Use Rust procedural macros to define theories at compile time, generating AST ty
 theory! {
     name: ParMonoid,
     params: (cm: CommutativeMonoid),
-    
+
     exports {
         Elem => Proc;
     },
-    
+
     terms {
         PZero . Proc ::= "0";
         PPar . Proc ::= "(" Proc "|" Proc ")";

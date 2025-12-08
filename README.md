@@ -20,7 +20,7 @@ MeTTaIL is a **meta-language framework** for **poly-lingual computation** - enab
 
 MeTTaIL lets you define formal languages through:
 1. **Operations** - BNF-like syntax with binders
-2. **Equations** - Structural equivalences  
+2. **Equations** - Structural equivalences
 3. **Rewrites** - Computational rules with substitution
 
 Then automatically generates:
@@ -35,7 +35,7 @@ Then automatically generates:
 theory! {
     name: RhoCalc,
     exports { Proc, Name }
-    
+
     terms {
         PZero . Proc ::= "0" ;
         PInput . Proc ::= "for" "(" Name "->" <Name> ")" "{" Proc "}" ;
@@ -45,11 +45,11 @@ theory! {
         NQuote . Name ::= "@" "(" Proc ")" ;
         NVar . Name ::= Var ;
     }
-    
+
     equations {
         (NQuote (PDrop N)) == N ;      // Reflection
     }
-    
+
     rewrites {
         // Communication: for(chan->x){P} , chan!(Q) => P[@Q/x]
         (PPar {(PInput chan x P), (POutput chan Q), ...rest})

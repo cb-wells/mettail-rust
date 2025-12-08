@@ -1,8 +1,8 @@
 # Ascent Datalog Generation Design
 
-**Status:** Design Phase  
-**Date:** November 4, 2025  
-**Phase:** 3 - Automated Datalog Generation  
+**Status:** Design Phase
+**Date:** November 4, 2025
+**Phase:** 3 - Automated Datalog Generation
 
 ---
 
@@ -16,7 +16,7 @@ Mettail is a framework for defining languages with variable-binding operations, 
 - ✅ Display implementations
 
 However, the **core logic** for exploring rewrite spaces via Ascent (Rust Datalog) is currently **hand-written**. This document designs the automatic generation of Ascent code for:
-- `eq` relations (equality/equations) 
+- `eq` relations (equality/equations)
 - `rw` relations (rewrites + congruences)
 - `cat` relations (e.g., `proc`, `name`) for term exploration
 
@@ -42,10 +42,10 @@ ascent_source! {
     // Category expansion: explore subterms
     proc(p1) <-- proc(p0), rw(p0,p1);
     proc(p1) <-- proc(p0), eq(p0,p1);
-    proc(*p.clone()), proc(*q.clone()) <-- 
+    proc(*p.clone()), proc(*q.clone()) <--
         proc(p0), if let Proc::PPar(p,q) = p0;
     proc(*p.clone()) <--
-        proc(p0), 
+        proc(p0),
         if let Proc::PNew(scope) = p0,
         let (x,p) = scope.clone().unbind();
 
@@ -55,46 +55,46 @@ ascent_source! {
         proc(p0),
         if let Proc::PPar(p,q) = p0,
         let p1 = Proc::PPar(q.clone(),p.clone());
-    
+
     // Associativity: P|(Q|R) == (P|Q)|R
     eq(p0,p1) <--
         proc(p0),
         if let Proc::PPar(t,r) = p0,
         if let Proc::PPar(p,q) = &**t,
         let p1 = Proc::PPar(p.clone(),Box::new(Proc::PPar(q.clone(),r.clone())));
-    
+
     // Reflexivity, symmetry, transitivity
     eq(p,p) <-- proc(p);
     eq(q,p) <-- eq(p,q);
     eq(p,r) <-- eq(p,q), eq(q,r);
 
     // Rewrite clauses
-    rw(s, t.clone()) <-- 
+    rw(s, t.clone()) <--
         proc(s),
         if let Some(t) = try_rewrite_rule_0(&s);
-    rw(s, t.clone()) <-- 
+    rw(s, t.clone()) <--
         proc(s),
         if let Some(t) = try_rewrite_rule_1(&s);
-    rw(s, t.clone()) <-- 
+    rw(s, t.clone()) <--
         proc(s),
         if let Some(t) = try_rewrite_rule_2(&s);
-    
+
     // Congruence: rewrite inside PPar
-    rw(s,t) <-- 
+    rw(s,t) <--
         proc(s),
         if let Proc::PPar(s0,p) = s,
         rw(**s0,t0),
         let t = Proc::PPar(Box::new(t0.clone()),p.clone());
-    
+
     // Congruence: rewrite inside PNew
-    rw(s,t) <-- 
+    rw(s,t) <--
         proc(s),
         if let Proc::PNew(scope) = s,
         let (x, p) = scope.clone().unbind(),
         rw(*p,t0),
         let new_scope = mettail_runtime::Scope::new(x.clone(), Box::new(t0.clone())),
         let t = Proc::PNew(new_scope);
-    
+
     // Extension: rewrite along equality
     rw(s1,t) <-- rw(s0,t), eq(s0,s1);
 }
@@ -130,7 +130,7 @@ theory! {
         // ...
     },
     rewrites {
-        (PPar (PAmb N (PPar (PIn M P) Q)) (PAmb M R)) 
+        (PPar (PAmb N (PPar (PIn M P) Q)) (PAmb M R))
             => (PAmb M (PPar (PAmb N (PPar P Q)) R));
         // ...
     }
@@ -142,19 +142,19 @@ theory! {
 ```rust
 ascent_source! {
     ambient_source:  // Named source: ${theory_name}_source
-    
+
     // Category exploration relations (unadorned)
     relation proc(Proc);
     relation name(Name);
-    
+
     // Equality relations (per-category, typed)
     relation eq_proc(Proc, Proc);
     relation eq_name(Name, Name);
-    
+
     // Rewrite relations (per-category, typed)
     relation rw_proc(Proc, Proc);
     relation rw_name(Name, Name);
-    
+
     // Category exploration rules (generated)
     // Equation rules (generated)
     // Rewrite rules (generated)
@@ -193,15 +193,15 @@ For each exported category `C`:
 
 **For non-binding constructor (PPar):**
 ```rust
-proc(*p.clone()), proc(*q.clone()) <-- 
-    proc(p0), 
+proc(*p.clone()), proc(*q.clone()) <--
+    proc(p0),
     if let Proc::PPar(p,q) = p0;
 ```
 
 **For binding constructor (PNew):**
 ```rust
 proc(*p.clone()) <--
-    proc(p0), 
+    proc(p0),
     if let Proc::PNew(scope) = p0,
     let (x,p) = scope.clone().unbind();
 ```
@@ -216,7 +216,7 @@ fn generate_category_deconstruction(
     let mut clauses = Vec::new();
     let cat_lower = category.to_string().to_lowercase();
     let cat_rel = format_ident!("{}", cat_lower);
-    
+
     for rule in rules {
         if rule.bindings.is_empty() {
             // Non-binding constructor
@@ -224,11 +224,11 @@ fn generate_category_deconstruction(
             let fields: Vec<_> = (0..field_count(rule))
                 .map(|i| format_ident!("field_{}", i))
                 .collect();
-            
+
             let subterm_facts: Vec<_> = fields.iter().map(|f| {
                 quote! { #cat_rel((*#f).clone()) }
             }).collect();
-            
+
             clauses.push(quote! {
                 #(#subterm_facts),* <--
                     #cat_rel(t),
@@ -307,13 +307,13 @@ fn generate_equation_clause(
     let cat_lower = category.to_string().to_lowercase();
     let eq_rel = format_ident!("eq_{}", cat_lower);
     let cat_rel = format_ident!("{}", cat_lower);
-    
+
     // Parse LHS pattern
     let lhs_pattern = generate_pattern_match(&equation.left, "t0");
-    
+
     // Generate RHS construction
     let rhs_expr = generate_construction(&equation.right);
-    
+
     quote! {
         #eq_rel(t0, t1) <--
             #cat_rel(t0),
@@ -358,14 +358,14 @@ For each exported category `C` (e.g., `Proc`):
 
 **Base rewrite (using generated function):**
 ```rust
-rw_proc(s, t.clone()) <-- 
+rw_proc(s, t.clone()) <--
     proc(s),
     if let Some(t) = try_rewrite_rule_0(&s);
 ```
 
 **Congruence from declared rule:** `if S => T then (PPar P S) => (PPar P T)`
 ```rust
-rw_proc(s, t) <-- 
+rw_proc(s, t) <--
     proc(s),
     if let Proc::PPar(p, s0) = s,
     rw_proc(**s0, t0),
@@ -374,7 +374,7 @@ rw_proc(s, t) <--
 
 **Congruence from declared rule:** `if S => T then (PNew x S) => (PNew x T)`
 ```rust
-rw_proc(s, t) <-- 
+rw_proc(s, t) <--
     proc(s),
     if let Proc::PNew(scope) = s,
     let (x, p) = scope.clone().unbind(),
@@ -400,27 +400,27 @@ fn generate_rewrite_clauses(
     let cat_rel = format_ident!("{}", category.to_string().to_lowercase());
     let rw_rel = format_ident!("rw_{}", category.to_string().to_lowercase());
     let eq_rel = format_ident!("eq_{}", category.to_string().to_lowercase());
-    
+
     // Base rewrites (one per declared rewrite rule of this category)
     for (i, rule) in base_rewrites.iter().enumerate() {
         let fn_name = format_ident!("try_rewrite_rule_{}", i);
         clauses.push(quote! {
-            #rw_rel(s, t.clone()) <-- 
+            #rw_rel(s, t.clone()) <--
                 #cat_rel(s),
                 if let Some(t) = #fn_name(&s);
         });
     }
-    
+
     // Congruences (from explicitly declared congruence rules)
     for rule in congruence_rewrites {
         clauses.push(generate_congruence_clause(category, rule));
     }
-    
+
     // Extension along equality
     clauses.push(quote! {
         #rw_rel(s1, t) <-- #rw_rel(s0, t), #eq_rel(s0, s1);
     });
-    
+
     clauses
 }
 
@@ -481,11 +481,11 @@ pub fn theory(input: TokenStream) -> TokenStream {
     let ast_code = generate_ast(&theory_def);
     let rewrite_code = generate_rewrite_engine(&theory_def);
     let ascent_code = generate_ascent_source(&theory_def);  // NEW
-    
+
     quote! {
         #ast_code
         #rewrite_code
-        
+
         #ascent_code  // Generates full ascent_source! { ... } block
     }
 }
@@ -524,11 +524,11 @@ Expected generation:
 relation expr(Expr);
 
 // Deconstruction
-expr(*e.clone()) <-- 
-    expr(e0), 
+expr(*e.clone()) <--
+    expr(e0),
     if let Expr::Succ(e) = e0;
-expr(*e1.clone()), expr(*e2.clone()) <-- 
-    expr(e0), 
+expr(*e1.clone()), expr(*e2.clone()) <--
+    expr(e0),
     if let Expr::Plus(e1, e2) = e0;
 ```
 
@@ -603,7 +603,7 @@ Expected generation:
 ```rust
 relation rw_expr(Expr, Expr);
 
-rw_expr(s, t.clone()) <-- 
+rw_expr(s, t.clone()) <--
     expr(s),
     if let Some(t) = try_rewrite_rule_0(&s);
 
@@ -639,19 +639,19 @@ rewrites {
 Expected generation:
 ```rust
 // Base rewrite
-rw_expr(s, t.clone()) <-- 
+rw_expr(s, t.clone()) <--
     expr(s),
     if let Some(t) = try_rewrite_rule_0(&s);
 
 // Congruence for Plus (first field)
-rw_expr(s, t) <-- 
+rw_expr(s, t) <--
     expr(s),
     if let Expr::Plus(s0, y) = s,
     rw_expr(**s0, t0),
     let t = Expr::Plus(Box::new(t0.clone()), y.clone());
 
 // Congruence for Lam (inside binder)
-rw_expr(s, t) <-- 
+rw_expr(s, t) <--
     expr(s),
     if let Expr::Lam(scope) = s,
     let (x, body) = scope.clone().unbind(),
@@ -701,7 +701,7 @@ rw_expr(s, t) <--
 
 **Problem:** Parse congruence rules and determine which field to rewrite.
 
-**Solution:** 
+**Solution:**
 - Congruence rules have form: `if S => T then (Constructor ... S ...) => (Constructor ... T ...)`
 - Parse LHS to find which argument position contains variable `S`
 - Generate Ascent clause that matches constructor, recursively rewrites that field, and reconstructs
@@ -712,7 +712,7 @@ Input: `if S => T then (Plus S Y) => (Plus T Y)`
 
 Generated:
 ```rust
-rw_expr(s, t) <-- 
+rw_expr(s, t) <--
     expr(s),
     if let Expr::Plus(s0, y) = s,  // Match constructor
     rw_expr(**s0, t0),              // Recursively rewrite first field (S's position)
@@ -734,8 +734,8 @@ Example:
 - Generate relations for all exported categories (both category and per-category eq/rw)
 - In deconstruction, extract subterms of different categories:
   ```rust
-  proc(*p.clone()), name(*n.clone()) <-- 
-      proc(p0), 
+  proc(*p.clone()), name(*n.clone()) <--
+      proc(p0),
       if let Proc::PAmb(n, p) = p0;
   ```
 - Each category has its own typed rewrite relation (`rw_proc`, `rw_name`)
@@ -782,22 +782,22 @@ use syn::Ident;
 pub fn generate_ascent_source(theory: &TheoryDef) -> TokenStream {
     let theory_name = theory.name.to_string().to_lowercase();
     let source_name = format_ident!("{}_source", theory_name);
-    
+
     let relations = generate_relations(theory);
     let category_rules = generate_category_rules(theory);
     let equation_rules = generate_equation_rules(theory);
     let rewrite_rules = generate_rewrite_rules(theory);
-    
+
     quote! {
         ascent_source! {
             #source_name:
-            
+
             #relations
-            
+
             #category_rules
-            
+
             #equation_rules
-            
+
             #rewrite_rules
         }
     }
@@ -805,28 +805,28 @@ pub fn generate_ascent_source(theory: &TheoryDef) -> TokenStream {
 
 fn generate_relations(theory: &TheoryDef) -> TokenStream {
     let mut relations = Vec::new();
-    
+
     // Category exploration relations
     for export in &theory.exports {
         let cat = &export.name;
         let cat_lower = format_ident!("{}", cat.to_string().to_lowercase());
         relations.push(quote! { relation #cat_lower(#cat); });
     }
-    
+
     // Equality relations (per-category)
     for export in &theory.exports {
         let cat = &export.name;
         let eq_rel = format_ident!("eq_{}", cat.to_string().to_lowercase());
         relations.push(quote! { relation #eq_rel(#cat, #cat); });
     }
-    
+
     // Rewrite relations (per-category)
     for export in &theory.exports {
         let cat = &export.name;
         let rw_rel = format_ident!("rw_{}", cat.to_string().to_lowercase());
         relations.push(quote! { relation #rw_rel(#cat, #cat); });
     }
-    
+
     quote! { #(#relations)* }
 }
 
@@ -846,28 +846,28 @@ use ascent_gen::generate_ascent_source;  // NEW
 #[proc_macro_error]
 pub fn theory(input: TokenStream) -> TokenStream {
     let theory_def = parse_macro_input!(input as TheoryDef);
-    
+
     if let Err(e) = validate_theory(&theory_def) {
         let span = e.span();
         let msg = e.message();
         abort!(span, "{}", msg);
     }
-    
+
     let ast_code = generate_ast(&theory_def);
     let rewrite_code = generate_rewrite_engine(&theory_def);
     let ascent_code = generate_ascent_source(&theory_def);  // NEW
-    
+
     let grammar = generate_lalrpop_grammar(&theory_def);
     if let Err(e) = write_grammar_file(&theory_def.name.to_string(), &grammar) {
         eprintln!("Warning: Failed to write LALRPOP grammar: {}", e);
     }
-    
+
     let combined = quote! {
         #ast_code
         #rewrite_code
         #ascent_code  // NEW
     };
-    
+
     TokenStream::from(combined)
 }
 ```
@@ -1018,6 +1018,6 @@ The end result: **users write only the theory definition** (including explicit c
 
 ---
 
-**Last Updated:** November 4, 2025  
+**Last Updated:** November 4, 2025
 **Status:** Ready for review and implementation
 

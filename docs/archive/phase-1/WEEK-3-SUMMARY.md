@@ -1,6 +1,6 @@
 # Week 3 Progress Summary
 
-**Date:** 2025-10-25  
+**Date:** 2025-10-25
 **Status:** Week 3 Started - 8 of 12 tasks complete (67%)
 
 ---
@@ -78,7 +78,7 @@ terms {
 }
 ```
 
-**Why critical:** 
+**Why critical:**
 - Rho Calculus `for(x){P}` uses binders
 - Substitution must respect bound variables
 - Communication: `for(x){P} | y!(Q) => P[Q/x]` needs both
@@ -103,7 +103,7 @@ rewrites {
 
 ### By Category:
 - **Foundation:** 6/6 complete (100%) ✅
-- **Implementation:** 2/3 complete (67%) 🔄  
+- **Implementation:** 2/3 complete (67%) 🔄
 - **Target Application:** 0/3 complete (0%) ⏳
 
 ### Timeline:
@@ -126,7 +126,7 @@ rewrites {
 - Generates working parsers from grammar
 - Foundation for LALRPOP migration (Phase 2)
 
-### 2. Substitution Infrastructure  
+### 2. Substitution Infrastructure
 - Implements `Substitutable` trait from runtime
 - Recursively substitutes through AST
 - Tracks free variables

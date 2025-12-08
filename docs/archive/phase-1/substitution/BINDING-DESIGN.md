@@ -1,6 +1,6 @@
 # Binding and Substitution Representation Design
 
-**Date:** 2025-10-25  
+**Date:** 2025-10-25
 **Status:** Design Decision Needed
 
 ---
@@ -154,10 +154,10 @@ PNew(Box::new(|x| PDrop(NQuote(x))))
 enum Proc {
     PZero,
     PVar(String),
-    PNew { 
-        var: String, 
+    PNew {
+        var: String,
         var_id: usize,      // Unique ID for this binder
-        body: Box<Proc> 
+        body: Box<Proc>
     },
     PDrop(Name),
 }
@@ -210,8 +210,8 @@ pub struct Scope {
 // Type-checker uses scope to avoid capture
 impl TypeChecker {
     fn infer_with_scope(
-        &self, 
-        expr: &Expr, 
+        &self,
+        expr: &Expr,
         scope: &Scope
     ) -> Result<String, TypeError> {
         match expr {
@@ -319,10 +319,10 @@ pub enum Proc {
 fn validate_freshness(cond: &FreshnessCondition, eq: &Equation) -> Result<(), String> {
     let var = cond.var.to_string();
     let term = cond.term.to_string();
-    
+
     // 1. Check both appear in equation ✓ (already done)
     // 2. Check x != term ✓ (already done)
-    
+
     // 3. TODO: Check x doesn't appear free in term
     //    For now: accept any condition
     //    Later: use scope analysis to verify

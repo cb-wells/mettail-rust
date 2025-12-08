@@ -134,21 +134,21 @@ impl Parse for TheoryDef {
         let _ = input.parse::<Token![:]>()?;
         let name = input.parse::<Ident>()?;
         let _ = input.parse::<Token![,]>()?;
-        
+
         // Parse: exports { ... }
         let exports = if input.peek(Token![exports]) {
             parse_exports(input)?
         } else {
             Vec::new()
         };
-        
+
         // Parse: terms { ... }
         let terms = if input.peek(Token![terms]) {
             parse_terms(input)?
         } else {
             Vec::new()
         };
-        
+
         Ok(TheoryDef {
             name,
             exports,
@@ -159,39 +159,39 @@ impl Parse for TheoryDef {
 
 fn parse_exports(input: ParseStream) -> SynResult<Vec<Export>> {
     let _ = input.parse::<Token![exports]>()?;
-    
+
     let content;
     syn::braced!(content in input);
-    
+
     let mut exports = Vec::new();
     while !content.is_empty() {
         let name = content.parse::<Ident>()?;
         exports.push(Export { name });
-        
+
         if content.peek(Token![;]) {
             let _ = content.parse::<Token![;]>()?;
         }
     }
-    
+
     // Optional comma after closing brace
     if input.peek(Token![,]) {
         let _ = input.parse::<Token![,]>()?;
     }
-    
+
     Ok(exports)
 }
 
 fn parse_terms(input: ParseStream) -> SynResult<Vec<GrammarRule>> {
     let _ = input.parse::<Token![terms]>()?;
-    
+
     let content;
     syn::braced!(content in input);
-    
+
     let mut rules = Vec::new();
     while !content.is_empty() {
         rules.push(parse_grammar_rule(&content)?);
     }
-    
+
     Ok(rules)
 }
 
@@ -200,11 +200,11 @@ fn parse_grammar_rule(input: ParseStream) -> SynResult<GrammarRule> {
     let label = input.parse::<Ident>()?;
     let _ = input.parse::<Token![.]>()?;
     let category = input.parse::<Ident>()?;
-    
+
     // Parse ::= (as two colons)
     let _ = input.parse::<Token![::]>()?;
     let _ = input.parse::<Token![=]>()?;
-    
+
     // Parse items until semicolon
     let mut items = Vec::new();
     while !input.peek(Token![;]) {
@@ -218,9 +218,9 @@ fn parse_grammar_rule(input: ParseStream) -> SynResult<GrammarRule> {
             items.push(GrammarItem::NonTerminal(ident));
         }
     }
-    
+
     let _ = input.parse::<Token![;]>()?;
-    
+
     Ok(GrammarRule {
         label,
         category,
@@ -245,7 +245,7 @@ pub fn validate_theory(theory: &TheoryDef) -> Result<(), String> {
         .iter()
         .map(|e| e.name.to_string())
         .collect();
-    
+
     // Check each rule
     for rule in &theory.terms {
         // Check that the rule's category is exported
@@ -256,7 +256,7 @@ pub fn validate_theory(theory: &TheoryDef) -> Result<(), String> {
                 rule.label, cat_name
             ));
         }
-        
+
         // Check that all non-terminal items reference exported categories
         for item in &rule.items {
             if let GrammarItem::NonTerminal(ident) = item {
@@ -270,7 +270,7 @@ pub fn validate_theory(theory: &TheoryDef) -> Result<(), String> {
             }
         }
     }
-    
+
     Ok(())
 }
 
@@ -279,7 +279,7 @@ mod tests {
     use super::*;
     use crate::ast::*;
     use syn::parse_quote;
-    
+
     #[test]
     fn test_valid_theory() {
         let theory = TheoryDef {
@@ -295,10 +295,10 @@ mod tests {
                 }
             ],
         };
-        
+
         assert!(validate_theory(&theory).is_ok());
     }
-    
+
     #[test]
     fn test_invalid_category() {
         let theory = TheoryDef {
@@ -317,7 +317,7 @@ mod tests {
                 }
             ],
         };
-        
+
         assert!(validate_theory(&theory).is_err());
     }
 }
@@ -338,25 +338,25 @@ use std::collections::HashMap;
 pub fn generate_ast(theory: &TheoryDef) -> TokenStream {
     // Group rules by category
     let mut rules_by_cat: HashMap<String, Vec<&GrammarRule>> = HashMap::new();
-    
+
     for rule in &theory.terms {
         let cat_name = rule.category.to_string();
         rules_by_cat.entry(cat_name).or_default().push(rule);
     }
-    
+
     // Generate enum for each exported category
     let enums: Vec<TokenStream> = theory.exports.iter().map(|export| {
         let cat_name = &export.name;
-        
+
         let rules = rules_by_cat
             .get(&cat_name.to_string())
             .map(|v| v.as_slice())
             .unwrap_or(&[]);
-        
+
         let variants: Vec<TokenStream> = rules.iter().map(|rule| {
             generate_variant(rule)
         }).collect();
-        
+
         quote! {
             #[derive(Debug, Clone, PartialEq, Eq)]
             pub enum #cat_name {
@@ -364,7 +364,7 @@ pub fn generate_ast(theory: &TheoryDef) -> TokenStream {
             }
         }
     }).collect();
-    
+
     quote! {
         #(#enums)*
     }
@@ -372,7 +372,7 @@ pub fn generate_ast(theory: &TheoryDef) -> TokenStream {
 
 fn generate_variant(rule: &GrammarRule) -> TokenStream {
     let label = &rule.label;
-    
+
     // Count non-terminal items (these become fields)
     let fields: Vec<_> = rule.items
         .iter()
@@ -381,7 +381,7 @@ fn generate_variant(rule: &GrammarRule) -> TokenStream {
             _ => None,
         })
         .collect();
-    
+
     if fields.is_empty() {
         // Unit variant
         quote! { #label }
@@ -390,7 +390,7 @@ fn generate_variant(rule: &GrammarRule) -> TokenStream {
         let boxed_fields: Vec<TokenStream> = fields.iter().map(|f| {
             quote! { Box<#f> }
         }).collect();
-        
+
         quote! { #label(#(#boxed_fields),*) }
     }
 }
@@ -400,7 +400,7 @@ mod tests {
     use super::*;
     use crate::ast::*;
     use syn::parse_quote;
-    
+
     #[test]
     fn test_generate_simple_enum() {
         let theory = TheoryDef {
@@ -425,7 +425,7 @@ mod tests {
                 },
             ],
         };
-        
+
         let output = generate_ast(&theory);
         let expected = quote! {
             #[derive(Debug, Clone, PartialEq, Eq)]
@@ -434,7 +434,7 @@ mod tests {
                 Plus(Box<Elem>, Box<Elem>)
             }
         };
-        
+
         // Note: This is a simplified test; in reality, compare token streams
         println!("Generated: {}", output);
         println!("Expected: {}", expected);
@@ -466,15 +466,15 @@ use codegen::generate_ast;
 pub fn theory(input: TokenStream) -> TokenStream {
     // Parse input
     let theory_def = parse_macro_input!(input as TheoryDef);
-    
+
     // Validate
     if let Err(e) = validate_theory(&theory_def) {
         abort_call_site!(e);
     }
-    
+
     // Generate code
     let generated = generate_ast(&theory_def);
-    
+
     TokenStream::from(generated)
 }
 ```
@@ -509,11 +509,11 @@ use mettail_macros::theory;
 
 theory! {
     name: SimpleMonoid,
-    
+
     exports {
         Elem;
     },
-    
+
     terms {
         Zero . Elem ::= "0" ;
         Plus . Elem ::= Elem "+" Elem ;
@@ -527,13 +527,13 @@ fn main() {
         Box::new(Elem::Zero),
         Box::new(Elem::Zero),
     );
-    
+
     println!("Zero: {:?}", zero);
     println!("Plus: {:?}", one_plus_zero);
-    
+
     // Test equality
     assert_eq!(zero, Elem::Zero);
-    
+
     println!("\n✅ POC successful! Generated AST types work.");
 }
 ```
@@ -546,14 +546,14 @@ use mettail_macros::theory;
 // This should FAIL to compile with a clear error message
 theory! {
     name: Invalid,
-    
+
     exports {
         Elem;
     },
-    
+
     terms {
         Zero . Elem ::= "0" ;
-        
+
         // ERROR: Name is not exported!
         Quote . Name ::= "@" Elem ;
     }
@@ -579,20 +579,20 @@ use mettail_macros::theory;
 fn test_simple_theory() {
     theory! {
         name: TestTheory,
-        
+
         exports {
             Elem;
         },
-        
+
         terms {
             Zero . Elem ::= "0" ;
             Succ . Elem ::= Elem "+" "1" ;
         }
     }
-    
+
     let x = Elem::Zero;
     let y = Elem::Succ(Box::new(Elem::Zero));
-    
+
     assert_eq!(x, Elem::Zero);
     assert_ne!(x, y);
 }
@@ -601,23 +601,23 @@ fn test_simple_theory() {
 fn test_multiple_categories() {
     theory! {
         name: MultiCat,
-        
+
         exports {
             Proc;
             Name;
         },
-        
+
         terms {
             PZero . Proc ::= "0" ;
             PDrop . Proc ::= "*" Name ;
             NQuote . Name ::= "@" Proc ;
         }
     }
-    
+
     let proc = Proc::PZero;
     let name = Name::NQuote(Box::new(Proc::PZero));
     let proc2 = Proc::PDrop(Box::new(name.clone()));
-    
+
     println!("{:?}", proc);
     println!("{:?}", name);
     println!("{:?}", proc2);
@@ -642,10 +642,10 @@ This POC demonstrates the feasibility of implementing MeTTaIL as Rust procedural
 
 ## What Works
 
-✅ Theory definition via `theory! {}` macro  
-✅ Compile-time validation of category references  
-✅ AST generation for exported categories  
-✅ Type-safe enum variants from grammar rules  
+✅ Theory definition via `theory! {}` macro
+✅ Compile-time validation of category references
+✅ AST generation for exported categories
+✅ Type-safe enum variants from grammar rules
 
 ## Usage
 
@@ -656,11 +656,11 @@ use mettail_macros::theory;
 
 theory! {
     name: SimpleMonoid,
-    
+
     exports {
         Elem;
     },
-    
+
     terms {
         Zero . Elem ::= "0" ;
         Plus . Elem ::= Elem "+" Elem ;

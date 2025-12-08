@@ -10,10 +10,10 @@ Last Updated: November 9, 2025 - **Phase 4 COMPLETE!** 🎉
 
 ## Summary
 
-✅ **Phase 1**: Runtime (`HashBag`) - COMPLETE  
-✅ **Phase 2**: AST & Parsing - COMPLETE  
-✅ **Phase 3**: Code Generation - COMPLETE  
-✅ **Phase 4**: Parser Integration (LALRPOP) - COMPLETE  
+✅ **Phase 1**: Runtime (`HashBag`) - COMPLETE
+✅ **Phase 2**: AST & Parsing - COMPLETE
+✅ **Phase 3**: Code Generation - COMPLETE
+✅ **Phase 4**: Parser Integration (LALRPOP) - COMPLETE
 🔄 **Phase 5**: Rest Patterns & Rewrite Integration - IN PROGRESS
 
 ---
@@ -253,9 +253,9 @@ cargo run --example rhocalc
 
 ## Progress Tracking
 
-**Current Phase**: Phase 5 - Rest Patterns 🔄 (Phases 1-4 complete!)  
-**Days Completed**: 9 / 12  
-**Blockers**: None  
+**Current Phase**: Phase 5 - Rest Patterns 🔄 (Phases 1-4 complete!)
+**Days Completed**: 9 / 12
+**Blockers**: None
 **Next Action**: Implement rest pattern AST and parser
 
 **Phase 4 Success**: Collections fully working! Parser, Display, Substitution all functional. `test_minimal` passes end-to-end test: parse `{0 | 0}` → construct → display → equality ✅

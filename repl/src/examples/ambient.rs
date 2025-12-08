@@ -178,4 +178,3 @@ pub static AMB_REST_COMPLEX: Example = Example {
     category: ExampleCategory::Advanced,
     theory: TheoryName::AmbientCalculus,
 };
-

@@ -3,7 +3,9 @@
 // This module generates Display trait implementations for AST types,
 // allowing them to be pretty-printed back to source syntax.
 
-use crate::ast::{TheoryDef, GrammarItem, GrammarRule};
+#![allow(clippy::cmp_owned)]
+
+use crate::ast::{GrammarItem, GrammarRule, TheoryDef};
 use proc_macro2::TokenStream;
 use quote::quote;
 use std::collections::HashMap;
@@ -12,24 +14,28 @@ use std::collections::HashMap;
 pub fn generate_display(theory: &TheoryDef) -> TokenStream {
     // Group rules by category
     let mut rules_by_cat: HashMap<String, Vec<&GrammarRule>> = HashMap::new();
-    
+
     for rule in &theory.terms {
         let cat_name = rule.category.to_string();
         rules_by_cat.entry(cat_name).or_default().push(rule);
     }
-    
+
     // Generate Display impl for each exported category
-    let impls: Vec<TokenStream> = theory.exports.iter().map(|export| {
-        let cat_name = &export.name;
-        
-        let rules = rules_by_cat
-            .get(&cat_name.to_string())
-            .map(|v| v.as_slice())
-            .unwrap_or(&[]);
-        
-        generate_display_impl(cat_name, rules)
-    }).collect();
-    
+    let impls: Vec<TokenStream> = theory
+        .exports
+        .iter()
+        .map(|export| {
+            let cat_name = &export.name;
+
+            let rules = rules_by_cat
+                .get(&cat_name.to_string())
+                .map(|v| v.as_slice())
+                .unwrap_or(&[]);
+
+            generate_display_impl(cat_name, rules)
+        })
+        .collect();
+
     quote! {
         #(#impls)*
     }
@@ -37,10 +43,11 @@ pub fn generate_display(theory: &TheoryDef) -> TokenStream {
 
 /// Generate Display impl for a single category
 fn generate_display_impl(category: &syn::Ident, rules: &[&GrammarRule]) -> TokenStream {
-    let match_arms: Vec<TokenStream> = rules.iter().map(|rule| {
-        generate_display_arm(rule)
-    }).collect();
-    
+    let match_arms: Vec<TokenStream> = rules
+        .iter()
+        .map(|rule| generate_display_arm(rule))
+        .collect();
+
     quote! {
         impl std::fmt::Display for #category {
             fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
@@ -56,14 +63,15 @@ fn generate_display_impl(category: &syn::Ident, rules: &[&GrammarRule]) -> Token
 fn generate_display_arm(rule: &GrammarRule) -> TokenStream {
     let category = &rule.category;
     let label = &rule.label;
-    
+
     // Check if this has binders
     if !rule.bindings.is_empty() {
         return generate_binder_display_arm(rule);
     }
-    
+
     // Collect field names and their types
-    let fields: Vec<(String, Option<&syn::Ident>)> = rule.items
+    let fields: Vec<(String, Option<&syn::Ident>)> = rule
+        .items
         .iter()
         .enumerate()
         .filter_map(|(i, item)| match item {
@@ -72,7 +80,7 @@ fn generate_display_arm(rule: &GrammarRule) -> TokenStream {
             _ => None,
         })
         .collect();
-    
+
     if fields.is_empty() {
         // Unit variant - just print terminals
         let output = format_terminals(rule);
@@ -81,10 +89,11 @@ fn generate_display_arm(rule: &GrammarRule) -> TokenStream {
         }
     } else {
         // Tuple variant - pattern match fields
-        let field_names: Vec<syn::Ident> = fields.iter()
+        let field_names: Vec<syn::Ident> = fields
+            .iter()
             .map(|(name, _)| syn::Ident::new(name, proc_macro2::Span::call_site()))
             .collect();
-        
+
         // Check if any fields are Var - they need special handling
         let has_var = fields.iter().any(|(_, nt_opt)| {
             if let Some(nt) = nt_opt {
@@ -93,20 +102,20 @@ fn generate_display_arm(rule: &GrammarRule) -> TokenStream {
                 false
             }
         });
-        
+
         if has_var {
             // Generate code that extracts names from Vars
             let mut format_parts = Vec::new();
             let mut format_args_tokens = Vec::new();
             let mut part_str = String::new();
             let mut field_iter = fields.iter().zip(field_names.iter());
-            
+
             for item in &rule.items {
                 match item {
                     GrammarItem::Terminal(term) => {
                         let escaped = term.replace("{", "{{").replace("}", "}}");
                         part_str.push_str(&escaped);
-                    }
+                    },
                     GrammarItem::NonTerminal(nt) if nt.to_string() == "Var" => {
                         if !part_str.is_empty() {
                             format_parts.push(part_str.clone());
@@ -121,7 +130,7 @@ fn generate_display_arm(rule: &GrammarRule) -> TokenStream {
                                 }
                             });
                         }
-                    }
+                    },
                     GrammarItem::NonTerminal(_) => {
                         if !part_str.is_empty() {
                             format_parts.push(part_str.clone());
@@ -131,24 +140,24 @@ fn generate_display_arm(rule: &GrammarRule) -> TokenStream {
                             format_parts.push("{}".to_string());
                             format_args_tokens.push(quote! { #field_name });
                         }
-                    }
-                    _ => {}
+                    },
+                    _ => {},
                 }
             }
-            
+
             if !part_str.is_empty() {
                 format_parts.push(part_str);
             }
-            
+
             let format_str = format_parts.join("");
-            
+
             quote! {
                 #category::#label(#(#field_names),*) => write!(f, #format_str, #(#format_args_tokens),*)
             }
         } else {
             // No Var fields - use simple approach
             let (format_str, format_args) = build_format_string(rule, &fields);
-            
+
             quote! {
                 #category::#label(#(#field_names),*) => write!(f, #format_str, #(#format_args),*)
             }
@@ -160,49 +169,51 @@ fn generate_display_arm(rule: &GrammarRule) -> TokenStream {
 fn generate_binder_display_arm(rule: &GrammarRule) -> TokenStream {
     let category = &rule.category;
     let label = &rule.label;
-    
+
     let (binder_idx, body_indices) = &rule.bindings[0];
     let body_idx = body_indices[0];
-    
+
     // Collect regular fields (not binder, not body)
     let mut regular_fields = Vec::new();
     let mut has_scope = false;
     let mut field_idx = 0;
-    
+
     for (i, item) in rule.items.iter().enumerate() {
         match item {
             GrammarItem::NonTerminal(_) if i == body_idx => {
                 has_scope = true;
-            }
+            },
             GrammarItem::NonTerminal(_) => {
                 regular_fields.push(format!("f{}", field_idx));
                 field_idx += 1;
-            }
+            },
             GrammarItem::Binder { .. } if i == *binder_idx => {
                 // Skip - it's in the scope
-            }
-            _ => {}
+            },
+            _ => {},
         }
     }
-    
+
     // Build pattern: regular fields + scope
     let mut all_fields = regular_fields.clone();
     if has_scope {
         all_fields.push("scope".to_string());
     }
-    
-    let field_idents: Vec<syn::Ident> = all_fields.iter()
+
+    let field_idents: Vec<syn::Ident> = all_fields
+        .iter()
         .map(|name| syn::Ident::new(name, proc_macro2::Span::call_site()))
         .collect();
-    
+
     // Build format string with placeholders for all parts
     let format_str = build_binder_format_string_simple(rule);
-    
+
     // Build format args: regular fields, then binder name, then body
-    let regular_field_idents: Vec<syn::Ident> = regular_fields.iter()
+    let regular_field_idents: Vec<syn::Ident> = regular_fields
+        .iter()
         .map(|name| syn::Ident::new(name, proc_macro2::Span::call_site()))
         .collect();
-    
+
     quote! {
         #category::#label(#(#field_idents),*) => {
             // Use unbind() to get fresh variables with proper names for display
@@ -214,18 +225,21 @@ fn generate_binder_display_arm(rule: &GrammarRule) -> TokenStream {
 }
 
 /// Build format string and args for a rule (no Var fields)
-fn build_format_string(rule: &GrammarRule, fields: &[(String, Option<&syn::Ident>)]) -> (String, Vec<TokenStream>) {
+fn build_format_string(
+    rule: &GrammarRule,
+    fields: &[(String, Option<&syn::Ident>)],
+) -> (String, Vec<TokenStream>) {
     let mut format_str = String::new();
     let mut format_args = Vec::new();
     let mut field_iter = fields.iter();
-    
+
     for item in &rule.items {
         match item {
             GrammarItem::Terminal(term) => {
                 // Escape braces in format strings
                 let escaped = term.replace("{", "{{").replace("}", "}}");
                 format_str.push_str(&escaped);
-            }
+            },
             GrammarItem::NonTerminal(_) => {
                 // Regular fields
                 if let Some((name, _)) = field_iter.next() {
@@ -233,13 +247,13 @@ fn build_format_string(rule: &GrammarRule, fields: &[(String, Option<&syn::Ident
                     let field_ident = syn::Ident::new(name, proc_macro2::Span::call_site());
                     format_args.push(quote! { #field_ident });
                 }
-            }
+            },
             GrammarItem::Collection { separator, delimiters, .. } => {
                 // Collection field - format with custom separator
                 if let Some((name, _)) = field_iter.next() {
                     format_str.push_str("{}");
                     let field_ident = syn::Ident::new(name, proc_macro2::Span::call_site());
-                    
+
                     // Generate custom formatting for collection with separator
                     let sep = separator.clone();
                     if let Some((open, close)) = delimiters {
@@ -270,25 +284,25 @@ fn build_format_string(rule: &GrammarRule, fields: &[(String, Option<&syn::Ident
                         });
                     }
                 }
-            }
+            },
             GrammarItem::Binder { .. } => {
                 // Binders are handled separately in binder rules
-            }
+            },
         }
     }
-    
+
     (format_str, format_args)
 }
 
 /// Build format string for a rule with binders (simplified)
 fn build_binder_format_string_simple(rule: &GrammarRule) -> String {
     let mut format_str = String::new();
-    
+
     let (binder_idx, body_indices) = &rule.bindings[0];
     let body_idx = body_indices[0];
-    
+
     let mut prev_was_nonterminal = false;
-    
+
     for (i, item) in rule.items.iter().enumerate() {
         match item {
             GrammarItem::Terminal(term) => {
@@ -296,7 +310,7 @@ fn build_binder_format_string_simple(rule: &GrammarRule) -> String {
                 let escaped = term.replace("{", "{{").replace("}", "}}");
                 format_str.push_str(&escaped);
                 prev_was_nonterminal = false;
-            }
+            },
             GrammarItem::NonTerminal(_) if i == body_idx => {
                 // Body - will be provided from scope.unbind()
                 if prev_was_nonterminal {
@@ -304,7 +318,7 @@ fn build_binder_format_string_simple(rule: &GrammarRule) -> String {
                 }
                 format_str.push_str("{}");
                 prev_was_nonterminal = true;
-            }
+            },
             GrammarItem::NonTerminal(_) => {
                 // Regular field
                 if prev_was_nonterminal {
@@ -312,7 +326,7 @@ fn build_binder_format_string_simple(rule: &GrammarRule) -> String {
                 }
                 format_str.push_str("{}");
                 prev_was_nonterminal = true;
-            }
+            },
             GrammarItem::Collection { .. } => {
                 // Collection field
                 if prev_was_nonterminal {
@@ -320,7 +334,7 @@ fn build_binder_format_string_simple(rule: &GrammarRule) -> String {
                 }
                 format_str.push_str("{}");
                 prev_was_nonterminal = true;
-            }
+            },
             GrammarItem::Binder { .. } if i == *binder_idx => {
                 // Binder - will be provided from scope.unbind()
                 if prev_was_nonterminal {
@@ -328,11 +342,11 @@ fn build_binder_format_string_simple(rule: &GrammarRule) -> String {
                 }
                 format_str.push_str("{}");
                 prev_was_nonterminal = true;
-            }
-            GrammarItem::Binder { .. } => {}
+            },
+            GrammarItem::Binder { .. } => {},
         }
     }
-    
+
     format_str
 }
 
@@ -351,17 +365,15 @@ fn format_terminals(rule: &GrammarRule) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use syn::parse_quote;
     use crate::ast::*;
-    
+    use syn::parse_quote;
+
     #[test]
     fn test_display_generation() {
         let theory = TheoryDef {
             name: parse_quote!(Test),
             params: vec![],
-            exports: vec![
-                Export { name: parse_quote!(Expr) }
-            ],
+            exports: vec![Export { name: parse_quote!(Expr) }],
             terms: vec![
                 GrammarRule {
                     label: parse_quote!(Zero),
@@ -383,15 +395,14 @@ mod tests {
             equations: vec![],
             rewrites: vec![],
         };
-        
+
         let display_impl = generate_display(&theory);
         let code = display_impl.to_string();
-        
+
         println!("Generated Display:\n{}", code);
-        
+
         assert!(code.contains("impl std :: fmt :: Display for Expr"));
         assert!(code.contains("Expr :: Zero"));
         assert!(code.contains("Expr :: Add"));
     }
 }
-

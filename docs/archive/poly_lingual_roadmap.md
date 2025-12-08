@@ -14,7 +14,7 @@ Enable **poly-lingual computation**: the ability to compose, translate, and exec
 
 1. **No Single Language is Optimal** - Different domains need different abstractions
    - Process calculi for concurrency
-   - Lambda calculi for functional programming  
+   - Lambda calculi for functional programming
    - Logic programming for constraints
    - Linear logic for resource management
 
@@ -31,11 +31,11 @@ Enable **poly-lingual computation**: the ability to compose, translate, and exec
 
 ### MeTTaIL's Approach
 
-**Unified Meta-Language** → Define languages formally with shared semantics  
-**Compositional Theories** → Build complex languages from simpler components  
-**Equational Reasoning** → Prove properties across language boundaries  
-**Performance-First** → Production-grade execution (not toy implementations)  
-**Type Safety** → Catch errors at compile-time, not runtime  
+**Unified Meta-Language** → Define languages formally with shared semantics
+**Compositional Theories** → Build complex languages from simpler components
+**Equational Reasoning** → Prove properties across language boundaries
+**Performance-First** → Production-grade execution (not toy implementations)
+**Type Safety** → Catch errors at compile-time, not runtime
 
 ---
 
@@ -161,7 +161,7 @@ Automatic flattening via generated helper functions makes nested collections (`{
 **Milestone:** Interactive exploration + automated testing
 
 **Priority Order:**
-1. **Term Generation for Collections** (2 weeks) - **ENABLES TESTING**  
+1. **Term Generation for Collections** (2 weeks) - **ENABLES TESTING**
 2. **REPL Enhancements** (1-2 weeks) - History, context display, ambient calculus
 3. **Performance Benchmarking** (1-2 weeks) - Quantify improvements
 4. **Debugging & Diagnostics** (2-3 weeks) - Polish
@@ -174,7 +174,7 @@ Automatic flattening via generated helper functions makes nested collections (`{
 
 **Problem**: Current term generation skips collection constructors, making it impossible to automatically generate test cases for theories using `HashBag`, `HashSet`, or `Vec`.
 
-**Impact**: 
+**Impact**:
 - Cannot use `Proc::generate_random_at_depth()` for RhoCalc/Ambient
 - Manual test case construction is tedious and error-prone
 - Limits ability to fuzz-test rewrite systems
@@ -226,12 +226,12 @@ fn test_random_with_collections() {
   - **Theory Selection**: Load any defined theory dynamically
   - **Term Input**: Parse, select from examples, or generate random terms
   - **Ascent Integration**: Automatic execution on term input
-  - **Interactive Queries**: 
+  - **Interactive Queries**:
     - List all reachable terms
     - Show available rewrites from current term
     - Display normal forms
     - Query equivalence classes
-  - **Navigation**: 
+  - **Navigation**:
     - Step forward through rewrites
     - Explore rewrite graph interactively
     - Backtrack to previous states
@@ -848,7 +848,7 @@ MeTTaIL should make formal methods **accessible** and **practical**:
 
 ---
 
-**Next Milestone:** Collection types implementation (December 2025)  
-**Next Major Release:** v0.3.0 with 100x performance improvement  
+**Next Milestone:** Collection types implementation (December 2025)
+**Next Major Release:** v0.3.0 with 100x performance improvement
 **Long-Term Vision:** Standard platform for poly-lingual computation by 2028
 

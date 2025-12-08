@@ -1,0 +1,5 @@
+error: expected identifier
+  --> tests/compile_fail/undefined_category_reference.rs:12:29
+   |
+12 |         Drop . Proc ::= "*" (Name) ;
+   |                             ^

@@ -209,10 +209,10 @@
 
 1. **First: Create `equations.rs`** (~550 lines, clean extraction)
    - All equation-related functions are well-isolated
-   
+
 2. **Second: Move deconstruction to `categories.rs`** (~450 lines)
    - Extends existing categories.rs
-   
+
 3. **Third: Split `congruence.rs` into subdirectory**
    - Rename current `congruence.rs` to `congruence/analysis.rs`
    - Create `congruence/collection.rs` with collection congruence from ascent_gen
@@ -222,7 +222,7 @@
 
 4. **Fourth (Optional): Split `rewrites.rs` into subdirectory**
    - If it continues to grow or has sub-concerns
-   
+
 5. **Fifth: Minimal `ascent_gen.rs`**
    - Keep only `generate_ascent_source()` and orchestration
    - ~100 lines total
@@ -263,15 +263,15 @@ ascent/
 
 1. **Single files for < 800 lines, single concern**
    - relations.rs, equations.rs
-   
+
 2. **Subdirectories when:**
    - Total > 1000 lines AND
    - Multiple sub-concerns AND
    - Likely to grow
-   
+
 3. **Keep orchestrators minimal**
    - ascent_gen.rs should just wire things together
-   
+
 4. **Group by feature, not by type**
    - ✅ `congruence/collection.rs` (feature: collection congruence)
    - ❌ `generators/congruence.rs` (type: generator)

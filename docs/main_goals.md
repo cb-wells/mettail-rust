@@ -156,10 +156,10 @@ morphism! {
     name: LambdaToRho,
     from: LambdaCalc,
     to: RhoCalc,
-    
+
     // λx.M ↦ new(x.P) where M ↦ P
     translate Lam(x, m) => PNew(x, translate(m)),
-    
+
     // M N ↦ for(y <- M){N!(*y)}
     translate App(m, n) => ...,
 }
@@ -223,7 +223,7 @@ morphism! {
 
 ---
 
-**Next Milestone**: Term generation + REPL enhancement (Q1 2026)  
+**Next Milestone**: Term generation + REPL enhancement (Q1 2026)
 **Long-Term Vision**: Standard platform for poly-lingual computation
 
 See also:

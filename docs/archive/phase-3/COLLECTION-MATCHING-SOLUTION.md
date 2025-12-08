@@ -5,7 +5,7 @@
 Our current implementation iterates through collections looking for matches:
 ```rust
 let elem_0 = bag.iter().next()      // Get first element
-let elem_1 = bag.iter().nth(1)      // Get second element  
+let elem_1 = bag.iter().nth(1)      // Get second element
 if let Pattern1 = elem_0 { ... }    // Hope it matches!
 ```
 
@@ -103,7 +103,7 @@ relation pinput_proj_{rule_id}(
     OriginalElement   // Keep reference to original element
 );
 
-// Pattern 2: (POutput chan Q)  
+// Pattern 2: (POutput chan Q)
 relation poutput_proj_{rule_id}(
     BagPtr,
     Channel,          // Same indexed key
@@ -193,23 +193,23 @@ rw_proc(parent, result) <--
 theory! {
     name: RhoCalc,
     // ... grammar ...
-    
+
     rewrites {
         // The user writes this simple syntax
         (PPar {(PInput chan x P), (POutput chan Q), ...rest})
             => (PPar {(subst P x (NQuote Q)), ...rest});
     }
-    
+
     // The macro generates this optimized code:
     ascent_code! {
         // Projection relations (auto-generated)
         relation pinput_in_par(usize, Name, Binder<String>, Proc, Proc);
         relation poutput_in_par(usize, Name, Proc, Proc);
-        
+
         // Extraction rules (auto-generated)
         pinput_in_par(bag_id, chan, x, body, elem) <-- /* ... */;
         poutput_in_par(bag_id, chan, payload, elem) <-- /* ... */;
-        
+
         // Join-based rewrite (auto-generated)
         rw_proc(parent, result) <--
             pinput_in_par(bid, c, x, body, ie),

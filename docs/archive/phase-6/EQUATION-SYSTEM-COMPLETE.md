@@ -1,6 +1,6 @@
 # Equation System Implementation - Complete
 
-**Date**: 2025-11-22  
+**Date**: 2025-11-22
 **Status**: ✅ **Production Ready** - Equations fully working with freshness conditions
 
 ## Summary
@@ -26,7 +26,7 @@ The equation system for MeTTaIL is now fully implemented and operational. All co
 
 **Ambient Calculus Tests**: 23/30 passing (77%) ✅
 - All base rewrite rules working
-- All congruence rules working  
+- All congruence rules working
 - All scope extrusion equations working
 - Equations correctly establish equivalence relations
 - Freshness conditions properly enforced
@@ -60,7 +60,7 @@ Variables in patterns are checked against the theory to determine if they're nul
 
 ```rust
 let is_nullary_constructor = theory.terms.iter().any(|rule| {
-    rule.label.to_string() == var_name && 
+    rule.label.to_string() == var_name &&
     rule.category == *expected_category &&
     rule.items.iter().all(|item| matches!(item, GrammarItem::Terminal(_)))
 });
@@ -135,14 +135,14 @@ eq_proc(p0, p1) <--
     // Freshness check
     if is_fresh(&x, &n),
     // RHS construction
-    let p1 = Proc::PPar({ 
+    let p1 = Proc::PPar({
         let mut bag = HashBag::new();
         bag.insert(p.clone());
         bag.insert(Proc::PIn(
-            Box::new(n.clone()), 
+            Box::new(n.clone()),
             Box::new(Proc::PNew(Scope::from_parts_unsafe(x.clone(), Box::new(q.clone()))))
         ));
-        bag 
+        bag
     });
 ```
 

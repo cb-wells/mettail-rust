@@ -76,14 +76,14 @@ But the current implementation would **reject** this because `@(0) != @(0 | 0)` 
 
 **Current:**
 ```rust
-rw(s, t.clone()) <-- 
+rw(s, t.clone()) <--
     proc(s),
     if let Some(t) = try_rewrite_rule_0(&s);
 ```
 
 **Proposed:**
 ```rust
-rw_proc(s, t) <-- 
+rw_proc(s, t) <--
     proc(s),
     if let Proc::PPar(p_in, p_out) = s,
     if let Proc::PInput(chan1, scope) = &**p_in,
@@ -130,7 +130,7 @@ rw_proc(s, t) <--
 
 1. **Correctness First**: Equational matching is not a corner case—it's fundamental to rewrite systems with equations. We should default to correct semantics.
 
-2. **Performance is Manageable**: 
+2. **Performance is Manageable**:
    - Ascent is highly optimized for Datalog evaluation
    - Relation lookups are indexed and efficient
    - The cost is likely negligible compared to the combinatorial explosion of term generation
@@ -138,7 +138,7 @@ rw_proc(s, t) <--
 
 3. **Simplicity**: One code generation path is easier to maintain and understand than two.
 
-4. **Future-Proofing**: 
+4. **Future-Proofing**:
    - Makes it easy to add matching modulo theories (AC, etc.)
    - Enables advanced features like conditional rewriting based on relations
    - Allows rewrite strategies to be expressed declaratively
@@ -171,7 +171,7 @@ For `if x # P` conditions:
 
 **Option A:** Keep freshness as function call
 ```rust
-rw_proc(s, t) <-- 
+rw_proc(s, t) <--
     proc(s),
     // ... pattern matching ...
     if !body.contains_free(&x),  // Still a function call
@@ -183,7 +183,7 @@ rw_proc(s, t) <--
 relation fresh(Binder<String>, Proc);
 fresh(x, p) <-- proc(p), if !p.contains_free(&x);
 
-rw_proc(s, t) <-- 
+rw_proc(s, t) <--
     proc(s),
     // ... pattern matching ...
     fresh(x, body),
@@ -241,7 +241,7 @@ pub fn try_rewrite_rule_0(term: &Proc) -> Option<Proc> {
 
 Ascent invocation:
 ```rust
-rw_proc(s, t.clone()) <-- 
+rw_proc(s, t.clone()) <--
     proc(s),
     if let Some(t) = try_rewrite_rule_0(&s);
 ```
@@ -250,7 +250,7 @@ rw_proc(s, t.clone()) <--
 
 Generated Ascent clause:
 ```rust
-rw_proc(s, t) <-- 
+rw_proc(s, t) <--
     proc(s),
     if let Proc::PPar(p_in, p_out) = s,
     if let Proc::PInput(chan1, scope1) = &**p_in,
@@ -269,7 +269,7 @@ No function generated—just the clause in theory source.
 
 **Issue:** Some complex patterns might be hard to express in Ascent's clause syntax.
 
-**Solution:** 
+**Solution:**
 - For most cases, Ascent's `if let` and `let` are sufficient
 - For truly complex cases, can still fall back to helper functions for RHS construction
 - But keep matching (LHS) in Ascent for equational correctness

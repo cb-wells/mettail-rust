@@ -11,7 +11,7 @@ The rewrite pattern matcher now supports **arbitrary nesting depth** for pattern
 ### Before (Limited to 2 levels)
 ```rust
 // FAILED - P and Q at level 3:
-(PPar (PAmb N (PPar (PIn M P) Q)) (PAmb M R)) 
+(PPar (PAmb N (PPar (PIn M P) Q)) (PAmb M R))
     => (PAmb M (PPar (PAmb N (PPar P Q)) R));
 //                                  ^ ^
 //                                  P and Q not found!
@@ -20,7 +20,7 @@ The rewrite pattern matcher now supports **arbitrary nesting depth** for pattern
 ### After (Arbitrary depth)
 ```rust
 // WORKS - All variables extracted at any depth:
-(PPar (PAmb N (PPar (PIn M P) Q)) (PAmb M R)) 
+(PPar (PAmb N (PPar (PIn M P) Q)) (PAmb M R))
     => (PAmb M (PPar (PAmb N (PPar P Q)) R));
 //                                  ^ ^
 //                                  P and Q found! ✓
@@ -49,7 +49,7 @@ The rewrite pattern matcher now supports **arbitrary nesting depth** for pattern
 
 **`mettail-macros/src/rewrite_gen.rs`** (lines 246-576)
 - Added `NestedPatternInfo` struct to track recursive structure
-- Implemented `extract_variables_recursive()` for depth-first variable extraction  
+- Implemented `extract_variables_recursive()` for depth-first variable extraction
 - Implemented `wrap_nested_patterns_recursive()` and `wrap_single_pattern()` for code generation
 - Replaced flat iteration with recursive tree traversal
 
@@ -102,12 +102,12 @@ $ cargo build --bin rhocalc
 For pattern `PPar(PAmb(N, PPar(PIn(M, P), Q)), PAmb(M, R))`:
 
 **Top level (`field_*`)**:
-- `field_0` → `PAmb(N, PPar(...))`  
+- `field_0` → `PAmb(N, PPar(...))`
 - `field_1` → `PAmb(M, R)`
 
 **Level 2 (`field_*_inner_*`)**:
 - `field_0_inner_0` → `N`
-- `field_0_inner_1` → `PPar(PIn(M, P), Q)` 
+- `field_0_inner_1` → `PPar(PIn(M, P), Q)`
 - `field_1_inner_0` → `M`
 - `field_1_inner_1` → `R`
 
