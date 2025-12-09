@@ -84,7 +84,7 @@ fn generate_ast_enums(theory: &TheoryDef) -> TokenStream {
             let cat_str = cat_name.to_string();
             let first_letter = cat_str.chars().next().unwrap_or('V').to_uppercase().collect::<String>();
             let var_label = format_ident!("{}Var", first_letter);
-            
+
             variants.push(quote! {
                 #var_label(mettail_runtime::OrdVar)
             });
