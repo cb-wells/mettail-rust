@@ -6,6 +6,12 @@ use proc_macro2::TokenStream;
 use quote::quote;
 use std::collections::HashMap;
 
+/// Check if a rule is a Var rule (single item, NonTerminal "Var")
+fn is_var_rule(rule: &GrammarRule) -> bool {
+    rule.items.len() == 1
+        && matches!(&rule.items[0], GrammarItem::NonTerminal(ident) if ident.to_string() == "Var")
+}
+
 pub fn generate_ast(theory: &TheoryDef) -> TokenStream {
     let ast_enums = generate_ast_enums(theory);
     let flatten_helpers = generate_flatten_helpers(theory);
@@ -64,9 +70,25 @@ fn generate_ast_enums(theory: &TheoryDef) -> TokenStream {
             .map(|v| v.as_slice())
             .unwrap_or(&[]);
 
-        let variants: Vec<TokenStream> = rules.iter().map(|rule| {
+        // Check if there's already a Var rule
+        let has_var_rule = rules.iter().any(|rule| is_var_rule(rule));
+
+        let mut variants: Vec<TokenStream> = rules.iter().map(|rule| {
             generate_variant(rule)
         }).collect();
+
+        // Automatically add Var variant if it doesn't exist
+        if !has_var_rule {
+            use quote::format_ident;
+            // Generate label: first letter of category + "Var"
+            let cat_str = cat_name.to_string();
+            let first_letter = cat_str.chars().next().unwrap_or('V').to_uppercase().collect::<String>();
+            let var_label = format_ident!("{}Var", first_letter);
+            
+            variants.push(quote! {
+                #var_label(mettail_runtime::OrdVar)
+            });
+        }
 
         quote! {
             #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, mettail_runtime::BoundTerm)]
@@ -605,5 +627,136 @@ mod tests {
         println!("Generated: {}", output);
         assert!(output.to_string().contains("enum Proc"));
         assert!(output.to_string().contains("enum Name"));
+    }
+
+    #[test]
+    fn test_automatic_var_generation() {
+        // Tests theory without Var rules - they should be automatically generated
+        let theory = TheoryDef {
+            name: parse_quote!(Test),
+            params: vec![],
+            exports: vec![
+                Export { name: parse_quote!(Proc) },
+                Export { name: parse_quote!(Name) },
+                Export { name: parse_quote!(Term) },
+            ],
+            terms: vec![
+                GrammarRule {
+                    label: parse_quote!(PZero),
+                    category: parse_quote!(Proc),
+                    items: vec![GrammarItem::Terminal("0".to_string())],
+                    bindings: vec![],
+                },
+                GrammarRule {
+                    label: parse_quote!(NQuote),
+                    category: parse_quote!(Name),
+                    items: vec![
+                        GrammarItem::Terminal("@".to_string()),
+                        GrammarItem::NonTerminal(parse_quote!(Proc)),
+                    ],
+                    bindings: vec![],
+                },
+                // No Var rules explicitly defined
+            ],
+            equations: vec![],
+            rewrites: vec![],
+        };
+
+        let output = generate_ast(&theory);
+        let output_str = output.to_string();
+
+        println!("Generated AST:\n{}", output_str);
+
+        // Checks that Var variants are automatically generated for each exported category
+        // Looks for the enum definitions and verify they contain Var variants
+        // Proc -> PVar
+        let proc_enum_start = output_str.find("pub enum Proc").unwrap_or(0);
+        let proc_enum_end = output_str[proc_enum_start..]
+            .find("impl")
+            .unwrap_or(output_str.len() - proc_enum_start);
+        let proc_enum_section = &output_str[proc_enum_start..proc_enum_start + proc_enum_end];
+        assert!(
+            proc_enum_section.contains("PVar") && proc_enum_section.contains("OrdVar"),
+            "Expected PVar variant for Proc category in enum definition"
+        );
+
+        // Name -> NVar
+        let name_enum_start = output_str.find("pub enum Name").unwrap_or(0);
+        let name_enum_end = output_str[name_enum_start..]
+            .find("impl")
+            .unwrap_or(output_str.len() - name_enum_start);
+        let name_enum_section = &output_str[name_enum_start..name_enum_start + name_enum_end];
+        assert!(
+            name_enum_section.contains("NVar") && name_enum_section.contains("OrdVar"),
+            "Expected NVar variant for Name category in enum definition"
+        );
+
+        // Term -> TVar
+        let term_enum_start = output_str.find("pub enum Term").unwrap_or(0);
+        let term_enum_end = output_str[term_enum_start..]
+            .find("impl")
+            .unwrap_or(output_str.len() - term_enum_start);
+        let term_enum_section = &output_str[term_enum_start..term_enum_start + term_enum_end];
+        assert!(
+            term_enum_section.contains("TVar") && term_enum_section.contains("OrdVar"),
+            "Expected TVar variant for Term category in enum definition"
+        );
+
+        // Verify the enum structure exists
+        assert!(output_str.contains("enum Proc"));
+        assert!(output_str.contains("enum Name"));
+        assert!(output_str.contains("enum Term"));
+    }
+
+    #[test]
+    fn test_automatic_var_generation_with_existing_var() {
+        // Tests that if a Var rule already exists, we don't generate a duplicate
+        let theory = TheoryDef {
+            name: parse_quote!(Test),
+            params: vec![],
+            exports: vec![Export { name: parse_quote!(Proc) }],
+            terms: vec![
+                GrammarRule {
+                    label: parse_quote!(PZero),
+                    category: parse_quote!(Proc),
+                    items: vec![GrammarItem::Terminal("0".to_string())],
+                    bindings: vec![],
+                },
+                GrammarRule {
+                    label: parse_quote!(PVar),
+                    category: parse_quote!(Proc),
+                    items: vec![GrammarItem::NonTerminal(parse_quote!(Var))],
+                    bindings: vec![],
+                },
+                // Var rule explicitly defined
+            ],
+            equations: vec![],
+            rewrites: vec![],
+        };
+
+        let output = generate_ast(&theory);
+        let output_str = output.to_string();
+
+        println!("Generated AST:\n{}", output_str);
+
+        // Should have exactly one PVar variant in the enum definition (the explicitly defined one)
+        // Finds the enum definition section
+        let proc_enum_start = output_str.find("pub enum Proc").unwrap_or(0);
+        let proc_enum_end = output_str[proc_enum_start..]
+            .find("impl")
+            .unwrap_or(output_str.len() - proc_enum_start);
+        let proc_enum_section = &output_str[proc_enum_start..proc_enum_start + proc_enum_end];
+        
+        // Counts PVar in the enum definition only
+        let pvar_in_enum = proc_enum_section.matches("PVar").count();
+        assert_eq!(
+            pvar_in_enum, 1,
+            "Expected exactly one PVar variant in enum definition, found {}",
+            pvar_in_enum
+        );
+        assert!(
+            proc_enum_section.contains("PVar") && proc_enum_section.contains("OrdVar"),
+            "Expected PVar variant in enum definition"
+        );
     }
 }
