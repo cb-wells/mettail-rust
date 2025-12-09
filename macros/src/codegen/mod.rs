@@ -15,6 +15,7 @@ pub use ast_gen::*;
 use crate::ast::{GrammarItem, GrammarRule};
 
 /// Checks if a rule is a Var rule (single item, NonTerminal "Var")
+#[allow(clippy::cmp_owned)]
 pub fn is_var_rule(rule: &GrammarRule) -> bool {
     rule.items.len() == 1
         && matches!(&rule.items[0], GrammarItem::NonTerminal(ident) if ident.to_string() == "Var")
