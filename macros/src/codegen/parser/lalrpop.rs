@@ -6,12 +6,7 @@
 #![allow(clippy::cmp_owned, clippy::useless_format)]
 
 use crate::ast::{GrammarItem, GrammarRule, TheoryDef};
-
-/// Checks if a rule is a Var rule (single item, NonTerminal "Var")
-fn is_var_rule(rule: &GrammarRule) -> bool {
-    rule.items.len() == 1
-        && matches!(&rule.items[0], GrammarItem::NonTerminal(ident) if ident.to_string() == "Var")
-}
+use crate::codegen::is_var_rule;
 
 /// Generates Var label for a category (first letter + "Var")
 fn generate_var_label(category: &syn::Ident) -> String {

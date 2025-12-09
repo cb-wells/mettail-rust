@@ -1,16 +1,10 @@
 #![allow(clippy::cmp_owned, clippy::single_match)]
 
-use super::{display, subst, termgen};
+use super::{display, is_var_rule, subst, termgen};
 use crate::ast::{GrammarItem, GrammarRule, TheoryDef};
 use proc_macro2::TokenStream;
 use quote::quote;
 use std::collections::HashMap;
-
-/// Check if a rule is a Var rule (single item, NonTerminal "Var")
-fn is_var_rule(rule: &GrammarRule) -> bool {
-    rule.items.len() == 1
-        && matches!(&rule.items[0], GrammarItem::NonTerminal(ident) if ident.to_string() == "Var")
-}
 
 pub fn generate_ast(theory: &TheoryDef) -> TokenStream {
     let ast_enums = generate_ast_enums(theory);
