@@ -746,7 +746,7 @@ mod tests {
             .find("impl")
             .unwrap_or(output_str.len() - proc_enum_start);
         let proc_enum_section = &output_str[proc_enum_start..proc_enum_start + proc_enum_end];
-        
+
         // Counts PVar in the enum definition only
         let pvar_in_enum = proc_enum_section.matches("PVar").count();
         assert_eq!(

@@ -16,7 +16,12 @@ fn is_var_rule(rule: &GrammarRule) -> bool {
 /// Generates Var label for a category (first letter + "Var")
 fn generate_var_label(category: &syn::Ident) -> String {
     let cat_str = category.to_string();
-    let first_letter = cat_str.chars().next().unwrap_or('V').to_uppercase().collect::<String>();
+    let first_letter = cat_str
+        .chars()
+        .next()
+        .unwrap_or('V')
+        .to_uppercase()
+        .collect::<String>();
     format!("{}Var", first_letter)
 }
 
@@ -228,7 +233,11 @@ fn generate_infix_alternative(rule: &GrammarRule, cat_str: &str) -> String {
 }
 
 /// Generate simple production (no infix operators)
-fn generate_simple_production(category: &syn::Ident, rules: &[&GrammarRule], has_var_rule: bool) -> String {
+fn generate_simple_production(
+    category: &syn::Ident,
+    rules: &[&GrammarRule],
+    has_var_rule: bool,
+) -> String {
     let mut production = String::new();
 
     // Production header: pub CategoryName: CategoryName = {
@@ -595,10 +604,7 @@ mod tests {
         let theory = TheoryDef {
             name: parse_quote!(Test),
             params: vec![],
-            exports: vec![
-                Export { name: parse_quote!(Proc) },
-                Export { name: parse_quote!(Name) },
-            ],
+            exports: vec![Export { name: parse_quote!(Proc) }, Export { name: parse_quote!(Name) }],
             terms: vec![
                 GrammarRule {
                     label: parse_quote!(PZero),
@@ -627,12 +633,16 @@ mod tests {
         // Checks that Var alternatives are automatically generated for each exported category
         // Proc -> PVar
         assert!(
-            grammar.contains("PVar(mettail_runtime::OrdVar(Var::Free(mettail_runtime::get_or_create_var(v))))"),
+            grammar.contains(
+                "PVar(mettail_runtime::OrdVar(Var::Free(mettail_runtime::get_or_create_var(v))))"
+            ),
             "Expected PVar parser alternative for Proc category"
         );
         // Name -> NVar
         assert!(
-            grammar.contains("NVar(mettail_runtime::OrdVar(Var::Free(mettail_runtime::get_or_create_var(v))))"),
+            grammar.contains(
+                "NVar(mettail_runtime::OrdVar(Var::Free(mettail_runtime::get_or_create_var(v))))"
+            ),
             "Expected NVar parser alternative for Name category"
         );
 
@@ -673,13 +683,11 @@ mod tests {
 
         // Should have exactly one PVar alternative (the explicitly defined one)
         let pvar_count = grammar.matches("PVar").count();
-        assert_eq!(
-            pvar_count, 1,
-            "Expected exactly one PVar alternative, found {}",
-            pvar_count
-        );
+        assert_eq!(pvar_count, 1, "Expected exactly one PVar alternative, found {}", pvar_count);
         assert!(
-            grammar.contains("PVar(mettail_runtime::OrdVar(Var::Free(mettail_runtime::get_or_create_var(v))))"),
+            grammar.contains(
+                "PVar(mettail_runtime::OrdVar(Var::Free(mettail_runtime::get_or_create_var(v))))"
+            ),
             "Expected PVar parser alternative"
         );
     }
