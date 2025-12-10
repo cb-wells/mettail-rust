@@ -682,7 +682,10 @@ fn generate_equation_freshness(
 
     for condition in conditions {
         let var_name = condition.var.to_string();
-        let term_name = condition.term.to_string();
+        let term_name = match &condition.term {
+            crate::ast::FreshnessTarget::Var(id) => id.to_string(),
+            crate::ast::FreshnessTarget::CollectionRest(id) => id.to_string(),
+        };
 
         // Find the bound identifiers for both the binder variable and the term
         let var_ident = bindings

@@ -32,9 +32,17 @@ pub struct Equation {
 }
 
 /// Freshness condition: x # Term means x is fresh in Term
+#[derive(Debug, Clone)]
+pub enum FreshnessTarget {
+    /// Simple variable/term (e.g., `P`)
+    Var(Ident),
+    /// Collection rest binding (e.g., `...rest`)
+    CollectionRest(Ident),
+}
+
 pub struct FreshnessCondition {
     pub var: Ident,
-    pub term: Ident,
+    pub term: FreshnessTarget,
 }
 
 /// Rewrite rule with optional freshness conditions and optional congruence premise
@@ -462,31 +470,60 @@ fn parse_equation(input: ParseStream) -> SynResult<Equation> {
     if input.peek(Token![if]) {
         let _ = input.parse::<Token![if]>()?;
 
-        // Parse one or more freshness conditions
-        loop {
-            let var = input.parse::<Ident>()?;
-            let _ = input.parse::<Token![#]>()?;
-            let term = input.parse::<Ident>()?;
+        // Support parenthesized freshness: if (x # ...rest) then
+        if input.peek(syn::token::Paren) {
+            let paren_content;
+            syn::parenthesized!(paren_content in input);
 
-            conditions.push(FreshnessCondition { var, term });
+            let var = paren_content.parse::<Ident>()?;
+            let _ = paren_content.parse::<Token![#]>()?;
 
-            // Check for 'then' or continue with more conditions
-            if input.peek(Ident) {
-                let lookahead = input.fork().parse::<Ident>()?;
-                if lookahead == "then" {
-                    let _ = input.parse::<Ident>()?; // consume 'then'
-                    break;
-                }
+            let term = if paren_content.peek(Token![...]) {
+                let _ = paren_content.parse::<Token![...]>()?;
+                FreshnessTarget::CollectionRest(paren_content.parse::<Ident>()?)
+            } else {
+                FreshnessTarget::Var(paren_content.parse::<Ident>()?)
+            };
+
+            let then_kw = input.parse::<Ident>()?;
+            if then_kw != "then" {
+                return Err(syn::Error::new(then_kw.span(), "expected 'then'"));
             }
 
-            if input.peek(Token![,]) {
-                let _ = input.parse::<Token![,]>()?;
-                // Continue parsing more conditions
-            } else {
-                return Err(syn::Error::new(
-                    input.span(),
-                    "expected 'then' or ',' after freshness condition",
-                ));
+            conditions.push(FreshnessCondition { var, term });
+        } else {
+            // Non-parenthesized: allow multiple comma-separated freshness conditions
+            loop {
+                let var = input.parse::<Ident>()?;
+                let _ = input.parse::<Token![#]>()?;
+
+                let term = if input.peek(Token![...]) {
+                    let _ = input.parse::<Token![...]>()?;
+                    FreshnessTarget::CollectionRest(input.parse::<Ident>()?)
+                } else {
+                    FreshnessTarget::Var(input.parse::<Ident>()?)
+                };
+
+                conditions.push(FreshnessCondition { var, term });
+
+                // Check for 'then' or continue with more conditions
+                if input.peek(Ident) {
+                    let lookahead = input.fork().parse::<Ident>()?;
+                    if lookahead == "then" {
+                        let _ = input.parse::<Ident>()?; // consume 'then'
+                        break;
+                    }
+                }
+
+                if input.peek(Token![,]) {
+                    let _ = input.parse::<Token![,]>()?;
+                    // Continue parsing more conditions
+                } else {
+                    return Err(syn::Error::new(
+                        input.span(),
+                        "expected 'then' or ',' after freshness condition",
+                    ));
+                }
             }
         }
     }
@@ -631,30 +668,66 @@ fn parse_rewrite_rule(input: ParseStream) -> SynResult<RewriteRule> {
 
     while input.peek(Token![if]) {
         let _ = input.parse::<Token![if]>()?;
-        let var = input.parse::<Ident>()?;
 
-        // Check if this is a congruence premise (if S => T then) or freshness (if x # Q then)
-        if input.peek(Token![=]) && input.peek2(Token![>]) {
-            // Congruence premise: if S => T then
-            let _ = input.parse::<Token![=]>()?;
-            let _ = input.parse::<Token![>]>()?;
-            let target = input.parse::<Ident>()?;
-            let then_kw = input.parse::<Ident>()?;
-            if then_kw != "then" {
-                return Err(syn::Error::new(then_kw.span(), "expected 'then'"));
-            }
+        // Allow either parenthesized freshness clause: if (x # ...rest) then
+        // or the original forms: if x # P then  OR congruence: if S => T then
+        if input.peek(syn::token::Paren) {
+            let paren_content;
+            syn::parenthesized!(paren_content in input);
 
-            premise = Some((var, target));
-        } else {
-            // Freshness condition: if x # Q then
-            let _ = input.parse::<Token![#]>()?;
-            let term = input.parse::<Ident>()?;
+            // Inside parentheses we expect a single freshness condition: var # term
+            let var = paren_content.parse::<Ident>()?;
+            let _ = paren_content.parse::<Token![#]>()?;
+
+            let term = if paren_content.peek(Token![...]) {
+                let _ = paren_content.parse::<Token![...]>()?;
+                let rest_ident = paren_content.parse::<Ident>()?;
+                FreshnessTarget::CollectionRest(rest_ident)
+            } else {
+                FreshnessTarget::Var(paren_content.parse::<Ident>()?)
+            };
+
+            // After parentheses we expect 'then'
             let then_kw = input.parse::<Ident>()?;
             if then_kw != "then" {
                 return Err(syn::Error::new(then_kw.span(), "expected 'then'"));
             }
 
             conditions.push(FreshnessCondition { var, term });
+        } else {
+            // Not parenthesized - could be congruence premise or freshness
+            let var = input.parse::<Ident>()?;
+
+            // Check if this is a congruence premise (if S => T then) or freshness (if x # Q then)
+            if input.peek(Token![=]) && input.peek2(Token![>]) {
+                // Congruence premise: if S => T then
+                let _ = input.parse::<Token![=]>()?;
+                let _ = input.parse::<Token![>]>()?;
+                let target = input.parse::<Ident>()?;
+                let then_kw = input.parse::<Ident>()?;
+                if then_kw != "then" {
+                    return Err(syn::Error::new(then_kw.span(), "expected 'then'"));
+                }
+
+                premise = Some((var, target));
+            } else {
+                // Freshness condition: if x # Q then
+                let _ = input.parse::<Token![#]>()?;
+
+                let term = if input.peek(Token![...]) {
+                    let _ = input.parse::<Token![...]>()?;
+                    FreshnessTarget::CollectionRest(input.parse::<Ident>()?)
+                } else {
+                    FreshnessTarget::Var(input.parse::<Ident>()?)
+                };
+
+                let then_kw = input.parse::<Ident>()?;
+                if then_kw != "then" {
+                    return Err(syn::Error::new(then_kw.span(), "expected 'then'"));
+                }
+
+                conditions.push(FreshnessCondition { var, term });
+            }
         }
     }
 
@@ -718,6 +791,34 @@ mod tests {
                 assert!(delimiters.is_none());
             },
             _ => panic!("Expected Collection item"),
+        }
+    }
+
+    #[test]
+    fn parse_parenthesized_collection_freshness() {
+        let input = quote! {
+            name: TestFresh,
+            exports { Proc Name }
+            terms {
+                PPar . Proc ::= HashBag(Proc) sep "|" delim "{" "}" ;
+                PNew . Proc ::= "new(" <Name> "," Proc ")" ;
+                PVar . Proc ::= Var ;
+                NVar . Name ::= Var ;
+            }
+            equations {
+                if (x # ...rest) then (PPar {(PNew x P), ...rest}) == (PNew x (PPar {P, ...rest}));
+            }
+        };
+
+        let result = parse2::<TheoryDef>(input);
+        assert!(result.is_ok(), "Failed to parse parenthesized freshness: {:?}", result.err());
+        let theory = result.unwrap();
+        assert_eq!(theory.equations.len(), 1);
+        let eq = &theory.equations[0];
+        assert_eq!(eq.conditions.len(), 1);
+        match &eq.conditions[0].term {
+            FreshnessTarget::CollectionRest(id) => assert_eq!(id.to_string(), "rest"),
+            other => panic!("Expected CollectionRest freshness target, got: {:?}", other),
         }
     }
 
