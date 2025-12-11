@@ -38,8 +38,14 @@ pub fn generate_lalrpop_grammar(theory: &TheoryDef) -> String {
     grammar.push_str(&format!("// Generated LALRPOP grammar for theory: {}\n", theory_name));
     grammar.push_str("// This file is auto-generated - do not edit manually\n\n");
 
-    // Add use statements for AST types
-    grammar.push_str("use mettail_runtime::{Var, Binder, Scope};\n");
+    // Add use statements for runtime helpers. Only include `Binder` and `Scope`
+    // when the theory contains binder rules to avoid unused-import warnings
+    let has_binders = theory.terms.iter().any(|r| !r.bindings.is_empty());
+    if has_binders {
+        grammar.push_str("use mettail_runtime::{Var, Binder, Scope};\n");
+    } else {
+        grammar.push_str("use mettail_runtime::{Var};\n");
+    }
 
     // Import the AST types from the crate where the theory is defined
     // When used in test modules, this will be super::{...}

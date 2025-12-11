@@ -4,6 +4,7 @@
 // organized by theory and category.
 
 pub mod ambient;
+pub mod calculator;
 pub mod rhocalc;
 
 /// Metadata for an example process
@@ -19,6 +20,7 @@ pub struct Example {
 pub enum TheoryName {
     RhoCalculus,
     AmbientCalculus,
+    Calculator,
 }
 
 impl TheoryName {
@@ -26,6 +28,7 @@ impl TheoryName {
         match self {
             TheoryName::RhoCalculus => "rhocalc",
             TheoryName::AmbientCalculus => "ambient",
+            TheoryName::Calculator => "calculator",
         }
     }
 }
@@ -49,6 +52,7 @@ impl Example {
         let mut examples = Vec::new();
         examples.extend(rhocalc::all());
         examples.extend(ambient::all());
+        examples.extend(calculator::all());
         examples
     }
 
@@ -70,6 +74,7 @@ impl Example {
         match theory {
             TheoryName::RhoCalculus => rhocalc::all(),
             TheoryName::AmbientCalculus => ambient::all(),
+            TheoryName::Calculator => calculator::all(),
         }
     }
 

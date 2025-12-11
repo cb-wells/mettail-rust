@@ -1,0 +1,27 @@
+// Generated LALRPOP grammar for theory: Calculator
+// This file is auto-generated - do not edit manually
+
+use mettail_runtime::{Var};
+use super::{Expr};
+
+grammar;
+
+Ident: String = {
+    r"[a-zA-Z_][a-zA-Z0-9_]*" => <>.to_string(),
+};
+
+pub Expr: Expr = {
+    <ExprInfix>
+};
+
+ExprInfix: Expr = {
+    <left:ExprInfix> "+" <right:ExprAtom> => Expr::Add(Box::new(left), Box::new(right)),
+    <left:ExprInfix> "-" <right:ExprAtom> => Expr::Sub(Box::new(left), Box::new(right)),
+    <ExprAtom>
+};
+
+ExprAtom: Expr = {
+    "(" <Expr> ")",
+    <v:Ident> => Expr::NumLit(mettail_runtime::OrdVar(Var::Free(mettail_runtime::get_or_create_var(v))))
+};
+

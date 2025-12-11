@@ -44,9 +44,11 @@ pub fn generate_ast(theory: &TheoryDef) -> TokenStream {
         #random_gen_impl
 
         #[cfg(not(test))]
+        #[allow(unused_imports)]
         lalrpop_util::lalrpop_mod!(pub #theory_mod);
 
         #[cfg(test)]
+        #[allow(unused_imports)]
         lalrpop_util::lalrpop_mod!(#theory_mod);
     }
 }

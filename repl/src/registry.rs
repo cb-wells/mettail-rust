@@ -48,9 +48,10 @@ impl Default for TheoryRegistry {
 pub fn build_registry() -> Result<TheoryRegistry> {
     let mut registry = TheoryRegistry::new();
 
-    // Register RhoCalc
+    // Register theories
     registry.register(Box::new(crate::theories::RhoCalculusTheory));
     registry.register(Box::new(crate::theories::AmbCalculusTheory));
+    registry.register(Box::new(crate::theories::CalculatorTheory));
 
     if registry.theories.is_empty() {
         bail!("No theories available.");
