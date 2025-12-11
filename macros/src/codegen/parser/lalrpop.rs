@@ -6,6 +6,19 @@
 #![allow(clippy::cmp_owned, clippy::useless_format)]
 
 use crate::ast::{GrammarItem, GrammarRule, TheoryDef};
+use crate::codegen::is_var_rule;
+
+/// Generates Var label for a category (first letter + "Var")
+fn generate_var_label(category: &syn::Ident) -> String {
+    let cat_str = category.to_string();
+    let first_letter = cat_str
+        .chars()
+        .next()
+        .unwrap_or('V')
+        .to_uppercase()
+        .collect::<String>();
+    format!("{}Var", first_letter)
+}
 
 /// Generate a LALRPOP grammar file content for a theory
 ///
@@ -53,10 +66,9 @@ pub fn generate_lalrpop_grammar(theory: &TheoryDef) -> String {
             .filter(|r| r.category == *cat_name)
             .collect();
 
-        if !rules.is_empty() {
-            grammar.push_str(&generate_category_production(cat_name, &rules));
-            grammar.push('\n');
-        }
+        // Always generate production (even if no rules, we might need Var)
+        grammar.push_str(&generate_category_production(cat_name, &rules));
+        grammar.push('\n');
     }
 
     grammar
@@ -68,16 +80,19 @@ pub fn generate_lalrpop_grammar(theory: &TheoryDef) -> String {
 fn generate_category_production(category: &syn::Ident, rules: &[&GrammarRule]) -> String {
     let _cat_str = category.to_string();
 
+    // Checks if there's already a Var rule
+    let has_var_rule = rules.iter().any(|r| is_var_rule(r));
+
     // Classify rules by type
     let (infix_rules, other_rules): (Vec<&GrammarRule>, Vec<&GrammarRule>) =
         rules.iter().copied().partition(|r| is_infix_rule(r));
 
     // If we have infix operators, generate tiered rules for precedence
     if !infix_rules.is_empty() {
-        generate_tiered_production(category, &infix_rules, &other_rules)
+        generate_tiered_production(category, &infix_rules, &other_rules, has_var_rule)
     } else {
         // No infix operators - generate simple production
-        generate_simple_production(category, &other_rules)
+        generate_simple_production(category, &other_rules, has_var_rule)
     }
 }
 
@@ -110,6 +125,7 @@ fn generate_tiered_production(
     category: &syn::Ident,
     infix_rules: &[&GrammarRule],
     other_rules: &[&GrammarRule],
+    has_var_rule: bool,
 ) -> String {
     let cat_str = category.to_string();
     let mut production = String::new();
@@ -149,6 +165,15 @@ fn generate_tiered_production(
         } else {
             production.push('\n');
         }
+    }
+
+    // Automatically adds Var alternative if it doesn't exist (lowest precedence)
+    if !has_var_rule {
+        let var_label = generate_var_label(category);
+        production.push_str(&format!(
+            "    <v:Ident> => {}::{}(mettail_runtime::OrdVar(Var::Free(mettail_runtime::get_or_create_var(v))))\n",
+            cat_str, var_label
+        ));
     }
 
     production.push_str("};\n");
@@ -203,7 +228,11 @@ fn generate_infix_alternative(rule: &GrammarRule, cat_str: &str) -> String {
 }
 
 /// Generate simple production (no infix operators)
-fn generate_simple_production(category: &syn::Ident, rules: &[&GrammarRule]) -> String {
+fn generate_simple_production(
+    category: &syn::Ident,
+    rules: &[&GrammarRule],
+    has_var_rule: bool,
+) -> String {
     let mut production = String::new();
 
     // Production header: pub CategoryName: CategoryName = {
@@ -214,12 +243,21 @@ fn generate_simple_production(category: &syn::Ident, rules: &[&GrammarRule]) -> 
         production.push_str("    ");
         production.push_str(&generate_rule_alternative(rule));
 
-        // Add comma unless it's the last rule
-        if i < rules.len() - 1 {
+        // Adds comma unless it's the last rule and we won't add Var
+        if i < rules.len() - 1 || !has_var_rule {
             production.push_str(",\n");
         } else {
             production.push('\n');
         }
+    }
+
+    // Automatically adds Var alternative if it doesn't exist (lowest precedence)
+    if !has_var_rule {
+        let var_label = generate_var_label(category);
+        production.push_str(&format!(
+            "    <v:Ident> => {}::{}(mettail_runtime::OrdVar(Var::Free(mettail_runtime::get_or_create_var(v))))\n",
+            category, var_label
+        ));
     }
 
     production.push_str("};\n");
@@ -547,4 +585,115 @@ fn generate_collection_alternative(
     action.push_str("    }");
 
     format!("{}{}", pattern.trim(), action)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ast::*;
+    use syn::parse_quote;
+
+    #[test]
+    fn test_automatic_var_in_parser() {
+        // Tests theory without Var rules - they should be automatically generated in parser
+        let theory = TheoryDef {
+            name: parse_quote!(Test),
+            params: vec![],
+            exports: vec![Export { name: parse_quote!(Proc) }, Export { name: parse_quote!(Name) }],
+            terms: vec![
+                GrammarRule {
+                    label: parse_quote!(PZero),
+                    category: parse_quote!(Proc),
+                    items: vec![GrammarItem::Terminal("0".to_string())],
+                    bindings: vec![],
+                },
+                GrammarRule {
+                    label: parse_quote!(NQuote),
+                    category: parse_quote!(Name),
+                    items: vec![
+                        GrammarItem::Terminal("@".to_string()),
+                        GrammarItem::NonTerminal(parse_quote!(Proc)),
+                    ],
+                    bindings: vec![],
+                },
+                // No Var rules explicitly defined
+            ],
+            equations: vec![],
+            rewrites: vec![],
+        };
+
+        let grammar = generate_lalrpop_grammar(&theory);
+        println!("Generated grammar:\n{}", grammar);
+
+        // Checks that Var alternatives are automatically generated for each exported category
+        // Proc -> PVar
+        assert!(
+            grammar.contains(
+                "PVar(mettail_runtime::OrdVar(Var::Free(mettail_runtime::get_or_create_var(v))))"
+            ),
+            "Expected PVar parser alternative for Proc category"
+        );
+        // Name -> NVar
+        assert!(
+            grammar.contains(
+                "NVar(mettail_runtime::OrdVar(Var::Free(mettail_runtime::get_or_create_var(v))))"
+            ),
+            "Expected NVar parser alternative for Name category"
+        );
+
+        // Verifies the grammar structure
+        assert!(grammar.contains("pub Proc: Proc"));
+        assert!(grammar.contains("pub Name: Name"));
+        assert!(grammar.contains("<v:Ident>"));
+    }
+
+    #[test]
+    fn test_automatic_var_in_parser_with_existing_var() {
+        // Tests that if a Var rule already exists, we don't generate a duplicate
+        let theory = TheoryDef {
+            name: parse_quote!(Test),
+            params: vec![],
+            exports: vec![Export { name: parse_quote!(Proc) }],
+            terms: vec![
+                GrammarRule {
+                    label: parse_quote!(PZero),
+                    category: parse_quote!(Proc),
+                    items: vec![GrammarItem::Terminal("0".to_string())],
+                    bindings: vec![],
+                },
+                GrammarRule {
+                    label: parse_quote!(PVar),
+                    category: parse_quote!(Proc),
+                    items: vec![GrammarItem::NonTerminal(parse_quote!(Var))],
+                    bindings: vec![],
+                },
+                // Var rule explicitly defined
+            ],
+            equations: vec![],
+            rewrites: vec![],
+        };
+
+        let grammar = generate_lalrpop_grammar(&theory);
+        println!("Generated grammar:\n{}", grammar);
+
+        // Should have exactly one PVar alternative (the explicitly defined one)
+        let pvar_count = grammar.matches("PVar").count();
+        assert_eq!(pvar_count, 1, "Expected exactly one PVar alternative, found {}", pvar_count);
+        assert!(
+            grammar.contains(
+                "PVar(mettail_runtime::OrdVar(Var::Free(mettail_runtime::get_or_create_var(v))))"
+            ),
+            "Expected PVar parser alternative"
+        );
+    }
+
+    #[test]
+    fn test_var_label_generation() {
+        // Tests that Var labels are generated correctly for different category names
+        assert_eq!(generate_var_label(&parse_quote!(Proc)), "PVar");
+        assert_eq!(generate_var_label(&parse_quote!(Name)), "NVar");
+        assert_eq!(generate_var_label(&parse_quote!(Term)), "TVar");
+        assert_eq!(generate_var_label(&parse_quote!(Expr)), "EVar");
+        assert_eq!(generate_var_label(&parse_quote!(Type)), "TVar");
+    }
 }
