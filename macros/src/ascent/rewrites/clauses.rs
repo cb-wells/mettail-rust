@@ -139,7 +139,10 @@ fn generate_rewrite_clause(rule: &RewriteRule, theory: &TheoryDef) -> TokenStrea
     // Add freshness checks
     for condition in &rule.conditions {
         let var_name = condition.var.to_string();
-        let term_name = condition.term.to_string();
+        let term_name = match &condition.term {
+            crate::ast::FreshnessTarget::Var(id) => id.to_string(),
+            crate::ast::FreshnessTarget::CollectionRest(id) => id.to_string(),
+        };
 
         let var_binding = bindings.get(&var_name).unwrap_or_else(|| {
             panic!(

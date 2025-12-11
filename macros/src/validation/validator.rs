@@ -196,7 +196,10 @@ fn validate_equation_freshness(eq: &Equation) -> Result<(), ValidationError> {
     // Validate each freshness condition
     for cond in &eq.conditions {
         let var_name = cond.var.to_string();
-        let term_name = cond.term.to_string();
+        let (term_name, term_span) = match &cond.term {
+            crate::ast::FreshnessTarget::Var(id) => (id.to_string(), id.span()),
+            crate::ast::FreshnessTarget::CollectionRest(id) => (id.to_string(), id.span()),
+        };
 
         // Check that the variable appears in the equation
         if !equation_vars.contains(&var_name) {
@@ -211,7 +214,7 @@ fn validate_equation_freshness(eq: &Equation) -> Result<(), ValidationError> {
             return Err(ValidationError::FreshnessTermNotInEquation {
                 var: var_name,
                 term: term_name,
-                span: cond.term.span(),
+                span: term_span,
             });
         }
 
@@ -240,7 +243,10 @@ fn validate_rewrite_freshness(rw: &RewriteRule) -> Result<(), ValidationError> {
     // Validate each freshness condition
     for cond in &rw.conditions {
         let var_name = cond.var.to_string();
-        let term_name = cond.term.to_string();
+        let (term_name, term_span) = match &cond.term {
+            crate::ast::FreshnessTarget::Var(id) => (id.to_string(), id.span()),
+            crate::ast::FreshnessTarget::CollectionRest(id) => (id.to_string(), id.span()),
+        };
 
         // Check that the variable appears in the rewrite
         if !rewrite_vars.contains(&var_name) {
@@ -255,7 +261,7 @@ fn validate_rewrite_freshness(rw: &RewriteRule) -> Result<(), ValidationError> {
             return Err(ValidationError::FreshnessTermNotInEquation {
                 var: var_name,
                 term: term_name,
-                span: cond.term.span(),
+                span: term_span,
             });
         }
 
@@ -416,7 +422,7 @@ mod tests {
             equations: vec![Equation {
                 conditions: vec![FreshnessCondition {
                     var: parse_quote!(x),
-                    term: parse_quote!(P),
+                    term: crate::ast::FreshnessTarget::Var(parse_quote!(P)),
                 }],
                 // (PDrop (NQuote (PNew x P)))  -- has type Proc
                 left: Expr::Apply {
@@ -459,7 +465,7 @@ mod tests {
             equations: vec![Equation {
                 conditions: vec![FreshnessCondition {
                     var: parse_quote!(x), // x doesn't appear in equation!
-                    term: parse_quote!(Q),
+                    term: crate::ast::FreshnessTarget::Var(parse_quote!(Q)),
                 }],
                 // (NZero) == (NZero) - no variables
                 left: Expr::Apply {
@@ -496,7 +502,7 @@ mod tests {
             equations: vec![Equation {
                 conditions: vec![FreshnessCondition {
                     var: parse_quote!(x),
-                    term: parse_quote!(x), // x # x is invalid
+                    term: crate::ast::FreshnessTarget::Var(parse_quote!(x)), // x # x is invalid
                 }],
                 // x == (NVar)
                 left: Expr::Var(parse_quote!(x)),
