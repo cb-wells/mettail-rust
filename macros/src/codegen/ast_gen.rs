@@ -1,16 +1,10 @@
 #![allow(clippy::cmp_owned, clippy::single_match)]
 
-use super::{display, subst, termgen};
+use super::{display, generate_var_label, is_var_rule, subst, termgen};
 use crate::ast::{GrammarItem, GrammarRule, TheoryDef};
 use proc_macro2::TokenStream;
 use quote::quote;
 use std::collections::HashMap;
-
-/// Check if a rule is a Var rule (single item, NonTerminal "Var")
-fn is_var_rule(rule: &GrammarRule) -> bool {
-    rule.items.len() == 1
-        && matches!(&rule.items[0], GrammarItem::NonTerminal(ident) if ident.to_string() == "Var")
-}
 
 pub fn generate_ast(theory: &TheoryDef) -> TokenStream {
     let ast_enums = generate_ast_enums(theory);
@@ -81,11 +75,7 @@ fn generate_ast_enums(theory: &TheoryDef) -> TokenStream {
 
         // Automatically add Var variant if it doesn't exist
         if !has_var_rule {
-            use quote::format_ident;
-            // Generate label: first letter of category + "Var"
-            let cat_str = cat_name.to_string();
-            let first_letter = cat_str.chars().next().unwrap_or('V').to_uppercase().collect::<String>();
-            let var_label = format_ident!("{}Var", first_letter);
+            let var_label = generate_var_label(cat_name);
 
             variants.push(quote! {
                 #var_label(mettail_runtime::OrdVar)
@@ -258,29 +248,8 @@ fn generate_binder_variant(rule: &GrammarRule) -> TokenStream {
     }
 }
 
-/// Generate automatic flattening helpers for collection constructors
-///
-/// For each constructor with a collection field, generates a helper function
-/// that automatically flattens nested collections of the same type.
-///
-/// Example generated code:
-/// ```ignore
-/// impl Proc {
-///     fn insert_into_ppar(bag: &mut mettail_runtime::HashBag<Proc>, elem: Proc) {
-///         match elem {
-///             Proc::PPar(inner) => {
-///                 // Recursively flatten nested PPar
-///                 for (e, count) in inner.iter() {
-///                     for _ in 0..*count {
-///                         Self::insert_into_ppar(bag, e.clone());
-///                     }
-///                 }
-///             }
-///             _ => bag.insert(elem),
-///         }
-///     }
-/// }
-/// ```
+
+/// For each constructor with a collection field, generates a helper function that automatically flattens nested collections of the same type.
 fn generate_flatten_helpers(theory: &TheoryDef) -> TokenStream {
     use quote::format_ident;
 

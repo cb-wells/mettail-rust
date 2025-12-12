@@ -6,6 +6,7 @@
 #![allow(clippy::cmp_owned)]
 
 use crate::ast::{GrammarItem, GrammarRule, TheoryDef};
+use crate::codegen::{generate_var_label, is_var_rule};
 use proc_macro2::TokenStream;
 use quote::quote;
 use std::collections::HashMap;
@@ -43,10 +44,17 @@ pub fn generate_display(theory: &TheoryDef) -> TokenStream {
 
 /// Generate Display impl for a single category
 fn generate_display_impl(category: &syn::Ident, rules: &[&GrammarRule]) -> TokenStream {
-    let match_arms: Vec<TokenStream> = rules
+    let mut match_arms: Vec<TokenStream> = rules
         .iter()
         .map(|rule| generate_display_arm(rule))
         .collect();
+
+    // Check if Var variant was auto-generated
+    let has_var_rule = rules.iter().any(|rule| is_var_rule(rule));
+    if !has_var_rule {
+        let var_arm = generate_auto_var_display_arm(category);
+        match_arms.push(var_arm);
+    }
 
     quote! {
         impl std::fmt::Display for #category {
@@ -360,6 +368,27 @@ fn format_terminals(rule: &GrammarRule) -> String {
         })
         .collect::<Vec<_>>()
         .join("")
+}
+
+/// Generate display match arm for an auto-generated Var variant
+fn generate_auto_var_display_arm(category: &syn::Ident) -> TokenStream {
+    // Generate Var label: first letter + "Var"
+    let var_label = generate_var_label(category);
+
+    quote! {
+        #category::#var_label(var) => {
+            match &var.0 {
+                mettail_runtime::Var::Free(fv) => {
+                    let name = fv.pretty_name.as_ref().map(|s| s.as_str()).unwrap_or("_");
+                    write!(f, "{}", name)
+                }
+                mettail_runtime::Var::Bound(bv) => {
+                    let name = bv.pretty_name.as_ref().map(|s| s.as_str()).unwrap_or("_");
+                    write!(f, "{}", name)
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]

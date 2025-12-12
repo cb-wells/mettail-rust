@@ -23,6 +23,7 @@ use ascent::generate_freshness_functions;
 use ast::TheoryDef;
 use codegen::generate_ast;
 use codegen::parser::{generate_lalrpop_grammar, write_grammar_file};
+use codegen::blockly::{generate_blockly_definitions, write_blockly_blocks, write_blockly_categories};
 use validation::validate_theory;
 
 #[proc_macro]
@@ -51,6 +52,15 @@ pub fn theory(input: TokenStream) -> TokenStream {
         eprintln!("Warning: Failed to write LALRPOP grammar: {}", e);
     }
 
+    // Generate Blockly block definitions
+    let blockly_output = generate_blockly_definitions(&theory_def);
+    if let Err(e) = write_blockly_blocks(&theory_def.name.to_string(), &blockly_output) {
+        eprintln!("Warning: Failed to write Blockly blocks: {}", e);
+    }
+    if let Err(e) = write_blockly_categories(&theory_def.name.to_string(), &blockly_output) {
+        eprintln!("Warning: Failed to write Blockly categories: {}", e);
+    }
+    
     let combined = quote::quote! {
         #ast_code
         #freshness_fns

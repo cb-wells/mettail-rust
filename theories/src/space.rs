@@ -1,6 +1,5 @@
 use mettail_macros::theory;
 use mettail_runtime;
-use lalrpop_util::lalrpop_mod;
 use ascent_byods_rels::*;
 use std::time::Instant;
 // Note: Pretty printing moved to REPL. Use plain Display for now.

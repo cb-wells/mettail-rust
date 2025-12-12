@@ -7,6 +7,7 @@
 #![allow(clippy::cmp_owned)]
 
 use crate::ast::{GrammarItem, GrammarRule, TheoryDef};
+use crate::codegen::generate_var_label;
 use proc_macro2::TokenStream;
 use quote::quote;
 use syn::Ident;
@@ -111,10 +112,17 @@ fn generate_substitute_method(
     rules: &[&GrammarRule],
     _replacement_cat: &Ident,
 ) -> TokenStream {
-    let match_arms: Vec<TokenStream> = rules
+    let mut match_arms: Vec<TokenStream> = rules
         .iter()
         .map(|rule| generate_substitution_arm(category, rule, category))
         .collect();
+
+    // Check if Var variant was auto-generated
+    let has_var_rule = rules.iter().any(|rule| is_var_constructor(rule));
+    if !has_var_rule {
+        let var_arm = generate_auto_var_substitution_arm(category, category);
+        match_arms.push(var_arm);
+    }
 
     quote! {
         pub fn substitute(
@@ -137,10 +145,17 @@ fn generate_cross_category_substitute_method(
 ) -> TokenStream {
     let method_name = quote::format_ident!("substitute_{}", binder_cat.to_string().to_lowercase());
 
-    let match_arms: Vec<TokenStream> = rules
+    let mut match_arms: Vec<TokenStream> = rules
         .iter()
         .map(|rule| generate_substitution_arm(category, rule, binder_cat))
         .collect();
+
+    // Check if Var variant was auto-generated
+    let has_var_rule = rules.iter().any(|rule| is_var_constructor(rule));
+    if !has_var_rule {
+        let var_arm = generate_auto_var_substitution_arm(category, binder_cat);
+        match_arms.push(var_arm);
+    }
 
     quote! {
         /// Substitute `replacement` (of type #binder_cat) for free occurrences of `var` in this term
@@ -220,6 +235,37 @@ fn generate_substitution_arm(
 fn is_var_constructor(rule: &GrammarRule) -> bool {
     rule.items.len() == 1
         && matches!(&rule.items[0], GrammarItem::NonTerminal(ident) if ident.to_string() == "Var")
+}
+
+/// Generate substitution match arm for an auto-generated Var variant
+fn generate_auto_var_substitution_arm(
+    category: &Ident,
+    replacement_cat: &Ident,
+) -> TokenStream {
+    // Generate Var label: first letter + "Var"
+    let var_label = generate_var_label(category);
+
+    let category_str = category.to_string();
+    let replacement_cat_str = replacement_cat.to_string();
+
+    if category_str == replacement_cat_str {
+        // Same category - can substitute
+        quote! {
+            #category::#var_label(mettail_runtime::OrdVar(mettail_runtime::Var::Free(v))) if v == var => {
+                // This free variable matches - replace it
+                replacement.clone()
+            }
+            #category::#var_label(_) => {
+                // Different variable or bound variable - keep as is
+                self.clone()
+            }
+        }
+    } else {
+        // Different category - can't substitute
+        quote! {
+            #category::#var_label(_) => self.clone()
+        }
+    }
 }
 
 /// Generate substitution for a constructor with Scope (binder)

@@ -30,26 +30,31 @@ fn normalize_whitespace(s: &str) -> String {
     s.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-pub fn print_rule(line: &str) {
+pub fn print_rule(line: &str) -> String {
     if line.trim().is_empty() {
-        return;
+        return String::new();
     }
 
     // Normalize whitespace to fix TokenStream formatting issues
     let normalized = normalize_whitespace(line);
-
-    let (head, body) = normalized
-        .split_once("<- -")
-        .unwrap_or((normalized.trim(), ""));
+    
+    let (head, body) = normalized.split_once("<- -").unwrap_or((normalized.trim(), ""));
+    let head_clauses = split_commas_outside_parens(head);
+    let (head_last, head_rest) = head_clauses.split_last().unwrap_or((&"", &[]));
     let clauses = split_commas_outside_parens(body);
     let (last, rest) = clauses.split_last().unwrap_or((&"", &[]));
     if !body.trim().is_empty() {
-        eprintln!("{} <--", head.trim());
-        for clause in rest {
-            eprintln!("    {},", clause.trim());
+        let mut result = String::new();
+        for clause in head_rest {
+            result.push_str(&format!("{},\n", clause.trim()));
         }
-        eprintln!("    {};", last.trim());
+        result.push_str(&format!("{} <--\n", head_last.trim()));
+        for clause in rest {
+            result.push_str(&format!("    {},\n", clause.trim()));
+        }
+        result.push_str(&format!("    {};\n\n", last.trim()));
+        result.to_string()
     } else {
-        eprintln!("{};", normalized.trim());
+        format!("{};\n\n", normalized.trim())
     }
 }

@@ -43,10 +43,8 @@ pub fn generate_equation_rules(theory: &TheoryDef) -> TokenStream {
 
     // Generate clauses for each equation declaration
     // These add the BASE equalities specified by the theory
-    for (idx, equation) in theory.equations.iter().enumerate() {
-        eprintln!("\nEquation {}: {:?} == {:?}", idx, equation.left, equation.right);
+    for equation in theory.equations.iter() {
         if let Some(rule) = generate_equation_clause(equation, theory) {
-            eprintln!("  ✅ Generated successfully");
             rules.push(rule);
         } else {
             eprintln!("  ❌ Failed to generate (returned None)");
@@ -124,6 +122,7 @@ fn generate_congruence_rules(theory: &TheoryDef) -> Vec<TokenStream> {
             let eq_arg_rel = format_ident!("eq_{}", cat.to_string().to_lowercase());
 
             // Bind the variables (no .clone())
+            //////////////////// trying without! //////////////////
             body_clauses.push(quote! { #cat_rel(#lhs) });
             body_clauses.push(quote! { #cat_rel(#rhs) });
             // Use the bound variables (.clone() needed here)
