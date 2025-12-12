@@ -1,11 +1,19 @@
 // Calculator example expressions for the REPL
 //
-// Demonstrates integer arithmetic evaluation in the Calculator theory
+// Demonstrates integer arithmetic evaluation and variable binding in the Calculator theory
 
 use super::{Example, ExampleCategory, TheoryName};
 
 pub fn all() -> Vec<&'static Example> {
-    vec![&SIMPLE_NUMBER, &ADDITION, &SUBTRACTION, &COMPLEX_EXPRESSION]
+    vec![
+        &SIMPLE_NUMBER,
+        &ADDITION,
+        &SUBTRACTION,
+        &COMPLEX_EXPRESSION,
+        &ASSIGNMENT,
+        &VARIABLE_LOOKUP,
+        &VARIABLE_IN_EXPR,
+    ]
 }
 
 //=============================================================================
@@ -40,6 +48,30 @@ pub static COMPLEX_EXPRESSION: Example = Example {
     name: "complex_expr",
     description: "Multi-operator expression with left-to-right evaluation",
     source: "10 + 5 - 3 + 2",
+    category: ExampleCategory::Simple,
+    theory: TheoryName::Calculator,
+};
+
+pub static ASSIGNMENT: Example = Example {
+    name: "assignment",
+    description: "Variable assignment - stores and evaluates expression",
+    source: "x = 3 + 2",
+    category: ExampleCategory::Simple,
+    theory: TheoryName::Calculator,
+};
+
+pub static VARIABLE_LOOKUP: Example = Example {
+    name: "variable_lookup",
+    description: "Variable reference - retrieves stored value",
+    source: "x",
+    category: ExampleCategory::Simple,
+    theory: TheoryName::Calculator,
+};
+
+pub static VARIABLE_IN_EXPR: Example = Example {
+    name: "variable_in_expr",
+    description: "Using variables in expressions",
+    source: "y = x - 4 + 8",
     category: ExampleCategory::Simple,
     theory: TheoryName::Calculator,
 };

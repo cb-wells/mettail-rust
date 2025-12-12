@@ -2,12 +2,18 @@ use crate::examples::TheoryName;
 use crate::theory::{AscentResults, Term, TermInfo, Theory};
 use anyhow::Result;
 use std::fmt;
+use std::cell::RefCell;
 
 // Import the theory definition from the theories crate
 use mettail_theories::calculator::*;
 
+thread_local! {
+    static CALC_ENV: RefCell<CalculatorEnv> = RefCell::new(CalculatorEnv::new());
+}
+
 /// Calculator theory implementation for REPL
 pub struct CalculatorTheory;
+
 
 impl Theory for CalculatorTheory {
     fn name(&self) -> TheoryName {
@@ -15,11 +21,11 @@ impl Theory for CalculatorTheory {
     }
 
     fn categories(&self) -> Vec<String> {
-        vec!["Int".to_string()]
+        vec!["Int".to_string(), "Ident".to_string()]
     }
 
     fn constructor_count(&self) -> usize {
-        3 // NumLit, Add, Sub
+        5 // NumLit, Add, Sub, VarRef, Assign
     }
 
     fn equation_count(&self) -> usize {
@@ -32,9 +38,12 @@ impl Theory for CalculatorTheory {
 
     fn parse_term(&self, input: &str) -> Result<Box<dyn Term>> {
         mettail_runtime::clear_var_cache();
-        let result =
-            parse_and_eval(input).map_err(|e| anyhow::anyhow!("Parse/eval error: {}", e))?;
-        Ok(Box::new(CalcTerm(result)))
+        CALC_ENV.with(|env| {
+            let mut env_ref = env.borrow_mut();
+            let result = parse_and_eval_with_env(input, &mut env_ref)
+                .map_err(|e| anyhow::anyhow!("Parse/eval error: {}", e))?;
+            Ok(Box::new(CalcTerm(result)) as Box<dyn Term>)
+        })
     }
 
     fn run_ascent(&self, term: Box<dyn Term>) -> Result<AscentResults> {
