@@ -33,7 +33,7 @@ pub fn generate_display(theory: &TheoryDef) -> TokenStream {
                 .map(|v| v.as_slice())
                 .unwrap_or(&[]);
 
-            generate_display_impl(cat_name, rules)
+            generate_display_impl(cat_name, rules, theory)
         })
         .collect();
 
@@ -43,15 +43,16 @@ pub fn generate_display(theory: &TheoryDef) -> TokenStream {
 }
 
 /// Generate Display impl for a single category
-fn generate_display_impl(category: &syn::Ident, rules: &[&GrammarRule]) -> TokenStream {
+fn generate_display_impl(category: &syn::Ident, rules: &[&GrammarRule], theory: &TheoryDef) -> TokenStream {
     let mut match_arms: Vec<TokenStream> = rules
         .iter()
-        .map(|rule| generate_display_arm(rule))
+        .map(|rule| generate_display_arm(rule, theory))
         .collect();
 
     // Check if Var variant was auto-generated
+    // Skip for native types - they don't have Var variants
     let has_var_rule = rules.iter().any(|rule| is_var_rule(rule));
-    if !has_var_rule {
+    if !has_var_rule && !has_native_type(category, theory) {
         let var_arm = generate_auto_var_display_arm(category);
         match_arms.push(var_arm);
     }
@@ -67,14 +68,20 @@ fn generate_display_impl(category: &syn::Ident, rules: &[&GrammarRule]) -> Token
     }
 }
 
+/// Check if a category has a native type
+fn has_native_type(category: &syn::Ident, theory: &TheoryDef) -> bool {
+    theory.exports.iter()
+        .any(|e| e.name == *category && e.native_type.is_some())
+}
+
 /// Generate a match arm for displaying a single constructor
-fn generate_display_arm(rule: &GrammarRule) -> TokenStream {
+fn generate_display_arm(rule: &GrammarRule, theory: &TheoryDef) -> TokenStream {
     let category = &rule.category;
     let label = &rule.label;
 
     // Check if this has binders
     if !rule.bindings.is_empty() {
-        return generate_binder_display_arm(rule);
+        return generate_binder_display_arm(rule, theory);
     }
 
     // Collect field names and their types
@@ -131,12 +138,21 @@ fn generate_display_arm(rule: &GrammarRule) -> TokenStream {
                         }
                         if let Some((_, field_name)) = field_iter.next() {
                             format_parts.push("{}".to_string());
-                            format_args_tokens.push(quote! {
-                                match &(#field_name).0 {
-                                    mettail_runtime::Var::Free(fv) => fv.pretty_name.as_ref().map(|s| s.as_str()).unwrap_or("_"),
-                                    mettail_runtime::Var::Bound(bv) => bv.pretty_name.as_ref().map(|s| s.as_str()).unwrap_or("_"),
-                                }
-                            });
+                            // Check if this category has a native type
+                            if has_native_type(&rule.category, theory) {
+                                // For native types, the field is the value directly (e.g., i32)
+                                format_args_tokens.push(quote! {
+                                    #field_name
+                                });
+                            } else {
+                                // For regular Var fields, extract from OrdVar
+                                format_args_tokens.push(quote! {
+                                    match &(#field_name).0 {
+                                        mettail_runtime::Var::Free(fv) => fv.pretty_name.as_ref().map(|s| s.as_str()).unwrap_or("_"),
+                                        mettail_runtime::Var::Bound(bv) => bv.pretty_name.as_ref().map(|s| s.as_str()).unwrap_or("_"),
+                                    }
+                                });
+                            }
                         }
                     },
                     GrammarItem::NonTerminal(_) => {
@@ -174,7 +190,7 @@ fn generate_display_arm(rule: &GrammarRule) -> TokenStream {
 }
 
 /// Generate display for a constructor with binders
-fn generate_binder_display_arm(rule: &GrammarRule) -> TokenStream {
+fn generate_binder_display_arm(rule: &GrammarRule, _theory: &TheoryDef) -> TokenStream {
     let category = &rule.category;
     let label = &rule.label;
 
@@ -402,7 +418,7 @@ mod tests {
         let theory = TheoryDef {
             name: parse_quote!(Test),
             params: vec![],
-            exports: vec![Export { name: parse_quote!(Expr) }],
+            exports: vec![Export { name: parse_quote!(Expr), native_type: None }],
             terms: vec![
                 GrammarRule {
                     label: parse_quote!(Zero),

@@ -320,7 +320,7 @@ mod tests {
         let theory = TheoryDef {
             name: parse_quote!(Test),
             params: vec![],
-            exports: vec![Export { name: parse_quote!(Elem) }],
+            exports: vec![Export { name: parse_quote!(Elem), native_type: None }],
             terms: vec![GrammarRule {
                 label: parse_quote!(Zero),
                 category: parse_quote!(Elem),
@@ -339,7 +339,7 @@ mod tests {
         let theory = TheoryDef {
             name: parse_quote!(Test),
             params: vec![],
-            exports: vec![Export { name: parse_quote!(Elem) }],
+            exports: vec![Export { name: parse_quote!(Elem), native_type: None }],
             terms: vec![GrammarRule {
                 label: parse_quote!(Quote),
                 category: parse_quote!(Name), // Not exported!
@@ -361,7 +361,7 @@ mod tests {
         let theory = TheoryDef {
             name: parse_quote!(Test),
             params: vec![],
-            exports: vec![Export { name: parse_quote!(Elem) }],
+            exports: vec![Export { name: parse_quote!(Elem), native_type: None }],
             terms: vec![GrammarRule {
                 label: parse_quote!(Quote),
                 category: parse_quote!(Elem),
@@ -388,7 +388,7 @@ mod tests {
         let theory = TheoryDef {
             name: parse_quote!(Test),
             params: vec![],
-            exports: vec![Export { name: parse_quote!(Name) }, Export { name: parse_quote!(Proc) }],
+            exports: vec![Export { name: parse_quote!(Name), native_type: None }, Export { name: parse_quote!(Proc), native_type: None }],
             terms: vec![
                 GrammarRule {
                     label: parse_quote!(NQuote),
@@ -455,7 +455,7 @@ mod tests {
         let theory = TheoryDef {
             name: parse_quote!(Test),
             params: vec![],
-            exports: vec![Export { name: parse_quote!(Name) }],
+            exports: vec![Export { name: parse_quote!(Name), native_type: None }],
             terms: vec![GrammarRule {
                 label: parse_quote!(NZero),
                 category: parse_quote!(Name),
@@ -492,7 +492,7 @@ mod tests {
         let theory = TheoryDef {
             name: parse_quote!(Test),
             params: vec![],
-            exports: vec![Export { name: parse_quote!(Name) }],
+            exports: vec![Export { name: parse_quote!(Name), native_type: None }],
             terms: vec![GrammarRule {
                 label: parse_quote!(NVar),
                 category: parse_quote!(Name),

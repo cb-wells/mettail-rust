@@ -23,3 +23,13 @@ fn test_left_associativity() {
     assert_eq!(parse_and_eval("1+2-3").unwrap(), 0);
     assert_eq!(parse_and_eval("(1+2)-3").unwrap(), 0);
 }
+
+#[test]
+fn test_negative_integers() {
+    assert_eq!(parse_and_eval("-5").unwrap(), -5);
+    assert_eq!(parse_and_eval("-10").unwrap(), -10);
+    assert_eq!(parse_and_eval("5 + -3").unwrap(), 2);
+    assert_eq!(parse_and_eval("5 - -3").unwrap(), 8);
+    assert_eq!(parse_and_eval("-5 + 3").unwrap(), -2);
+    assert_eq!(parse_and_eval("-5 - 3").unwrap(), -8);
+}

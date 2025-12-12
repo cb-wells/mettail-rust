@@ -15,7 +15,7 @@ impl Theory for CalculatorTheory {
     }
 
     fn categories(&self) -> Vec<String> {
-        vec!["Expr".to_string()]
+        vec!["Int".to_string()]
     }
 
     fn constructor_count(&self) -> usize {
@@ -63,9 +63,9 @@ impl Theory for CalculatorTheory {
     }
 }
 
-/// Wrapper for i64 evaluation result
+/// Wrapper for i32 evaluation result (native type)
 #[derive(Clone)]
-struct CalcTerm(i64);
+struct CalcTerm(i32);
 
 impl Term for CalcTerm {
     fn clone_box(&self) -> Box<dyn Term> {
@@ -102,7 +102,7 @@ impl fmt::Debug for CalcTerm {
 }
 
 /// Compute a unique ID for a term
-fn compute_term_id(val: i64) -> u64 {
+fn compute_term_id(val: i32) -> u64 {
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
 

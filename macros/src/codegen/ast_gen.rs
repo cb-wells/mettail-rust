@@ -70,16 +70,20 @@ fn generate_ast_enums(theory: &TheoryDef) -> TokenStream {
         let has_var_rule = rules.iter().any(|rule| is_var_rule(rule));
 
         let mut variants: Vec<TokenStream> = rules.iter().map(|rule| {
-            generate_variant(rule)
+            generate_variant(rule, theory)
         }).collect();
 
-        // Automatically add Var variant if it doesn't exist
+        // For native types, we don't add a Var variant (native types don't use variables)
+        // Instead, we'll handle native literals in the parser
         if !has_var_rule {
-            let var_label = generate_var_label(cat_name);
+            // Only add Var variant if this is NOT a native type
+            if export.native_type.is_none() {
+                let var_label = generate_var_label(cat_name);
 
-            variants.push(quote! {
-                #var_label(mettail_runtime::OrdVar)
-            });
+                variants.push(quote! {
+                    #var_label(mettail_runtime::OrdVar)
+                });
+            }
         }
 
         quote! {
@@ -95,7 +99,7 @@ fn generate_ast_enums(theory: &TheoryDef) -> TokenStream {
     }
 }
 
-fn generate_variant(rule: &GrammarRule) -> TokenStream {
+fn generate_variant(rule: &GrammarRule, theory: &TheoryDef) -> TokenStream {
     let label = &rule.label;
 
     // Check if this rule has bindings
@@ -137,8 +141,30 @@ fn generate_variant(rule: &GrammarRule) -> TokenStream {
         #[allow(clippy::cmp_owned)]
         match &fields[0] {
             FieldType::NonTerminal(ident) if ident.to_string() == "Var" => {
-                // Special case: Var field -> generate OrdVar directly (not boxed)
-                quote! { #label(mettail_runtime::OrdVar) }
+                // Special case: Var field
+                // If this category has a native type, use the native type directly
+                // Otherwise, use OrdVar
+                let category = &rule.category;
+                let has_native = theory.exports.iter()
+                    .any(|e| e.name == *category && e.native_type.is_some());
+                
+                if has_native {
+                    // Get the native type
+                    if let Some(native_type) = theory.exports.iter()
+                        .find(|e| e.name == *category)
+                        .and_then(|e| e.native_type.as_ref())
+                    {
+                        // Clone the type to avoid lifetime issues and use it in quote
+                        let native_type_cloned = native_type.clone();
+                        quote! { #label(#native_type_cloned) }
+                    } else {
+                        // Fallback (shouldn't happen)
+                        quote! { #label(mettail_runtime::OrdVar) }
+                    }
+                } else {
+                    // Regular Var -> generate OrdVar directly (not boxed)
+                    quote! { #label(mettail_runtime::OrdVar) }
+                }
             },
             FieldType::NonTerminal(ident) => {
                 // Single non-terminal field
@@ -534,7 +560,7 @@ mod tests {
         let theory = TheoryDef {
             name: parse_quote!(Test),
             params: vec![],
-            exports: vec![Export { name: parse_quote!(Elem) }],
+            exports: vec![Export { name: parse_quote!(Elem), native_type: None }],
             terms: vec![
                 GrammarRule {
                     label: parse_quote!(Zero),
@@ -571,7 +597,7 @@ mod tests {
         let theory = TheoryDef {
             name: parse_quote!(Test),
             params: vec![],
-            exports: vec![Export { name: parse_quote!(Proc) }, Export { name: parse_quote!(Name) }],
+            exports: vec![Export { name: parse_quote!(Proc), native_type: None }, Export { name: parse_quote!(Name), native_type: None }],
             terms: vec![
                 GrammarRule {
                     label: parse_quote!(PZero),
@@ -607,9 +633,9 @@ mod tests {
             name: parse_quote!(Test),
             params: vec![],
             exports: vec![
-                Export { name: parse_quote!(Proc) },
-                Export { name: parse_quote!(Name) },
-                Export { name: parse_quote!(Term) },
+                Export { name: parse_quote!(Proc), native_type: None },
+                Export { name: parse_quote!(Name), native_type: None },
+                Export { name: parse_quote!(Term), native_type: None },
             ],
             terms: vec![
                 GrammarRule {
@@ -685,7 +711,7 @@ mod tests {
         let theory = TheoryDef {
             name: parse_quote!(Test),
             params: vec![],
-            exports: vec![Export { name: parse_quote!(Proc) }],
+            exports: vec![Export { name: parse_quote!(Proc), native_type: None }],
             terms: vec![
                 GrammarRule {
                     label: parse_quote!(PZero),

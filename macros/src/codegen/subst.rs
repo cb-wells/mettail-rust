@@ -30,7 +30,7 @@ pub fn generate_substitution(theory: &TheoryDef) -> TokenStream {
                 .filter(|r| r.category == *category)
                 .collect();
 
-            generate_category_substitution(category, &rules, &all_subst_cats)
+            generate_category_substitution(category, &rules, &all_subst_cats, theory)
         })
         .collect();
 
@@ -76,12 +76,28 @@ fn find_all_substitutable_categories(rules: &[GrammarRule]) -> std::collections:
     cats
 }
 
+/// Check if a category has a native type
+fn has_native_type(category: &Ident, theory: &TheoryDef) -> bool {
+    theory.exports.iter()
+        .any(|e| e.name == *category && e.native_type.is_some())
+}
+
 fn generate_category_substitution(
     category: &Ident,
     rules: &[&GrammarRule],
     subst_cats: &std::collections::HashSet<String>,
+    theory: &TheoryDef,
 ) -> TokenStream {
     let category_str = category.to_string();
+
+    // For native types, skip substitution generation (native values don't need substitution)
+    if has_native_type(category, theory) {
+        return quote! {
+            impl #category {
+                // Native types don't support substitution - they're values, not variables
+            }
+        };
+    }
 
     // Generate the main substitute method (same-category)
     let main_method = generate_substitute_method(category, rules, category);
@@ -118,8 +134,12 @@ fn generate_substitute_method(
         .collect();
 
     // Check if Var variant was auto-generated
+    // Skip for native types - they don't have Var variants and don't need substitution
     let has_var_rule = rules.iter().any(|rule| is_var_constructor(rule));
     if !has_var_rule {
+        // Only generate auto-var substitution if category doesn't have native type
+        // (We already skip substitution entirely for native types in generate_category_substitution,
+        // but this is a safety check)
         let var_arm = generate_auto_var_substitution_arm(category, category);
         match_arms.push(var_arm);
     }
@@ -655,7 +675,7 @@ mod tests {
         let theory = TheoryDef {
             name: parse_quote!(Test),
             params: vec![],
-            exports: vec![Export { name: parse_quote!(Elem) }],
+            exports: vec![Export { name: parse_quote!(Elem), native_type: None }],
             terms: vec![
                 GrammarRule {
                     label: parse_quote!(Zero),

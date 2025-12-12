@@ -137,7 +137,7 @@ fn generate_category_generation_method(cat_name: Ident, theory: &TheoryDef) -> T
         .filter(|r| r.category == cat_name)
         .collect();
 
-    let depth_0_cases = generate_depth_0_cases(&cat_name, &rules);
+    let depth_0_cases = generate_depth_0_cases(&cat_name, &rules, theory);
     let depth_d_cases = generate_depth_d_cases(&cat_name, &rules, theory);
 
     quote! {
@@ -160,7 +160,7 @@ fn generate_category_generation_method(cat_name: Ident, theory: &TheoryDef) -> T
 }
 
 /// Generate depth 0 cases (nullary constructors and variables)
-fn generate_depth_0_cases(cat_name: &Ident, rules: &[&GrammarRule]) -> TokenStream {
+fn generate_depth_0_cases(cat_name: &Ident, rules: &[&GrammarRule], theory: &TheoryDef) -> TokenStream {
     let mut cases = Vec::new();
 
     for rule in rules {
@@ -189,18 +189,33 @@ fn generate_depth_0_cases(cat_name: &Ident, rules: &[&GrammarRule]) -> TokenStre
             // Check if it's a Var constructor
             if let GrammarItem::NonTerminal(nt) = non_terminals[0] {
                 if nt.to_string() == "Var" {
-                    // Variable constructor - generate from var pool
-                    cases.push(quote! {
-                        for var_name in &self.vars {
-                            terms.push(#cat_name::#label(
-                                mettail_runtime::OrdVar(
-                                    mettail_runtime::Var::Free(
-                                        mettail_runtime::get_or_create_var(var_name)
+                    // Check if this category has a native type
+                    let has_native = theory.exports.iter()
+                        .any(|e| e.name == *cat_name && e.native_type.is_some());
+                    
+                    if has_native {
+                        // For native types, generate native values instead of OrdVar
+                        // For i32/i64, generate some sample integers
+                        cases.push(quote! {
+                            // Generate some sample native values
+                            for val in [0i32, 1i32, 2i32, 42i32] {
+                                terms.push(#cat_name::#label(val));
+                            }
+                        });
+                    } else {
+                        // Variable constructor - generate from var pool
+                        cases.push(quote! {
+                            for var_name in &self.vars {
+                                terms.push(#cat_name::#label(
+                                    mettail_runtime::OrdVar(
+                                        mettail_runtime::Var::Free(
+                                            mettail_runtime::get_or_create_var(var_name)
+                                        )
                                     )
-                                )
-                            ));
-                        }
-                    });
+                                ));
+                            }
+                        });
+                    }
                 }
             }
             // Skip Collection constructors - they can't be exhaustively generated

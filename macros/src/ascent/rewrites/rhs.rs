@@ -3,6 +3,70 @@ use crate::ast::{Expr, TheoryDef};
 use proc_macro2::TokenStream;
 use quote::quote;
 use std::collections::HashMap;
+use syn::Ident;
+
+/// Check if a category has a native type
+fn has_native_type<'a>(category: &Ident, theory: &'a TheoryDef) -> Option<&'a syn::Type> {
+    theory.exports.iter()
+        .find(|e| e.name == *category)
+        .and_then(|e| e.native_type.as_ref())
+}
+
+/// Get native type as string for comparison
+fn native_type_to_string(native_type: &syn::Type) -> String {
+    match native_type {
+        syn::Type::Path(type_path) => {
+            if let Some(segment) = type_path.path.segments.last() {
+                segment.ident.to_string()
+            } else {
+                "unknown".to_string()
+            }
+        },
+        _ => "unknown".to_string(),
+    }
+}
+
+/// Generate code to extract native value from an enum variant
+/// For example, if we have `Int::NumLit(42)`, extract `42`
+fn generate_extract_native_value(
+    binding: &TokenStream,
+    category: &Ident,
+    native_type: &syn::Type,
+) -> TokenStream {
+    let type_str = native_type_to_string(native_type);
+    
+    // Find the NumLit constructor for this category
+    // For now, we'll generate a match that extracts from NumLit
+    // This assumes there's a NumLit variant - we might need to make this more flexible
+    
+    if type_str == "i32" || type_str == "i64" {
+        // For integer types, extract from NumLit variant
+        quote! {
+            {
+                let val = #binding;
+                match val {
+                    #category::NumLit(n) => n,
+                    _ => {
+                        // For now, assume it's already evaluated or extract from other variants
+                        // TODO: Add proper evaluation for nested expressions
+                        panic!("Expected NumLit variant for native type evaluation")
+                    }
+                }
+            }
+        }
+    } else {
+        // For other types, similar pattern
+        quote! {
+            {
+                let val = #binding;
+                match val {
+                    #category::NumLit(n) => n,
+                    _ => panic!("Expected NumLit variant for native type evaluation")
+                }
+            }
+        }
+    }
+}
 
 /// Generate RHS construction for Ascent clause
 pub fn generate_ascent_rhs(
@@ -138,11 +202,20 @@ pub fn generate_rhs_construction(
         Expr::Apply { constructor, args } => {
             let category = congruence::extract_category(expr, theory).unwrap();
 
+            // Check if this category has a native type - if so, we might need special handling
+            let native_type_opt = has_native_type(&category, theory);
+
             // Check if this constructor has collection fields
             let grammar_rule = theory
                 .terms
                 .iter()
                 .find(|r| r.label == *constructor && r.category == category);
+
+            // Check if this is a NumLit constructor for a native type
+            // If so, and if args are variables, we might need to evaluate them
+            let is_native_literal = native_type_opt.is_some() 
+                && constructor.to_string() == "NumLit"
+                && args.len() == 1;
 
             let rhs_args: Vec<TokenStream> = args
                 .iter()
@@ -178,6 +251,20 @@ pub fn generate_rhs_construction(
                             generate_ascent_rhs(arg, bindings, theory)
                         };
 
+                    // Special handling for native type NumLit: if arg is a variable bound to a native value,
+                    // extract the native value directly
+                    if is_native_literal && i == 0 {
+                        if let Expr::Var(var) = arg {
+                            let var_name = var.to_string();
+                            if let Some(binding) = bindings.get(&var_name) {
+                                if let Some(native_type) = native_type_opt {
+                                    // Extract native value from the binding
+                                    return generate_extract_native_value(binding, &category, native_type);
+                                }
+                            }
+                        }
+                    }
+
                     // Don't wrap collection fields in Box::new
                     if is_collection_field {
                         inner
@@ -186,6 +273,20 @@ pub fn generate_rhs_construction(
                     }
                 })
                 .collect();
+
+            // If this is NumLit for native type and we have a single native value, construct directly
+            if is_native_literal && rhs_args.len() == 1 {
+                if let Some(native_type) = native_type_opt {
+                    let type_str = native_type_to_string(native_type);
+                    if type_str == "i32" || type_str == "i64" {
+                        // For integer types, NumLit takes the native value directly
+                        let native_val = &rhs_args[0];
+                        return quote! {
+                            #category::NumLit(#native_val)
+                        };
+                    }
+                }
+            }
 
             quote! {
                 #category::#constructor(#(#rhs_args),*)

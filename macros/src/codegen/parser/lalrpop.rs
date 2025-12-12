@@ -20,6 +20,63 @@ fn generate_var_label(category: &syn::Ident) -> String {
     format!("{}Var", first_letter)
 }
 
+/// Check if a category has a native type
+fn has_native_type<'a>(category: &syn::Ident, theory: &'a TheoryDef) -> Option<&'a syn::Type> {
+    theory.exports.iter()
+        .find(|e| e.name == *category)
+        .and_then(|e| e.native_type.as_ref())
+}
+
+/// Get native type as string for comparison
+fn native_type_to_string(native_type: &syn::Type) -> String {
+    // Simple string representation - works for basic types like i32, i64, etc.
+    // For more complex types, this might need improvement
+    // We use a simple approach: convert the type to a string representation
+    match native_type {
+        syn::Type::Path(type_path) => {
+            if let Some(segment) = type_path.path.segments.last() {
+                segment.ident.to_string()
+            } else {
+                "unknown".to_string()
+            }
+        },
+        _ => "unknown".to_string(),
+    }
+}
+
+/// Generate token parser for native type if needed
+fn generate_native_type_tokens(theory: &TheoryDef) -> String {
+    let mut tokens = String::new();
+    
+    // Check all exports for native types and generate appropriate token parsers
+    for export in &theory.exports {
+        if let Some(ref native_type) = export.native_type {
+            let type_str = native_type_to_string(native_type);
+            
+            // Generate token parser based on native type
+            if type_str == "i32" || type_str == "i64" {
+                tokens.push_str(&format!("Integer: {} = {{\n", type_str));
+                // Only match positive integers at token level
+                // Negative integers will be handled in the grammar via unary minus
+                tokens.push_str("    r\"[0-9]+\" => <>.parse().unwrap_or(0),\n");
+                tokens.push_str("};\n\n");
+            } else if type_str == "f32" || type_str == "f64" {
+                tokens.push_str(&format!("Float: {} = {{\n", type_str));
+                tokens.push_str("    r\"[0-9]+\\.[0-9]+\" => <>.parse().unwrap_or(0.0),\n");
+                tokens.push_str("};\n\n");
+            } else if type_str == "bool" {
+                tokens.push_str("Boolean: bool = {\n");
+                tokens.push_str("    \"true\" => true,\n");
+                tokens.push_str("    \"false\" => false,\n");
+                tokens.push_str("};\n\n");
+            }
+            // Add more native types as needed
+        }
+    }
+    
+    tokens
+}
+
 /// Generate a LALRPOP grammar file content for a theory
 ///
 /// This produces the text content of a `.lalrpop` file that can parse
@@ -33,12 +90,19 @@ pub fn generate_lalrpop_grammar(theory: &TheoryDef) -> String {
     grammar.push_str(&format!("// Generated LALRPOP grammar for theory: {}\n", theory_name));
     grammar.push_str("// This file is auto-generated - do not edit manually\n\n");
 
-    // Add use statements for runtime helpers. Only include `Binder` and `Scope`
-    // when the theory contains binder rules to avoid unused-import warnings
+    // Add use statements for runtime helpers. Only include what's needed
     let has_binders = theory.terms.iter().any(|r| !r.bindings.is_empty());
+    
+    // Check if any category needs Var (i.e., has non-native exports)
+    let needs_var = theory.exports.iter().any(|e| e.native_type.is_none());
+    
     if has_binders {
-        grammar.push_str("use mettail_runtime::{Var, Binder, Scope};\n");
-    } else {
+        if needs_var {
+            grammar.push_str("use mettail_runtime::{Var, Binder, Scope};\n");
+        } else {
+            grammar.push_str("use mettail_runtime::{Binder, Scope};\n");
+        }
+    } else if needs_var {
         grammar.push_str("use mettail_runtime::{Var};\n");
     }
 
@@ -61,6 +125,9 @@ pub fn generate_lalrpop_grammar(theory: &TheoryDef) -> String {
     grammar.push_str("    r\"[a-zA-Z_][a-zA-Z0-9_]*\" => <>.to_string(),\n");
     grammar.push_str("};\n\n");
 
+    // Generate native type token parsers if needed
+    grammar.push_str(&generate_native_type_tokens(theory));
+
     // Generate productions for each exported category
     for export in &theory.exports {
         let cat_name = &export.name;
@@ -73,7 +140,7 @@ pub fn generate_lalrpop_grammar(theory: &TheoryDef) -> String {
             .collect();
 
         // Always generate production (even if no rules, we might need Var)
-        grammar.push_str(&generate_category_production(cat_name, &rules));
+        grammar.push_str(&generate_category_production(cat_name, &rules, theory));
         grammar.push('\n');
     }
 
@@ -83,7 +150,7 @@ pub fn generate_lalrpop_grammar(theory: &TheoryDef) -> String {
 /// Generate a LALRPOP production for a category
 ///
 /// This handles precedence by creating tiered rules for infix operators
-fn generate_category_production(category: &syn::Ident, rules: &[&GrammarRule]) -> String {
+fn generate_category_production(category: &syn::Ident, rules: &[&GrammarRule], theory: &TheoryDef) -> String {
     let _cat_str = category.to_string();
 
     // Checks if there's already a Var rule
@@ -95,10 +162,10 @@ fn generate_category_production(category: &syn::Ident, rules: &[&GrammarRule]) -
 
     // If we have infix operators, generate tiered rules for precedence
     if !infix_rules.is_empty() {
-        generate_tiered_production(category, &infix_rules, &other_rules, has_var_rule)
+        generate_tiered_production(category, &infix_rules, &other_rules, has_var_rule, theory)
     } else {
         // No infix operators - generate simple production
-        generate_simple_production(category, &other_rules, has_var_rule)
+        generate_simple_production(category, &other_rules, has_var_rule, theory)
     }
 }
 
@@ -132,6 +199,7 @@ fn generate_tiered_production(
     infix_rules: &[&GrammarRule],
     other_rules: &[&GrammarRule],
     has_var_rule: bool,
+    theory: &TheoryDef,
 ) -> String {
     let cat_str = category.to_string();
     let mut production = String::new();
@@ -161,10 +229,26 @@ fn generate_tiered_production(
     // Add parenthesized expressions - reference the top-level rule
     production.push_str(&format!("    \"(\" <{}> \")\",\n", cat_str));
 
+    // Add unary minus support for native integer types (before other rules for precedence)
+    if let Some(native_type) = has_native_type(category, theory) {
+        let type_str = native_type_to_string(native_type);
+        if type_str == "i32" || type_str == "i64" {
+            // Find the actual Var rule label (e.g., NumLit) from other_rules
+            let var_rule_label = other_rules.iter()
+                .find(|r| is_var_rule(r))
+                .map(|r| r.label.to_string())
+                .unwrap_or_else(|| generate_var_label(category));
+            production.push_str(&format!(
+                "    \"-\" <i:Integer> => {}::{}(-i),\n",
+                cat_str, var_rule_label
+            ));
+        }
+    }
+
     // Add non-infix rules
     for (i, rule) in other_rules.iter().enumerate() {
         production.push_str("    ");
-        production.push_str(&generate_rule_alternative(rule));
+        production.push_str(&generate_rule_alternative_with_theory(rule, Some(theory)));
 
         if i < other_rules.len() - 1 {
             production.push_str(",\n");
@@ -174,12 +258,37 @@ fn generate_tiered_production(
     }
 
     // Automatically adds Var alternative if it doesn't exist (lowest precedence)
+    // But check for native types first - if category has native type, use native literal parser
     if !has_var_rule {
         let var_label = generate_var_label(category);
-        production.push_str(&format!(
-            "    <v:Ident> => {}::{}(mettail_runtime::OrdVar(Var::Free(mettail_runtime::get_or_create_var(v))))\n",
-            cat_str, var_label
-        ));
+        // Check if this category has a native type
+        if let Some(native_type) = has_native_type(category, theory) {
+            let type_str = native_type_to_string(native_type);
+            if type_str == "i32" || type_str == "i64" {
+                // Use Integer token for native integer types
+                // Also add unary minus support for negative numbers
+                production.push_str(&format!(
+                    "    \"-\" <i:Integer> => {}::{}(-i),\n",
+                    cat_str, var_label
+                ));
+                production.push_str(&format!(
+                    "    <i:Integer> => {}::{}(i)\n",
+                    cat_str, var_label
+                ));
+            } else {
+                // Other native types - fall back to Var for now
+                production.push_str(&format!(
+                    "    <v:Ident> => {}::{}(mettail_runtime::OrdVar(Var::Free(mettail_runtime::get_or_create_var(v))))\n",
+                    cat_str, var_label
+                ));
+            }
+        } else {
+            // No native type - use regular Var
+            production.push_str(&format!(
+                "    <v:Ident> => {}::{}(mettail_runtime::OrdVar(Var::Free(mettail_runtime::get_or_create_var(v))))\n",
+                cat_str, var_label
+            ));
+        }
     }
 
     production.push_str("};\n");
@@ -238,6 +347,7 @@ fn generate_simple_production(
     category: &syn::Ident,
     rules: &[&GrammarRule],
     has_var_rule: bool,
+    theory: &TheoryDef,
 ) -> String {
     let mut production = String::new();
 
@@ -247,7 +357,8 @@ fn generate_simple_production(
     // Generate alternative for each rule
     for (i, rule) in rules.iter().enumerate() {
         production.push_str("    ");
-        production.push_str(&generate_rule_alternative(rule));
+        // Pass theory context for native type detection
+        production.push_str(&generate_rule_alternative_with_theory(rule, Some(theory)));
 
         // Adds comma unless it's the last rule and we won't add Var
         if i < rules.len() - 1 || !has_var_rule {
@@ -258,20 +369,45 @@ fn generate_simple_production(
     }
 
     // Automatically adds Var alternative if it doesn't exist (lowest precedence)
+    // But check for native types first - if category has native type, use native literal parser
     if !has_var_rule {
         let var_label = generate_var_label(category);
-        production.push_str(&format!(
-            "    <v:Ident> => {}::{}(mettail_runtime::OrdVar(Var::Free(mettail_runtime::get_or_create_var(v))))\n",
-            category, var_label
-        ));
+        // Check if this category has a native type
+        if let Some(native_type) = has_native_type(category, theory) {
+            let type_str = native_type_to_string(native_type);
+            if type_str == "i32" || type_str == "i64" {
+                // Use Integer token for native integer types
+                // Also add unary minus support for negative numbers
+                production.push_str(&format!(
+                    "    \"-\" <i:Integer> => {}::{}(-i),\n",
+                    category, var_label
+                ));
+                production.push_str(&format!(
+                    "    <i:Integer> => {}::{}(i)\n",
+                    category, var_label
+                ));
+            } else {
+                // Other native types - fall back to Var for now
+                production.push_str(&format!(
+                    "    <v:Ident> => {}::{}(mettail_runtime::OrdVar(Var::Free(mettail_runtime::get_or_create_var(v))))\n",
+                    category, var_label
+                ));
+            }
+        } else {
+            // No native type - use regular Var
+            production.push_str(&format!(
+                "    <v:Ident> => {}::{}(mettail_runtime::OrdVar(Var::Free(mettail_runtime::get_or_create_var(v))))\n",
+                category, var_label
+            ));
+        }
     }
 
     production.push_str("};\n");
     production
 }
 
-/// Generate a LALRPOP alternative for a single grammar rule
-fn generate_rule_alternative(rule: &GrammarRule) -> String {
+/// Generate a LALRPOP alternative for a single grammar rule (with theory context for native types)
+fn generate_rule_alternative_with_theory(rule: &GrammarRule, theory: Option<&TheoryDef>) -> String {
     let label = &rule.label;
     let mut alt = String::new();
 
@@ -288,6 +424,17 @@ fn generate_rule_alternative(rule: &GrammarRule) -> String {
                 alt.push_str(&format!("\"{}\" => {}::{}", term, rule.category, label));
             },
             GrammarItem::NonTerminal(nt) if nt == "Var" => {
+                // Check if this category has a native type - if so, parse as native literal
+                if let Some(theory) = theory {
+                    if let Some(native_type) = has_native_type(&rule.category, theory) {
+                        let type_str = native_type_to_string(native_type);
+                        if type_str == "i32" || type_str == "i64" {
+                            // Parse as integer literal for native integer types
+                            alt.push_str(&format!("<i:Integer> => {}::{}(i)", rule.category, label));
+                            return alt;
+                        }
+                    }
+                }
                 // Variable: need to parse identifier
                 // Use get_or_create_var to ensure same name = same ID within a parse
                 alt.push_str(&format!("<v:Ident> => {}::{}(mettail_runtime::OrdVar(Var::Free(mettail_runtime::get_or_create_var(v))))",
@@ -605,7 +752,7 @@ mod tests {
         let theory = TheoryDef {
             name: parse_quote!(Test),
             params: vec![],
-            exports: vec![Export { name: parse_quote!(Proc) }, Export { name: parse_quote!(Name) }],
+            exports: vec![Export { name: parse_quote!(Proc), native_type: None }, Export { name: parse_quote!(Name), native_type: None }],
             terms: vec![
                 GrammarRule {
                     label: parse_quote!(PZero),
@@ -659,7 +806,7 @@ mod tests {
         let theory = TheoryDef {
             name: parse_quote!(Test),
             params: vec![],
-            exports: vec![Export { name: parse_quote!(Proc) }],
+            exports: vec![Export { name: parse_quote!(Proc), native_type: None }],
             terms: vec![
                 GrammarRule {
                     label: parse_quote!(PZero),

@@ -7,108 +7,51 @@
 use mettail_macros::theory;
 
 // Simple integer calculator theory: supports integer literals, + and -
+// Uses native i32 type for direct integer support
 theory! {
     name: Calculator,
     exports {
-        Expr
+        ![i32] as Int
     },
     terms {
-        // We represent numeric literals as Vars (identifier tokens) so that
-        // the generated parser can capture them. We will pre-process input
-        // to prefix numeric tokens with a letter (e.g. `3` -> `n3`) so they
-        // match the generated `Ident` token. The `NumLit` variant carries
-        // an `OrdVar` which we later read the pretty_name from.
-        NumLit . Expr ::= Var ;
+        // Numeric literals parse directly to i32 values
+        NumLit . Int ::= Var ;
 
-        Add . Expr ::= Expr "+" Expr ;
-        Sub . Expr ::= Expr "-" Expr ;
+        Add . Int ::= Int "+" Int ;
+        Sub . Int ::= Int "-" Int ;
     },
     equations {
     },
     rewrites {
+        // TODO: Add native operation rewrites once AST supports them
+        // For now, evaluation happens via the eval() method
     }
 }
 
-impl Expr {
-    /// Evaluate the expression as `i64`. Numeric literals must be parsed
-    /// as identifiers prefixed with a letter (e.g. `n42`).
-    pub fn eval(&self) -> i64 {
+impl Int {
+    /// Evaluate the expression as `i32`. With native types, `NumLit` contains
+    /// the integer value directly, so evaluation is straightforward.
+    pub fn eval(&self) -> i32 {
         match self {
-            Expr::NumLit(ordvar) => {
-                // Extract pretty_name from the underlying Var (Free or Bound)
-                match &ordvar.0 {
-                    mettail_runtime::Var::Free(fv) => {
-                        if let Some(name) = fv.pretty_name.as_ref() {
-                            // strip optional leading non-digit prefix (e.g. 'n')
-                            let digits: String = name
-                                .chars()
-                                .skip_while(|c| !c.is_ascii_digit())
-                                .collect::<String>();
-                            digits.parse::<i64>().unwrap_or(0)
-                        } else {
-                            0
-                        }
-                    },
-                    mettail_runtime::Var::Bound(bv) => {
-                        if let Some(name) = bv.pretty_name.as_ref() {
-                            let digits: String = name
-                                .chars()
-                                .skip_while(|c| !c.is_ascii_digit())
-                                .collect::<String>();
-                            digits.parse::<i64>().unwrap_or(0)
-                        } else {
-                            0
-                        }
-                    },
-                }
-            },
-            Expr::Add(a, b) => a.eval() + b.eval(),
-            Expr::Sub(a, b) => a.eval() - b.eval(),
+            Int::NumLit(n) => *n,
+            Int::Add(a, b) => a.eval() + b.eval(),
+            Int::Sub(a, b) => a.eval() - b.eval(),
         }
     }
-}
-
-/// Preprocess an input string by prefixing integer tokens with `n` so they
-/// match the generated `Ident` token (which requires a leading letter or `_`).
-fn preprocess_numbers(input: &str) -> String {
-    let mut out = String::new();
-    let mut chars = input.chars().peekable();
-
-    while let Some(&c) = chars.peek() {
-        if c.is_ascii_digit() {
-            let mut num = String::new();
-            while let Some(&d) = chars.peek() {
-                if d.is_ascii_digit() {
-                    num.push(d);
-                    chars.next();
-                } else {
-                    break;
-                }
-            }
-            out.push('n');
-            out.push_str(&num);
-        } else {
-            out.push(c);
-            chars.next();
-        }
-    }
-
-    out
 }
 
 /// Parse an input string (simple integers and + / -) and evaluate it.
-pub fn parse_and_eval(input: &str) -> Result<i64, String> {
+/// With native types, integers parse directly without preprocessing.
+pub fn parse_and_eval(input: &str) -> Result<i32, String> {
     // Clear var cache so variable identities are fresh for this parse
     mettail_runtime::clear_var_cache();
 
-    // Preprocess numeric tokens so they become valid identifiers
-    let pre = preprocess_numbers(input);
-
     // Use the generated parser module (lalrpop will generate `calculator` module)
-    let parser = calculator::ExprParser::new();
-    // The parser returns our generated `Expr` type
+    // With native types, integers parse directly via the Integer token
+    let parser = calculator::IntParser::new();
+    // The parser returns our generated `Int` type
     let expr = parser
-        .parse(&pre)
+        .parse(input)
         .map_err(|e| format!("parse error: {:?}", e))?;
 
     Ok(expr.eval())

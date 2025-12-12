@@ -37,7 +37,7 @@ fn generate_random_for_category(cat_name: &Ident, theory: &TheoryDef) -> TokenSt
         .filter(|r| r.category == *cat_name)
         .collect();
 
-    let depth_0_impl = generate_random_depth_0(cat_name, &rules);
+    let depth_0_impl = generate_random_depth_0(cat_name, &rules, theory);
     let depth_d_impl = generate_random_depth_d(cat_name, &rules, theory);
 
     quote! {
@@ -97,7 +97,7 @@ fn generate_random_for_category(cat_name: &Ident, theory: &TheoryDef) -> TokenSt
 }
 
 /// Generate random depth 0 case (nullary constructors and variables)
-fn generate_random_depth_0(cat_name: &Ident, rules: &[&GrammarRule]) -> TokenStream {
+fn generate_random_depth_0(cat_name: &Ident, rules: &[&GrammarRule], theory: &TheoryDef) -> TokenStream {
     let mut cases = Vec::new();
 
     for rule in rules {
@@ -132,27 +132,40 @@ fn generate_random_depth_0(cat_name: &Ident, rules: &[&GrammarRule]) -> TokenStr
             // Check if it's a Var constructor
             if let GrammarItem::NonTerminal(nt) = non_terminals[0] {
                 if nt.to_string() == "Var" {
-                    // Variable constructor
-                    cases.push(quote! {
-                        if !vars.is_empty() {
-                            let idx = rng.gen_range(0..vars.len());
-                            #cat_name::#label(
-                                mettail_runtime::OrdVar(
-                                    mettail_runtime::Var::Free(
-                                        mettail_runtime::get_or_create_var(&vars[idx])
+                    // Check if this category has a native type
+                    let has_native = theory.exports.iter()
+                        .any(|e| e.name == *cat_name && e.native_type.is_some());
+                    
+                    if has_native {
+                        // For native types, generate random native values
+                        // For i32/i64, generate random integers
+                        cases.push(quote! {
+                            let val = rng.gen_range(-100i32..100i32);
+                            #cat_name::#label(val)
+                        });
+                    } else {
+                        // Variable constructor
+                        cases.push(quote! {
+                            if !vars.is_empty() {
+                                let idx = rng.gen_range(0..vars.len());
+                                #cat_name::#label(
+                                    mettail_runtime::OrdVar(
+                                        mettail_runtime::Var::Free(
+                                            mettail_runtime::get_or_create_var(&vars[idx])
+                                        )
                                     )
                                 )
-                            )
-                        } else {
-                            #cat_name::#label(
-                                mettail_runtime::OrdVar(
-                                    mettail_runtime::Var::Free(
-                                        mettail_runtime::get_or_create_var("_")
+                            } else {
+                                #cat_name::#label(
+                                    mettail_runtime::OrdVar(
+                                        mettail_runtime::Var::Free(
+                                            mettail_runtime::get_or_create_var("_")
+                                        )
                                     )
                                 )
-                            )
-                        }
-                    });
+                            }
+                        });
+                    }
                 }
             }
         }
@@ -243,7 +256,7 @@ fn generate_random_depth_d(
 
     if constructor_cases.is_empty() {
         // No recursive constructors - just return depth 0
-        let depth_0 = generate_random_depth_0(cat_name, rules);
+        let depth_0 = generate_random_depth_0(cat_name, rules, theory);
         quote! { #depth_0 }
     } else {
         // Generate match arms instead of closures to avoid borrowing issues

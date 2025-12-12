@@ -85,10 +85,12 @@ pub enum Expr {
     },
 }
 
-/// Export: just a category name
-/// exports { Elem; Name; }
+/// Export: category name, optionally with native Rust type
+/// exports { Elem; Name; ![i32] as Int; }
 pub struct Export {
     pub name: Ident,
+    /// Optional native Rust type (e.g., `i32` for `![i32] as Int`)
+    pub native_type: Option<Type>,
 }
 
 /// Grammar rule
@@ -255,8 +257,29 @@ fn parse_exports(input: ParseStream) -> SynResult<Vec<Export>> {
 
     let mut exports = Vec::new();
     while !content.is_empty() {
-        let name = content.parse::<Ident>()?;
-        exports.push(Export { name });
+        // Check for native type syntax: ![Type] as Name
+        if content.peek(Token![!]) {
+            let _ = content.parse::<Token![!]>()?;
+            
+            // Parse [Type] - the brackets are part of the syntax, not the type
+            let bracket_content;
+            syn::bracketed!(bracket_content in content);
+            let native_type = bracket_content.parse::<Type>()?;
+            
+            let _ = content.parse::<Token![as]>()?;
+            let name = content.parse::<Ident>()?;
+            exports.push(Export {
+                name,
+                native_type: Some(native_type),
+            });
+        } else {
+            // Regular export: just a name
+            let name = content.parse::<Ident>()?;
+            exports.push(Export {
+                name,
+                native_type: None,
+            });
+        }
 
         if content.peek(Token![;]) {
             let _ = content.parse::<Token![;]>()?;
