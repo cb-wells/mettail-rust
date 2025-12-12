@@ -382,7 +382,8 @@ fn main() {
 
         TestCase {
             name: "open_after_amb_extrusion",
-            input: "{open(n, p) | new(x, {q | n[r]})}",
+            input: "{open(n, p) | new(x, {x[q] | n[r]})}",
+            // = new(x, {open(n,p) | x[q] | n[r]})
             expected_output: None, // Requires equation then multiple rewrites
             should_normalize: false,
             min_rewrites: 1,

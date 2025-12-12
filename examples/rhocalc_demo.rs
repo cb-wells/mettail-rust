@@ -3,8 +3,8 @@
 // This example shows how to use a theory defined in the theories crate
 // to parse terms and run Ascent rewrite rules.
 
-use ascent::*;
 use ascent_byods_rels::*;
+use ascent::*;
 use mettail_theories::rhocalc::*;
 use std::time::Instant;
 
@@ -45,7 +45,7 @@ fn demonstrate_rewrite(input: &str) {
 
     // Run Ascent
     let prog = ascent_run! {
-        include_source!(rhocalc_source);
+        include_source!(mettail_theories::rhocalc::rhocalc_source);
         proc(term.clone());
     };
 

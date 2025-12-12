@@ -24,9 +24,6 @@ theory! {
         PPar . Proc ::= HashBag(Proc) sep "|" delim "{" "}" ;
 
         NQuote . Name ::= "@" "(" Proc ")" ;
-
-        PVar . Proc ::= Var;
-        NVar . Name ::= Var;
     },
 
     equations {
@@ -34,7 +31,8 @@ theory! {
     },
 
     rewrites {
-        (PPar {(PInput N x P), (POutput N Q)})
+        // communication
+         (PPar {(PInput N x P), (POutput N Q)})
             => (PPar {(subst P x (NQuote Q))});
 
         (PDrop (NQuote P)) => P;
@@ -42,3 +40,5 @@ theory! {
         if S => T then (PPar {S, ...rest}) => (PPar {T, ...rest});
     },
 }
+
+//// GENERATED ////

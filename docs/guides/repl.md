@@ -60,7 +60,7 @@ rhocalc> apply 0
 
 ---
 
-### 🚧 Planned (Week 2)
+### 🚧 Planned
 
 #### History & Navigation
 - **`back`** - Navigate to previous term

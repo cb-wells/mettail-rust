@@ -24,17 +24,19 @@ theory! {
         PNew . Proc ::= "new(" <Name> "," Proc ")";
 
         PPar . Proc ::= HashBag(Proc) sep "|" delim "{" "}" ;
-
-        PVar . Proc ::= Var;
-        NVar . Name ::= Var ;
     },
     equations {
-        if x # P then (PPar {(PNew x P), ...rest}) == (PNew x (PPar {P, ...rest}));
-        if x # P then (PIn N (PNew x P)) == (PNew x (PIn N P));
-        if x # P then (POut N (PNew x P)) == (PNew x (POut N P));
-        if x # P then (POpen N (PNew x P)) == (PNew x (POpen N P));
-        if x # P then (PAmb N (PNew x P)) == (PNew x (PAmb N P));
         (PNew x (PNew y P)) == (PNew y (PNew x P));
+        if x # ...rest then 
+        (PPar {(PNew x P), ...rest}) == (PNew x (PPar {P, ...rest}));
+        if x # P then 
+        (PIn N (PNew x P)) == (PNew x (PIn N P));
+        if x # P then 
+        (POut N (PNew x P)) == (PNew x (POut N P));
+        if x # P then 
+        (POpen N (PNew x P)) == (PNew x (POpen N P));
+        if x # P then 
+        (PAmb N (PNew x P)) == (PNew x (PAmb N P));
     },
     rewrites {
         // {n[{in(m,p), ...q}], m[r]} => {m[{n[{p, ...q}], r}]}
@@ -55,3 +57,5 @@ theory! {
         if S => T then (PAmb N S) => (PAmb N T);
     }
 }
+
+//// GENERATED ////
