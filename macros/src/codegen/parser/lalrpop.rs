@@ -761,6 +761,7 @@ mod tests {
             ],
             equations: vec![],
             rewrites: vec![],
+            semantics: vec![],
         };
 
         let grammar = generate_lalrpop_grammar(&theory);
@@ -812,6 +813,7 @@ mod tests {
             ],
             equations: vec![],
             rewrites: vec![],
+            semantics: vec![],
         };
 
         let grammar = generate_lalrpop_grammar(&theory);

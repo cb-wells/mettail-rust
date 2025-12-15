@@ -29,6 +29,10 @@ theory! {
     rewrites {
         // Variable substitution: if env_var(x, v) then VarRef(x) => NumLit(v)
         if env_var(x, v) then (VarRef x) => (NumLit v);
+    },
+    semantics {
+        Add: +,
+        Sub: -,
     }
 }
 
@@ -78,75 +82,11 @@ pub fn env_to_facts(env: &CalculatorEnv) -> Vec<(String, i32)> {
     env.vars.iter().map(|(name, val)| (name.clone(), *val)).collect()
 }
 
-/// Apply rewrites to a term using environment facts
-/// Returns the rewritten term (normal form) or the original if no rewrite applies
-/// 
-/// This implements the rewrite rule: if env_var(x, v) then (VarRef x) => (NumLit v)
-/// by recursively substituting VarRef nodes with their values from the environment.
-fn apply_rewrites_with_env(term: Int, env: &CalculatorEnv) -> Result<Int, String> {
-    // Recursively apply variable substitution (mimicking the rewrite rule)
-    substitute_vars_recursive(&term, env)
-}
-
-/// Recursively substitute VarRef nodes with NumLit values from environment
-/// Implements: if env_var(x, v) then (VarRef x) => (NumLit v)
-fn substitute_vars_recursive(term: &Int, env: &CalculatorEnv) -> Result<Int, String> {
-    match term {
-        Int::VarRef(ord_var) => {
-            // Extract variable name from OrdVar
-            // ord_var is already OrdVar, so we need to match the inner Var
-            let var_name = match ord_var {
-                mettail_runtime::OrdVar(mettail_runtime::Var::Free(ref fv)) => {
-                    // pretty_name is Option<String> in moniker
-                    fv.pretty_name
-                        .as_ref()
-                        .map(|s| s.as_str())
-                        .ok_or_else(|| "Variable has no name".to_string())?
-                }
-                _ => return Err("Cannot substitute bound variable".to_string()),
-            };
-            
-            // Look up value in environment (env_var(x, v))
-            let val = env.get(var_name)
-                .ok_or_else(|| format!("undefined variable: {}", var_name))?;
-            
-            // Apply rewrite: VarRef(x) => NumLit(v)
-            Ok(Int::NumLit(val))
-        }
-        Int::NumLit(n) => Ok(Int::NumLit(*n)),
-        Int::Add(a, b) => {
-            let a_sub = substitute_vars_recursive(a, env)?;
-            let b_sub = substitute_vars_recursive(b, env)?;
-            Ok(Int::Add(Box::new(a_sub), Box::new(b_sub)))
-        }
-        Int::Sub(a, b) => {
-            let a_sub = substitute_vars_recursive(a, env)?;
-            let b_sub = substitute_vars_recursive(b, env)?;
-            Ok(Int::Sub(Box::new(a_sub), Box::new(b_sub)))
-        }
-    }
-}
-
 //=============================================================================
 // EVALUATION
 //=============================================================================
-
-impl Int {
-    /// Evaluate the expression as `i32`.
-    /// With native types, `NumLit` contains the integer value directly,
-    /// so evaluation is straightforward.
-    /// Variables (VarRef) should be substituted via rewrites before evaluation.
-    pub fn eval(&self) -> i32 {
-        match self {
-            Int::VarRef(_) => {
-                panic!("Cannot evaluate VarRef - variables must be substituted via rewrites first");
-            }
-            Int::NumLit(n) => *n,
-            Int::Add(a, b) => a.eval() + b.eval(),
-            Int::Sub(a, b) => a.eval() - b.eval(),
-        }
-    }
-}
+// Note: eval() method is now generated automatically by the theory! macro
+// Note: apply_rewrites_with_facts() is now generated automatically by the theory! macro
 
 /// Parse and evaluate a statement (assignment or expression) with environment.
 /// Returns the computed value.
@@ -174,8 +114,8 @@ pub fn parse_and_eval_with_env(
             .parse(expr_part)
             .map_err(|e| format!("parse error: {:?}", e))?;
 
-        // Apply rewrites to substitute variables
-        let rewritten = apply_rewrites_with_env(expr, env)?;
+        // Apply rewrites to substitute variables using generated method
+        let rewritten = expr.apply_rewrites_with_facts(env_to_facts(env))?;
 
         // Check for remaining variables (undefined variables)
         if has_var_ref(&rewritten) {
@@ -192,8 +132,8 @@ pub fn parse_and_eval_with_env(
             .parse(trimmed)
             .map_err(|e| format!("parse error: {:?}", e))?;
 
-        // Apply rewrites to substitute variables
-        let rewritten = apply_rewrites_with_env(expr, env)?;
+        // Apply rewrites to substitute variables using generated method
+        let rewritten = expr.apply_rewrites_with_facts(env_to_facts(env))?;
 
         // Check for remaining variables (undefined variables)
         if has_var_ref(&rewritten) {

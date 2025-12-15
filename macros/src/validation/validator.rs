@@ -347,6 +347,7 @@ mod tests {
             }],
             equations: vec![],
             rewrites: vec![],
+            semantics: vec![],
         };
 
         assert!(validate_theory(&theory).is_ok());
@@ -369,6 +370,7 @@ mod tests {
             }],
             equations: vec![],
             rewrites: vec![],
+            semantics: vec![],
         };
 
         assert!(validate_theory(&theory).is_err());
@@ -391,6 +393,7 @@ mod tests {
             }],
             equations: vec![],
             rewrites: vec![],
+            semantics: vec![],
         };
 
         let result = validate_theory(&theory);
@@ -457,6 +460,7 @@ mod tests {
                 right: Expr::Var(parse_quote!(P)),
             }],
             rewrites: vec![],
+            semantics: vec![],
         };
 
         // Should pass - x and P both appear in equation, types match
@@ -496,6 +500,7 @@ mod tests {
                 },
             }],
             rewrites: vec![],
+            semantics: vec![],
         };
 
         let result = validate_theory(&theory);
@@ -530,6 +535,7 @@ mod tests {
                 },
             }],
             rewrites: vec![],
+            semantics: vec![],
         };
 
         let result = validate_theory(&theory);

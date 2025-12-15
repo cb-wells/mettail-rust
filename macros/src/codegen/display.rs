@@ -436,6 +436,7 @@ mod tests {
             ],
             equations: vec![],
             rewrites: vec![],
+            semantics: vec![],
         };
 
         let display_impl = generate_display(&theory);

@@ -389,6 +389,7 @@ mod tests {
             ],
             equations: vec![],
             rewrites: vec![],
+            semantics: vec![],
         }
     }
 

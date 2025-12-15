@@ -1,7 +1,7 @@
 #![allow(clippy::cmp_owned, clippy::single_match)]
 
 use super::{display, generate_var_label, is_var_rule, subst, termgen};
-use crate::ast::{GrammarItem, GrammarRule, TheoryDef};
+use crate::ast::{GrammarItem, GrammarRule, TheoryDef, BuiltinOp};
 use proc_macro2::TokenStream;
 use quote::quote;
 use std::collections::HashMap;
@@ -14,6 +14,8 @@ pub fn generate_ast(theory: &TheoryDef) -> TokenStream {
     let display_impl = display::generate_display(theory);
     let generation_impl = termgen::generate_term_generation(theory);
     let random_gen_impl = termgen::generate_random_generation(theory);
+    let eval_impl = generate_eval_method(theory);
+    let rewrite_impl = generate_rewrite_application(theory);
 
     // Generate LALRPOP module reference
     let theory_name = &theory.name;
@@ -36,6 +38,10 @@ pub fn generate_ast(theory: &TheoryDef) -> TokenStream {
         #generation_impl
 
         #random_gen_impl
+
+        #eval_impl
+
+        #rewrite_impl
 
         #[cfg(not(test))]
         #[allow(unused_imports)]
@@ -557,6 +563,310 @@ fn generate_normalize_functions(theory: &TheoryDef) -> TokenStream {
     }
 }
 
+/// Generate eval() method for native types
+fn generate_eval_method(theory: &TheoryDef) -> TokenStream {
+    let mut impls = Vec::new();
+
+    for export in &theory.exports {
+        let category = &export.name;
+        
+        // Only generate for native types
+        let native_type = match export.native_type.as_ref() {
+            Some(ty) => ty,
+            None => continue,
+        };
+
+        // Find all rules for this category
+        let rules: Vec<&GrammarRule> = theory
+            .terms
+            .iter()
+            .filter(|r| r.category == *category)
+            .collect();
+
+        if rules.is_empty() {
+            continue;
+        }
+
+        // Build map of constructor -> semantic operation
+        let mut semantics_map: HashMap<String, BuiltinOp> = HashMap::new();
+        for semantic_rule in &theory.semantics {
+            // Find the rule for this constructor
+            if let Some(rule) = rules.iter().find(|r| r.label == semantic_rule.constructor) {
+                if rule.category == *category {
+                    let crate::ast::SemanticOperation::Builtin(op) = &semantic_rule.operation;
+                    semantics_map.insert(semantic_rule.constructor.to_string(), *op);
+                }
+            }
+        }
+
+        // Generate match arms
+        let mut match_arms = Vec::new();
+
+        for rule in &rules {
+            let label = &rule.label;
+            let label_str = label.to_string();
+
+            // Check if this is NumLit (literal with native type)
+            if label_str == "NumLit" {
+                match_arms.push(quote! {
+                    #category::#label(n) => *n,
+                });
+            }
+            // Check if this is a Var rule (VarRef, etc.)
+            else if is_var_rule(rule) {
+                match_arms.push(quote! {
+                    #category::#label(_) => {
+                        panic!("Cannot evaluate {} - variables must be substituted via rewrites first", stringify!(#label));
+                    }
+                });
+            }
+            // Check if this has semantics (operator)
+            else if let Some(op) = semantics_map.get(&label_str) {
+                // Count non-terminal arguments (excluding terminals)
+                let arg_count = rule.items.iter()
+                    .filter(|item| matches!(item, GrammarItem::NonTerminal(_)))
+                    .count();
+
+                if arg_count == 2 {
+                    // Binary operator
+                    let op_token = match op {
+                        BuiltinOp::Add => quote! { + },
+                        BuiltinOp::Sub => quote! { - },
+                        BuiltinOp::Mul => quote! { * },
+                        BuiltinOp::Div => quote! { / },
+                        BuiltinOp::Rem => quote! { % },
+                        BuiltinOp::BitAnd => quote! { & },
+                        BuiltinOp::BitOr => quote! { | },
+                        BuiltinOp::BitXor => quote! { ^ },
+                        BuiltinOp::Shl => quote! { << },
+                        BuiltinOp::Shr => quote! { >> },
+                    };
+
+                    match_arms.push(quote! {
+                        #category::#label(a, b) => a.eval() #op_token b.eval(),
+                    });
+                } else {
+                    // Unary or other arity - skip for now
+                    continue;
+                }
+            }
+            // Other constructors - skip (no semantics defined)
+        }
+
+        if !match_arms.is_empty() {
+            let impl_block = quote! {
+                impl #category {
+                    /// Evaluate the expression to its native type value.
+                    /// Variables must be substituted via rewrites before evaluation.
+                    pub fn eval(&self) -> #native_type {
+                        match self {
+                            #(#match_arms)*
+                        }
+                    }
+                }
+            };
+            impls.push(impl_block);
+        }
+    }
+
+    quote! {
+        #(#impls)*
+    }
+}
+
+/// Generate apply_rewrites_with_facts() method for categories with rewrites
+fn generate_rewrite_application(theory: &TheoryDef) -> TokenStream {
+    let mut impls = Vec::new();
+
+    // Only generate if there are rewrite rules
+    if theory.rewrites.is_empty() {
+        return quote! {};
+    }
+
+    // Find categories that have rewrite rules
+    let mut categories_with_rewrites = std::collections::HashSet::new();
+    for rewrite in &theory.rewrites {
+        // Extract category from LHS expression
+        if let crate::ast::Expr::Apply { constructor, .. } = &rewrite.left {
+            // Find the rule for this constructor to get its category
+            if let Some(rule) = theory.terms.iter().find(|r| r.label == *constructor) {
+                categories_with_rewrites.insert(rule.category.to_string());
+            }
+        }
+    }
+
+    // Generate for each exported category that has rewrites
+    for export in &theory.exports {
+        let category = &export.name;
+        let cat_str = category.to_string();
+        
+        if !categories_with_rewrites.contains(&cat_str) {
+            continue;
+        }
+
+
+        // Check if there are EnvQuery conditions to determine fact type
+        let has_env_query = theory.rewrites.iter().any(|rw| {
+            rw.conditions.iter().any(|c| matches!(c, crate::ast::Condition::EnvQuery { .. }))
+        });
+
+        if has_env_query {
+            // Find all rules for this category to generate match arms
+            let category_str = category.to_string();
+            let category_rules: Vec<&GrammarRule> = theory
+                .terms
+                .iter()
+                .filter(|r| r.category.to_string() == category_str)
+                .collect();
+            
+            // Find VarRef rule and NumLit rule for the rewrite
+            // Look for any Var rule (not just "VarRef" - could be any name)
+            let var_ref_rule = category_rules.iter().find(|r| is_var_rule(r));
+            // NumLit is specifically the rule named "NumLit" that has native type
+            let num_lit_rule = category_rules.iter().find(|r| {
+                r.label.to_string() == "NumLit"
+            });
+            
+            let num_lit_label = num_lit_rule.map(|r| &r.label);
+            
+            // Generate match arms for all constructors
+            let mut match_arms: Vec<TokenStream> = Vec::new();
+            let category_str = category.to_string();
+            
+            for rule in &category_rules {
+                let label = &rule.label;
+                let label_str = label.to_string();
+                
+                // Check if this is VarRef - apply rewrite
+                let is_var_ref = var_ref_rule
+                    .map(|vr| vr.label.to_string() == label_str)
+                    .unwrap_or(false);
+                
+                if is_var_ref {
+                    if let Some(numlit_label) = num_lit_label {
+                        match_arms.push(quote! {
+                            #category::#label(ord_var) => {
+                                let var_name: &str = match ord_var {
+                                    mettail_runtime::OrdVar(mettail_runtime::Var::Free(ref fv)) => {
+                                        fv.pretty_name.as_deref()
+                                            .ok_or_else(|| "Variable has no name".to_string())?
+                                    }
+                                    _ => return Err("Cannot substitute bound variable".to_string()),
+                                };
+                                let val = env.get(var_name)
+                                    .ok_or_else(|| format!("undefined variable: {}", var_name))?;
+                                Ok(#category::#numlit_label(*val))
+                            }
+                        });
+                        continue;
+                    }
+                }
+                
+                // Check if this is NumLit - pass through (has native type value)
+                let is_num_lit = num_lit_rule
+                    .map(|nl| nl.label.to_string() == label_str)
+                    .unwrap_or(false);
+                
+                if is_num_lit {
+                    match_arms.push(quote! {
+                        #category::#label(n) => Ok(#category::#label(*n))
+                    });
+                    continue;
+                }
+                
+                // For other constructors (Add, Sub, etc.), collect fields
+                let all_fields: Vec<syn::Ident> = rule.items.iter()
+                    .filter_map(|item| {
+                        match item {
+                            GrammarItem::NonTerminal(cat) => Some(cat.clone()),
+                            GrammarItem::Collection { element_type, .. } => Some(element_type.clone()),
+                            _ => None,
+                        }
+                    })
+                    .collect();
+                
+                let field_count = all_fields.len();
+                
+                if field_count == 0 {
+                    // Nullary constructor
+                    match_arms.push(quote! {
+                        #category::#label => Ok(#category::#label)
+                    });
+                } else {
+                    // Constructor with fields - generate recursive match arm
+                    let field_names: Vec<syn::Ident> = (0..field_count)
+                        .map(|i| syn::Ident::new(&format!("f{}", i), proc_macro2::Span::call_site()))
+                        .collect();
+                    
+                    // Generate reconstruction expressions for each field
+                    let reconstructed: Vec<TokenStream> = all_fields.iter()
+                        .enumerate()
+                        .map(|(idx, field_cat)| {
+                            let field_name = &field_names[idx];
+                            let field_cat_str = field_cat.to_string();
+                            
+                            if field_cat_str == category_str && field_cat_str != "Var" {
+                                // Same category - recurse
+                                quote! { Box::new(Self::substitute_vars_recursive(#field_name.as_ref(), env)?) }
+                            } else {
+                                // Different category or Var - just clone
+                                quote! { #field_name.clone() }
+                            }
+                        })
+                        .collect();
+                    
+                    match_arms.push(quote! {
+                        #category::#label(#(#field_names),*) => {
+                            Ok(#category::#label(#(#reconstructed),*))
+                        }
+                    });
+                }
+            }
+            
+            // Ensure we have at least some match arms (should always have VarRef and NumLit at minimum)
+            if match_arms.is_empty() {
+                return quote! {
+                    compile_error!("No match arms generated for category with env_var rewrites");
+                };
+            }
+            
+            // Generate function that accepts env_var facts: (String, i32)
+            let impl_block = quote! {
+                impl #category {
+                    /// Apply rewrites using environment facts.
+                    /// Returns the normal form (most reduced term) after applying all rewrites.
+                    /// 
+                    /// Implements the rewrite rule: if env_var(x, v) then (VarRef x) => (NumLit v)
+                    pub fn apply_rewrites_with_facts<I>(&self, facts: I) -> Result<#category, String>
+                    where
+                        I: IntoIterator<Item = (String, i32)>,
+                    {
+                        // Convert facts to HashMap for efficient lookup
+                        use std::collections::HashMap;
+                        let env: HashMap<String, i32> = facts.into_iter().collect();
+                        
+                        // Apply rewrites recursively
+                        Self::substitute_vars_recursive(self, &env)
+                    }
+                    
+                    /// Recursively substitute variables using environment facts
+                    /// Implements the rewrite rule: if env_var(x, v) then (VarRef x) => (NumLit v)
+                    fn substitute_vars_recursive(term: &#category, env: &HashMap<String, i32>) -> Result<#category, String> {
+                        match term {
+                            #(#match_arms),*
+                        }
+                    }
+                }
+            };
+            impls.push(impl_block);
+        }
+    }
+
+    quote! {
+        #(#impls)*
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -589,6 +899,7 @@ mod tests {
             ],
             equations: vec![],
             rewrites: vec![],
+            semantics: vec![],
         };
 
         let output = generate_ast(&theory);
@@ -625,6 +936,7 @@ mod tests {
             ],
             equations: vec![],
             rewrites: vec![],
+            semantics: vec![],
         };
 
         let output = generate_ast(&theory);
@@ -665,6 +977,7 @@ mod tests {
             ],
             equations: vec![],
             rewrites: vec![],
+            semantics: vec![],
         };
 
         let output = generate_ast(&theory);
@@ -737,6 +1050,7 @@ mod tests {
             ],
             equations: vec![],
             rewrites: vec![],
+            semantics: vec![],
         };
 
         let output = generate_ast(&theory);

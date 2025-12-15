@@ -4,7 +4,7 @@ use syn::{
 };
 
 /// Top-level theory definition
-/// theory! { name: Foo, params: ..., exports { ... }, terms { ... }, equations { ... }, rewrites { ... } }
+/// theory! { name: Foo, params: ..., exports { ... }, terms { ... }, equations { ... }, rewrites { ... }, semantics { ... } }
 pub struct TheoryDef {
     pub name: Ident,
     #[allow(dead_code)]
@@ -13,6 +13,7 @@ pub struct TheoryDef {
     pub terms: Vec<GrammarRule>,
     pub equations: Vec<Equation>,
     pub rewrites: Vec<RewriteRule>,
+    pub semantics: Vec<SemanticRule>,
 }
 
 /// Theory parameter (for generic theories)
@@ -71,6 +72,36 @@ pub struct RewriteRule {
     pub premise: Option<(Ident, Ident)>,
     pub left: Expr,
     pub right: Expr,
+}
+
+/// Semantic rule for operator evaluation
+/// semantics { Add: +, Sub: -, ... }
+#[derive(Debug, Clone)]
+pub struct SemanticRule {
+    pub constructor: Ident,
+    pub operation: SemanticOperation,
+}
+
+/// Semantic operation type
+#[derive(Debug, Clone)]
+pub enum SemanticOperation {
+    /// Built-in operations: Add, Sub, Mul, Div, etc.
+    Builtin(BuiltinOp),
+}
+
+/// Built-in operator types
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BuiltinOp {
+    Add,    // +
+    Sub,    // -
+    Mul,    // *
+    Div,    // /
+    Rem,    // %
+    BitAnd, // &
+    BitOr,  // |
+    BitXor, // ^
+    Shl,    // <<
+    Shr,    // >>
 }
 
 /// Expression in equations (AST patterns)
@@ -219,6 +250,18 @@ impl Parse for TheoryDef {
             Vec::new()
         };
 
+        // Parse: semantics { ... }
+        let semantics = if input.peek(Ident) {
+            let lookahead = input.fork().parse::<Ident>()?;
+            if lookahead == "semantics" {
+                parse_semantics(input)?
+            } else {
+                Vec::new()
+            }
+        } else {
+            Vec::new()
+        };
+
         Ok(TheoryDef {
             name,
             params,
@@ -226,6 +269,7 @@ impl Parse for TheoryDef {
             terms,
             equations,
             rewrites,
+            semantics,
         })
     }
 }
@@ -808,6 +852,82 @@ fn parse_rewrite_rule(input: ParseStream) -> SynResult<RewriteRule> {
     }
 
     Ok(RewriteRule { conditions, premise, left, right })
+}
+
+fn parse_semantics(input: ParseStream) -> SynResult<Vec<SemanticRule>> {
+    let semantics_ident = input.parse::<Ident>()?;
+    if semantics_ident != "semantics" {
+        return Err(syn::Error::new(semantics_ident.span(), "expected 'semantics'"));
+    }
+
+    let content;
+    syn::braced!(content in input);
+
+    let mut rules = Vec::new();
+    while !content.is_empty() {
+        // Parse: Constructor: Operator
+        let constructor = content.parse::<Ident>()?;
+        let _ = content.parse::<Token![:]>()?;
+        
+        // Parse operator symbol
+        let op = if content.peek(Token![+]) {
+            let _ = content.parse::<Token![+]>()?;
+            BuiltinOp::Add
+        } else if content.peek(Token![-]) {
+            let _ = content.parse::<Token![-]>()?;
+            BuiltinOp::Sub
+        } else if content.peek(Token![*]) {
+            let _ = content.parse::<Token![*]>()?;
+            BuiltinOp::Mul
+        } else if content.peek(Token![/]) {
+            let _ = content.parse::<Token![/]>()?;
+            BuiltinOp::Div
+        } else if content.peek(Token![%]) {
+            let _ = content.parse::<Token![%]>()?;
+            BuiltinOp::Rem
+        } else if content.peek(Token![&]) {
+            let _ = content.parse::<Token![&]>()?;
+            BuiltinOp::BitAnd
+        } else if content.peek(Token![|]) {
+            let _ = content.parse::<Token![|]>()?;
+            BuiltinOp::BitOr
+        } else if content.peek(Token![^]) {
+            let _ = content.parse::<Token![^]>()?;
+            BuiltinOp::BitXor
+        } else if content.peek(Token![<]) && content.peek2(Token![<]) {
+            let _ = content.parse::<Token![<]>()?;
+            let _ = content.parse::<Token![<]>()?;
+            BuiltinOp::Shl
+        } else if content.peek(Token![>]) && content.peek2(Token![>]) {
+            let _ = content.parse::<Token![>]>()?;
+            let _ = content.parse::<Token![>]>()?;
+            BuiltinOp::Shr
+        } else {
+            return Err(syn::Error::new(
+                content.span(),
+                "expected operator symbol (+, -, *, /, %, &, |, ^, <<, >>)",
+            ));
+        };
+
+        rules.push(SemanticRule {
+            constructor,
+            operation: SemanticOperation::Builtin(op),
+        });
+
+        // Optional comma or semicolon
+        if content.peek(Token![,]) {
+            let _ = content.parse::<Token![,]>()?;
+        } else if content.peek(Token![;]) {
+            let _ = content.parse::<Token![;]>()?;
+        }
+    }
+
+    // Optional comma after closing brace
+    if input.peek(Token![,]) {
+        let _ = input.parse::<Token![,]>()?;
+    }
+
+    Ok(rules)
 }
 
 #[cfg(test)]

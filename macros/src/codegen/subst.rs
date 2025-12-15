@@ -688,6 +688,7 @@ mod tests {
             ],
             equations: vec![],
             rewrites: vec![],
+            semantics: vec![],
         };
 
         let output = generate_substitution(&theory);
