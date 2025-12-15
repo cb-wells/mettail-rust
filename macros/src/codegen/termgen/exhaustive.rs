@@ -189,12 +189,14 @@ fn generate_depth_0_cases(cat_name: &Ident, rules: &[&GrammarRule], theory: &The
             // Check if it's a Var constructor
             if let GrammarItem::NonTerminal(nt) = non_terminals[0] {
                 if nt.to_string() == "Var" {
-                    // Check if this category has a native type
+                    // Check if this is NumLit with a native type
+                    let label_str = label.to_string();
+                    let is_numlit = label_str == "NumLit";
                     let has_native = theory.exports.iter()
                         .any(|e| e.name == *cat_name && e.native_type.is_some());
                     
-                    if has_native {
-                        // For native types, generate native values instead of OrdVar
+                    if has_native && is_numlit {
+                        // For NumLit with native types, generate native values
                         // For i32/i64, generate some sample integers
                         cases.push(quote! {
                             // Generate some sample native values
@@ -203,7 +205,7 @@ fn generate_depth_0_cases(cat_name: &Ident, rules: &[&GrammarRule], theory: &The
                             }
                         });
                     } else {
-                        // Variable constructor - generate from var pool
+                        // VarRef or other Var rules - generate from var pool
                         cases.push(quote! {
                             for var_name in &self.vars {
                                 terms.push(#cat_name::#label(

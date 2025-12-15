@@ -142,27 +142,35 @@ fn generate_variant(rule: &GrammarRule, theory: &TheoryDef) -> TokenStream {
         match &fields[0] {
             FieldType::NonTerminal(ident) if ident.to_string() == "Var" => {
                 // Special case: Var field
-                // If this category has a native type, use the native type directly
-                // Otherwise, use OrdVar
+                // If this is NumLit with a native type, use the native type directly
+                // VarRef and all other Var rules use OrdVar
                 let category = &rule.category;
-                let has_native = theory.exports.iter()
-                    .any(|e| e.name == *category && e.native_type.is_some());
+                let label_str = label.to_string();
                 
-                if has_native {
-                    // Get the native type
-                    if let Some(native_type) = theory.exports.iter()
-                        .find(|e| e.name == *category)
-                        .and_then(|e| e.native_type.as_ref())
-                    {
-                        // Clone the type to avoid lifetime issues and use it in quote
-                        let native_type_cloned = native_type.clone();
-                        quote! { #label(#native_type_cloned) }
+                // Explicitly check: only NumLit with native type gets native type
+                if label_str == "NumLit" {
+                    let has_native = theory.exports.iter()
+                        .any(|e| e.name == *category && e.native_type.is_some());
+                    
+                    if has_native {
+                        // NumLit with native type -> use native type (i32)
+                        if let Some(native_type) = theory.exports.iter()
+                            .find(|e| e.name == *category)
+                            .and_then(|e| e.native_type.as_ref())
+                        {
+                            // Clone the type to avoid lifetime issues and use it in quote
+                            let native_type_cloned = native_type.clone();
+                            quote! { #label(#native_type_cloned) }
+                        } else {
+                            // Fallback (shouldn't happen)
+                            quote! { #label(mettail_runtime::OrdVar) }
+                        }
                     } else {
-                        // Fallback (shouldn't happen)
+                        // NumLit without native type -> use OrdVar
                         quote! { #label(mettail_runtime::OrdVar) }
                     }
                 } else {
-                    // Regular Var -> generate OrdVar directly (not boxed)
+                    // VarRef or any other Var rule -> always use OrdVar
                     quote! { #label(mettail_runtime::OrdVar) }
                 }
             },

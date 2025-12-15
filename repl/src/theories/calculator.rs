@@ -33,7 +33,7 @@ impl Theory for CalculatorTheory {
     }
 
     fn rewrite_count(&self) -> usize {
-        0 // No rewrite rules defined
+        1 // Variable substitution rewrite rule
     }
 
     fn parse_term(&self, input: &str) -> Result<Box<dyn Term>> {

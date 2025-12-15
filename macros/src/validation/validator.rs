@@ -240,37 +240,55 @@ fn validate_rewrite_freshness(rw: &RewriteRule) -> Result<(), ValidationError> {
     collect_vars(&rw.left, &mut rewrite_vars);
     collect_vars(&rw.right, &mut rewrite_vars);
 
-    // Validate each freshness condition
+    // Validate each condition
     for cond in &rw.conditions {
-        let var_name = cond.var.to_string();
-        let (term_name, term_span) = match &cond.term {
-            crate::ast::FreshnessTarget::Var(id) => (id.to_string(), id.span()),
-            crate::ast::FreshnessTarget::CollectionRest(id) => (id.to_string(), id.span()),
-        };
+        match cond {
+            crate::ast::Condition::Freshness(freshness) => {
+                let var_name = freshness.var.to_string();
+                let (term_name, term_span) = match &freshness.term {
+                    crate::ast::FreshnessTarget::Var(id) => (id.to_string(), id.span()),
+                    crate::ast::FreshnessTarget::CollectionRest(id) => (id.to_string(), id.span()),
+                };
 
-        // Check that the variable appears in the rewrite
-        if !rewrite_vars.contains(&var_name) {
-            return Err(ValidationError::FreshnessVariableNotInEquation {
-                var: var_name,
-                span: cond.var.span(),
-            });
-        }
+                // Check that the variable appears in the rewrite
+                if !rewrite_vars.contains(&var_name) {
+                    return Err(ValidationError::FreshnessVariableNotInEquation {
+                        var: var_name,
+                        span: freshness.var.span(),
+                    });
+                }
 
-        // Check that the term variable appears in the rewrite
-        if !rewrite_vars.contains(&term_name) {
-            return Err(ValidationError::FreshnessTermNotInEquation {
-                var: var_name,
-                term: term_name,
-                span: term_span,
-            });
-        }
+                // Check that the term variable appears in the rewrite
+                if !rewrite_vars.contains(&term_name) {
+                    return Err(ValidationError::FreshnessTermNotInEquation {
+                        var: var_name,
+                        term: term_name,
+                        span: term_span,
+                    });
+                }
 
-        // Check that x != term (can't be fresh in itself)
-        if var_name == term_name {
-            return Err(ValidationError::FreshnessSelfReference {
-                var: var_name,
-                span: cond.var.span(),
-            });
+                // Check that x != term (can't be fresh in itself)
+                if var_name == term_name {
+                    return Err(ValidationError::FreshnessSelfReference {
+                        var: var_name,
+                        span: freshness.var.span(),
+                    });
+                }
+            }
+            crate::ast::Condition::EnvQuery { relation: _, args } => {
+                // Validate that the first arg (variable name) appears in the rewrite
+                // The second arg (value) is bound from the query, so it doesn't need to appear
+                if let Some(first_arg) = args.first() {
+                    let arg_name = first_arg.to_string();
+                    if !rewrite_vars.contains(&arg_name) {
+                        return Err(ValidationError::FreshnessVariableNotInEquation {
+                            var: arg_name,
+                            span: first_arg.span(),
+                        });
+                    }
+                }
+                // Other args (like the value) are bound from the query, so they don't need validation
+            }
         }
     }
 

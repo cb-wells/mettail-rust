@@ -1,6 +1,7 @@
 // Generated LALRPOP grammar for theory: Calculator
 // This file is auto-generated - do not edit manually
 
+use mettail_runtime::{Var};
 use super::{Int};
 
 grammar;
@@ -26,6 +27,7 @@ IntInfix: Int = {
 IntAtom: Int = {
     "(" <Int> ")",
     "-" <i:Integer> => Int::NumLit(-i),
+    <v:Ident> => Int::VarRef(mettail_runtime::OrdVar(Var::Free(mettail_runtime::get_or_create_var(v)))),
     <i:Integer> => Int::NumLit(i)
 };
 

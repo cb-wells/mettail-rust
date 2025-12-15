@@ -16,7 +16,7 @@ use super::rhs::generate_ascent_rhs;
 use crate::ascent::congruence::extract_category;
 use crate::ast::{Expr, RewriteRule, TheoryDef};
 use proc_macro2::TokenStream;
-use quote::quote;
+use quote::{format_ident, quote};
 use std::collections::HashMap;
 use syn::Ident;
 
@@ -136,32 +136,84 @@ fn generate_rewrite_clause(rule: &RewriteRule, theory: &TheoryDef) -> TokenStrea
     // Add equational checks for duplicate variables
     clauses.extend(equational_checks);
 
-    // Add freshness checks
+    // Add condition checks (freshness or environment queries)
     for condition in &rule.conditions {
-        let var_name = condition.var.to_string();
-        let term_name = match &condition.term {
-            crate::ast::FreshnessTarget::Var(id) => id.to_string(),
-            crate::ast::FreshnessTarget::CollectionRest(id) => id.to_string(),
-        };
+        match condition {
+            crate::ast::Condition::Freshness(freshness) => {
+                let var_name = freshness.var.to_string();
+                let term_name = match &freshness.term {
+                    crate::ast::FreshnessTarget::Var(id) => id.to_string(),
+                    crate::ast::FreshnessTarget::CollectionRest(id) => id.to_string(),
+                };
 
-        let var_binding = bindings.get(&var_name).unwrap_or_else(|| {
-            panic!(
-                "Freshness variable '{}' not bound. Available bindings: {:?}",
-                var_name,
-                bindings.keys().collect::<Vec<_>>()
-            )
-        });
-        let term_binding = bindings.get(&term_name).unwrap_or_else(|| {
-            panic!(
-                "Freshness term '{}' not bound. Available bindings: {:?}",
-                term_name,
-                bindings.keys().collect::<Vec<_>>()
-            )
-        });
+                let var_binding = bindings.get(&var_name).unwrap_or_else(|| {
+                    panic!(
+                        "Freshness variable '{}' not bound. Available bindings: {:?}",
+                        var_name,
+                        bindings.keys().collect::<Vec<_>>()
+                    )
+                });
+                let term_binding = bindings.get(&term_name).unwrap_or_else(|| {
+                    panic!(
+                        "Freshness term '{}' not bound. Available bindings: {:?}",
+                        term_name,
+                        bindings.keys().collect::<Vec<_>>()
+                    )
+                });
 
-        clauses.push(quote! {
-            if is_fresh(&#var_binding, &#term_binding)
-        });
+                clauses.push(quote! {
+                    if is_fresh(&#var_binding, &#term_binding)
+                });
+            }
+            crate::ast::Condition::EnvQuery { relation, args } => {
+                // Generate Ascent clause that queries the environment relation
+                // Example: if env_var(x, v) then (VarRef x) => (NumLit v)
+                // Pattern: (VarRef x) binds x to OrdVar
+                // Condition: env_var(x, v) means query env_var with x's name, bind v to the value
+                // RHS: (NumLit v) uses v which is bound from the query
+                
+                if args.len() < 2 {
+                    panic!("EnvQuery condition requires at least 2 arguments (variable name and value)");
+                }
+                
+                let var_arg = &args[0];  // x - bound from LHS pattern
+                let val_arg = &args[1];  // v - will be bound from env_var query
+                
+                let var_binding = bindings.get(&var_arg.to_string()).unwrap_or_else(|| {
+                    panic!(
+                        "EnvQuery variable '{}' not bound. Available bindings: {:?}",
+                        var_arg,
+                        bindings.keys().collect::<Vec<_>>()
+                    )
+                });
+                
+                // Extract variable name from OrdVar
+                // OrdVar contains Var::Free(FreeVar) which has pretty_name
+                let var_name_extraction = quote! {
+                    {
+                        let var_name_opt = match #var_binding {
+                            mettail_runtime::OrdVar(mettail_runtime::Var::Free(ref fv)) => {
+                                fv.pretty_name.clone()
+                            }
+                            _ => None
+                        };
+                        var_name_opt
+                    }
+                };
+                
+                // Generate clause: env_var(var_name, val) where:
+                // - var_name is extracted from the OrdVar (x binding)
+                // - val is bound from the query and will be used in RHS as v
+                let val_binding_name = format_ident!("{}", val_arg.to_string());
+                clauses.push(quote! {
+                    if let Some(var_name) = #var_name_extraction,
+                    #relation(var_name, #val_binding_name)
+                });
+                
+                // Add val_binding to bindings so RHS can use it
+                bindings.insert(val_arg.to_string(), quote! { #val_binding_name });
+            }
+        }
     }
 
     // Generate RHS

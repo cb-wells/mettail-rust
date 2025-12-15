@@ -5,6 +5,23 @@
 import * as Blockly from "blockly/core";
 
 const definitions = [
+	// Var Ref: ...
+	{
+		type: "int_var_ref",
+		tooltip: "Var Ref: ...",
+		message0: "%1",
+		args0: [
+			{
+				type: "field_input",
+				name: "VAR",
+				text: "v",
+			},
+		],
+		inputsInline: true,
+		output: "Int",
+		colour: "51b0e0",
+	},
+
 	// Num Lit: ...
 	{
 		type: "int_num_lit",

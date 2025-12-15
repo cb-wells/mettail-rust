@@ -93,8 +93,9 @@ pub fn generate_lalrpop_grammar(theory: &TheoryDef) -> String {
     // Add use statements for runtime helpers. Only include what's needed
     let has_binders = theory.terms.iter().any(|r| !r.bindings.is_empty());
     
-    // Check if any category needs Var (i.e., has non-native exports)
-    let needs_var = theory.exports.iter().any(|e| e.native_type.is_none());
+    // Check if any category needs Var (i.e., has non-native exports OR has Var rules)
+    let needs_var = theory.exports.iter().any(|e| e.native_type.is_none())
+        || theory.terms.iter().any(|r| is_var_rule(r));
     
     if has_binders {
         if needs_var {
@@ -233,14 +234,21 @@ fn generate_tiered_production(
     if let Some(native_type) = has_native_type(category, theory) {
         let type_str = native_type_to_string(native_type);
         if type_str == "i32" || type_str == "i64" {
-            // Find the actual Var rule label (e.g., NumLit) from other_rules
-            let var_rule_label = other_rules.iter()
-                .find(|r| is_var_rule(r))
+            // Find the NumLit rule (for integer literals), not VarRef (for variables)
+            // Explicitly look for NumLit first
+            let numlit_label = other_rules.iter()
+                .find(|r| r.label.to_string() == "NumLit")
                 .map(|r| r.label.to_string())
-                .unwrap_or_else(|| generate_var_label(category));
+                .unwrap_or_else(|| {
+                    // Fallback: find any Var rule that's not VarRef
+                    other_rules.iter()
+                        .find(|r| is_var_rule(r) && r.label.to_string() != "VarRef")
+                        .map(|r| r.label.to_string())
+                        .unwrap_or_else(|| "NumLit".to_string())
+                });
             production.push_str(&format!(
                 "    \"-\" <i:Integer> => {}::{}(-i),\n",
-                cat_str, var_rule_label
+                cat_str, numlit_label
             ));
         }
     }
@@ -407,7 +415,7 @@ fn generate_simple_production(
 }
 
 /// Generate a LALRPOP alternative for a single grammar rule (with theory context for native types)
-fn generate_rule_alternative_with_theory(rule: &GrammarRule, theory: Option<&TheoryDef>) -> String {
+fn generate_rule_alternative_with_theory(rule: &GrammarRule, _theory: Option<&TheoryDef>) -> String {
     let label = &rule.label;
     let mut alt = String::new();
 
@@ -424,18 +432,20 @@ fn generate_rule_alternative_with_theory(rule: &GrammarRule, theory: Option<&The
                 alt.push_str(&format!("\"{}\" => {}::{}", term, rule.category, label));
             },
             GrammarItem::NonTerminal(nt) if nt == "Var" => {
-                // Check if this category has a native type - if so, parse as native literal
-                if let Some(theory) = theory {
+                // Special case: NumLit with native type should parse Integer token, not Var
+                if let Some(theory) = _theory {
                     if let Some(native_type) = has_native_type(&rule.category, theory) {
                         let type_str = native_type_to_string(native_type);
                         if type_str == "i32" || type_str == "i64" {
-                            // Parse as integer literal for native integer types
-                            alt.push_str(&format!("<i:Integer> => {}::{}(i)", rule.category, label));
-                            return alt;
+                            // For NumLit with native integer type, parse Integer token
+                            if label.to_string() == "NumLit" {
+                                alt.push_str(&format!("<i:Integer> => {}::{}(i)", rule.category, label));
+                                return alt;
+                            }
                         }
                     }
                 }
-                // Variable: need to parse identifier
+                // Variable: need to parse identifier as variable node
                 // Use get_or_create_var to ensure same name = same ID within a parse
                 alt.push_str(&format!("<v:Ident> => {}::{}(mettail_runtime::OrdVar(Var::Free(mettail_runtime::get_or_create_var(v))))",
                     rule.category, label));

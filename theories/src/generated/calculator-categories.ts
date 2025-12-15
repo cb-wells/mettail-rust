@@ -4,6 +4,7 @@
 export const categoryInfo = {
 	Int: {
 		constructors: [
+			"VarRef",
 			"NumLit",
 			"Add",
 			"Sub"

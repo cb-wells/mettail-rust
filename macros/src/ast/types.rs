@@ -40,16 +40,32 @@ pub enum FreshnessTarget {
     CollectionRest(Ident),
 }
 
+#[derive(Debug, Clone)]
 pub struct FreshnessCondition {
     pub var: Ident,
     pub term: FreshnessTarget,
 }
 
+/// Condition types for rewrite rules
+#[derive(Debug, Clone)]
+pub enum Condition {
+    /// Freshness condition: if x # Q then
+    Freshness(FreshnessCondition),
+    /// Environment query condition: if env_var(x, v) then
+    EnvQuery {
+        /// Relation name (e.g., "env_var")
+        relation: Ident,
+        /// Arguments to the relation (e.g., ["x", "v"])
+        args: Vec<Ident>,
+    },
+}
+
 /// Rewrite rule with optional freshness conditions and optional congruence premise
 /// Base: (LHS) => (RHS) or if x # Q then (LHS) => (RHS)
 /// Congruence: if S => T then (LHS) => (RHS)
+/// Environment: if env_var(x, v) then (LHS) => (RHS)
 pub struct RewriteRule {
-    pub conditions: Vec<FreshnessCondition>,
+    pub conditions: Vec<Condition>,
     /// Optional congruence premise: (source_var, target_var)
     /// if S => T then ... represents Some(("S", "T"))
     pub premise: Option<(Ident, Ident)>,
@@ -692,9 +708,31 @@ fn parse_rewrite_rule(input: ParseStream) -> SynResult<RewriteRule> {
     while input.peek(Token![if]) {
         let _ = input.parse::<Token![if]>()?;
 
+        // Check if this is an environment query: if env_var(x, v) then
+        if input.peek(Ident) && input.peek2(syn::token::Paren) {
+            // Parse: env_var(x, v)
+            let relation = input.parse::<Ident>()?;
+            let args_content;
+            syn::parenthesized!(args_content in input);
+            
+            let mut args = Vec::new();
+            while !args_content.is_empty() {
+                args.push(args_content.parse::<Ident>()?);
+                if args_content.peek(Token![,]) {
+                    let _ = args_content.parse::<Token![,]>()?;
+                }
+            }
+            
+            let then_kw = input.parse::<Ident>()?;
+            if then_kw != "then" {
+                return Err(syn::Error::new(then_kw.span(), "expected 'then'"));
+            }
+            
+            conditions.push(Condition::EnvQuery { relation, args });
+        }
         // Allow either parenthesized freshness clause: if (x # ...rest) then
         // or the original forms: if x # P then  OR congruence: if S => T then
-        if input.peek(syn::token::Paren) {
+        else if input.peek(syn::token::Paren) {
             let paren_content;
             syn::parenthesized!(paren_content in input);
 
@@ -716,7 +754,7 @@ fn parse_rewrite_rule(input: ParseStream) -> SynResult<RewriteRule> {
                 return Err(syn::Error::new(then_kw.span(), "expected 'then'"));
             }
 
-            conditions.push(FreshnessCondition { var, term });
+            conditions.push(Condition::Freshness(FreshnessCondition { var, term }));
         } else {
             // Not parenthesized - could be congruence premise or freshness
             let var = input.parse::<Ident>()?;
@@ -749,7 +787,7 @@ fn parse_rewrite_rule(input: ParseStream) -> SynResult<RewriteRule> {
                     return Err(syn::Error::new(then_kw.span(), "expected 'then'"));
                 }
 
-                conditions.push(FreshnessCondition { var, term });
+                conditions.push(Condition::Freshness(FreshnessCondition { var, term }));
             }
         }
     }

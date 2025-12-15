@@ -132,19 +132,21 @@ fn generate_random_depth_0(cat_name: &Ident, rules: &[&GrammarRule], theory: &Th
             // Check if it's a Var constructor
             if let GrammarItem::NonTerminal(nt) = non_terminals[0] {
                 if nt.to_string() == "Var" {
-                    // Check if this category has a native type
+                    // Check if this is NumLit with a native type
+                    let label_str = label.to_string();
+                    let is_numlit = label_str == "NumLit";
                     let has_native = theory.exports.iter()
                         .any(|e| e.name == *cat_name && e.native_type.is_some());
                     
-                    if has_native {
-                        // For native types, generate random native values
+                    if has_native && is_numlit {
+                        // For NumLit with native types, generate random native values
                         // For i32/i64, generate random integers
                         cases.push(quote! {
                             let val = rng.gen_range(-100i32..100i32);
                             #cat_name::#label(val)
                         });
                     } else {
-                        // Variable constructor
+                        // VarRef or other Var rules - generate variables
                         cases.push(quote! {
                             if !vars.is_empty() {
                                 let idx = rng.gen_range(0..vars.len());

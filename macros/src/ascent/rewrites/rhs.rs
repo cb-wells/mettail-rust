@@ -26,48 +26,6 @@ fn native_type_to_string(native_type: &syn::Type) -> String {
     }
 }
 
-/// Generate code to extract native value from an enum variant
-/// For example, if we have `Int::NumLit(42)`, extract `42`
-fn generate_extract_native_value(
-    binding: &TokenStream,
-    category: &Ident,
-    native_type: &syn::Type,
-) -> TokenStream {
-    let type_str = native_type_to_string(native_type);
-    
-    // Find the NumLit constructor for this category
-    // For now, we'll generate a match that extracts from NumLit
-    // This assumes there's a NumLit variant - we might need to make this more flexible
-    
-    if type_str == "i32" || type_str == "i64" {
-        // For integer types, extract from NumLit variant
-        quote! {
-            {
-                let val = #binding;
-                match val {
-                    #category::NumLit(n) => n,
-                    _ => {
-                        // For now, assume it's already evaluated or extract from other variants
-                        // TODO: Add proper evaluation for nested expressions
-                        panic!("Expected NumLit variant for native type evaluation")
-                    }
-                }
-            }
-        }
-    } else {
-        // For other types, similar pattern
-        quote! {
-            {
-                let val = #binding;
-                match val {
-                    #category::NumLit(n) => n,
-                    _ => panic!("Expected NumLit variant for native type evaluation")
-                }
-            }
-        }
-    }
-}
-
 /// Generate RHS construction for Ascent clause
 pub fn generate_ascent_rhs(
     expr: &Expr,
@@ -252,21 +210,21 @@ pub fn generate_rhs_construction(
                         };
 
                     // Special handling for native type NumLit: if arg is a variable bound to a native value,
-                    // extract the native value directly
-                    if is_native_literal && i == 0 {
-                        if let Expr::Var(var) = arg {
-                            let var_name = var.to_string();
-                            if let Some(binding) = bindings.get(&var_name) {
-                                if let Some(native_type) = native_type_opt {
-                                    // Extract native value from the binding
-                                    return generate_extract_native_value(binding, &category, native_type);
-                                }
+                    // use it directly (it's already the native type from env_var relation)
+                    // Note: For EnvQuery bindings, the value is already the native type (i32), not an Int enum
+                    // We need to mark this so we don't wrap it in Box::new
+                    let is_native_value_binding = is_native_literal && i == 0
+                        && matches!(arg, Expr::Var(_))
+                        && bindings.contains_key(&{
+                            if let Expr::Var(var) = arg {
+                                var.to_string()
+                            } else {
+                                String::new()
                             }
-                        }
-                    }
+                        });
 
-                    // Don't wrap collection fields in Box::new
-                    if is_collection_field {
+                    // Don't wrap collection fields or native value bindings in Box::new
+                    if is_collection_field || is_native_value_binding {
                         inner
                     } else {
                         quote! { Box::new(#inner) }
