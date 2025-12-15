@@ -7,6 +7,7 @@
 
 use crate::ast::{GrammarItem, GrammarRule, TheoryDef};
 use crate::codegen::is_var_rule;
+use crate::utils::{has_native_type, native_type_to_string};
 
 /// Generates Var label for a category (first letter + "Var")
 fn generate_var_label(category: &syn::Ident) -> String {
@@ -20,29 +21,6 @@ fn generate_var_label(category: &syn::Ident) -> String {
     format!("{}Var", first_letter)
 }
 
-/// Check if a category has a native type
-fn has_native_type<'a>(category: &syn::Ident, theory: &'a TheoryDef) -> Option<&'a syn::Type> {
-    theory.exports.iter()
-        .find(|e| e.name == *category)
-        .and_then(|e| e.native_type.as_ref())
-}
-
-/// Get native type as string for comparison
-fn native_type_to_string(native_type: &syn::Type) -> String {
-    // Simple string representation - works for basic types like i32, i64, etc.
-    // For more complex types, this might need improvement
-    // We use a simple approach: convert the type to a string representation
-    match native_type {
-        syn::Type::Path(type_path) => {
-            if let Some(segment) = type_path.path.segments.last() {
-                segment.ident.to_string()
-            } else {
-                "unknown".to_string()
-            }
-        },
-        _ => "unknown".to_string(),
-    }
-}
 
 /// Generate token parser for native type if needed
 fn generate_native_type_tokens(theory: &TheoryDef) -> String {

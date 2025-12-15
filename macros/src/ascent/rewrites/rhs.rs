@@ -1,30 +1,9 @@
 use crate::ascent::congruence;
 use crate::ast::{Expr, TheoryDef};
+use crate::utils::{has_native_type, native_type_to_string};
 use proc_macro2::TokenStream;
 use quote::quote;
 use std::collections::HashMap;
-use syn::Ident;
-
-/// Check if a category has a native type
-fn has_native_type<'a>(category: &Ident, theory: &'a TheoryDef) -> Option<&'a syn::Type> {
-    theory.exports.iter()
-        .find(|e| e.name == *category)
-        .and_then(|e| e.native_type.as_ref())
-}
-
-/// Get native type as string for comparison
-fn native_type_to_string(native_type: &syn::Type) -> String {
-    match native_type {
-        syn::Type::Path(type_path) => {
-            if let Some(segment) = type_path.path.segments.last() {
-                segment.ident.to_string()
-            } else {
-                "unknown".to_string()
-            }
-        },
-        _ => "unknown".to_string(),
-    }
-}
 
 /// Generate RHS construction for Ascent clause
 pub fn generate_ascent_rhs(

@@ -7,6 +7,7 @@
 
 use crate::ast::{GrammarItem, GrammarRule, TheoryDef};
 use crate::codegen::{generate_var_label, is_var_rule};
+use crate::utils::has_native_type;
 use proc_macro2::TokenStream;
 use quote::quote;
 use std::collections::HashMap;
@@ -52,7 +53,7 @@ fn generate_display_impl(category: &syn::Ident, rules: &[&GrammarRule], theory: 
     // Check if Var variant was auto-generated
     // Skip for native types - they don't have Var variants
     let has_var_rule = rules.iter().any(|rule| is_var_rule(rule));
-    if !has_var_rule && !has_native_type(category, theory) {
+    if !has_var_rule && has_native_type(category, theory).is_none() {
         let var_arm = generate_auto_var_display_arm(category);
         match_arms.push(var_arm);
     }
@@ -68,11 +69,7 @@ fn generate_display_impl(category: &syn::Ident, rules: &[&GrammarRule], theory: 
     }
 }
 
-/// Check if a category has a native type
-fn has_native_type(category: &syn::Ident, theory: &TheoryDef) -> bool {
-    theory.exports.iter()
-        .any(|e| e.name == *category && e.native_type.is_some())
-}
+
 
 /// Generate a match arm for displaying a single constructor
 fn generate_display_arm(rule: &GrammarRule, theory: &TheoryDef) -> TokenStream {
@@ -139,7 +136,7 @@ fn generate_display_arm(rule: &GrammarRule, theory: &TheoryDef) -> TokenStream {
                         if let Some((_, field_name)) = field_iter.next() {
                             format_parts.push("{}".to_string());
                             // Check if this category has a native type
-                            if has_native_type(&rule.category, theory) {
+                            if has_native_type(&rule.category, theory).is_some() {
                                 // For native types, the field is the value directly (e.g., i32)
                                 format_args_tokens.push(quote! {
                                     #field_name

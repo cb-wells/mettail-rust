@@ -8,6 +8,7 @@
 
 use crate::ast::{GrammarItem, GrammarRule, TheoryDef};
 use crate::codegen::generate_var_label;
+use crate::utils::has_native_type;
 use proc_macro2::TokenStream;
 use quote::quote;
 use syn::Ident;
@@ -76,11 +77,6 @@ fn find_all_substitutable_categories(rules: &[GrammarRule]) -> std::collections:
     cats
 }
 
-/// Check if a category has a native type
-fn has_native_type(category: &Ident, theory: &TheoryDef) -> bool {
-    theory.exports.iter()
-        .any(|e| e.name == *category && e.native_type.is_some())
-}
 
 fn generate_category_substitution(
     category: &Ident,
@@ -91,7 +87,7 @@ fn generate_category_substitution(
     let category_str = category.to_string();
 
     // For native types, skip substitution generation (native values don't need substitution)
-    if has_native_type(category, theory) {
+    if has_native_type(category, theory).is_some() {
         return quote! {
             impl #category {
                 // Native types don't support substitution - they're values, not variables
