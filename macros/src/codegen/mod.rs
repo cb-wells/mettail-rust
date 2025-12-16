@@ -23,6 +23,14 @@ pub fn is_var_rule(rule: &GrammarRule) -> bool {
         && matches!(&rule.items[0], GrammarItem::NonTerminal(ident) if ident.to_string() == "Var")
 }
 
+/// Checks if a rule is an Integer rule (single item, NonTerminal "Integer")
+/// Used for native integer type handling in theory definitions
+#[allow(clippy::cmp_owned)]
+pub fn is_integer_rule(rule: &GrammarRule) -> bool {
+    rule.items.len() == 1
+        && matches!(&rule.items[0], GrammarItem::NonTerminal(ident) if ident.to_string() == "Integer")
+}
+
 /// Generate the Var variant label for a category
 /// 
 /// Convention: First letter of category + "Var"

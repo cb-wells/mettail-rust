@@ -218,12 +218,31 @@ fn generate_rewrite_clause(rule: &RewriteRule, theory: &TheoryDef) -> TokenStrea
 
     // Generate RHS
     let rhs = generate_ascent_rhs(&rule.right, &bindings, theory);
-    clauses.push(quote! { let t = (#rhs).normalize() });
+    
+    // Only call normalize() if the category has collection constructors
+    if category_has_collections(&lhs_category, theory) {
+        clauses.push(quote! { let t = (#rhs).normalize() });
+    } else {
+        clauses.push(quote! { let t = #rhs });
+    }
 
     quote! {
         #rw_rel(s, t) <--
             #(#clauses),*;
     }
+}
+
+/// Check if a category has any collection constructors
+fn category_has_collections(category: &Ident, theory: &TheoryDef) -> bool {
+    use crate::ast::GrammarItem;
+
+    theory.terms.iter().any(|rule| {
+        rule.category == *category
+            && rule
+                .items
+                .iter()
+                .any(|item| matches!(item, GrammarItem::Collection { .. }))
+    })
 }
 
 /// Collect all variable occurrences in an expression (for duplicate detection)

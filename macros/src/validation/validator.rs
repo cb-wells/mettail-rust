@@ -47,7 +47,7 @@ pub fn validate_theory(theory: &TheoryDef) -> Result<(), ValidationError> {
                 GrammarItem::NonTerminal(ident) => {
                     let ref_name = ident.to_string();
                     // Built-in types are always valid
-                    if ref_name == "Var" {
+                    if ref_name == "Var" || ref_name == "Integer" {
                         continue;
                     }
                     // Must be either exported or defined (or both)

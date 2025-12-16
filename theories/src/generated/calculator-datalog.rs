@@ -59,6 +59,6 @@ rw_int(s, t) <--
     let s_f0_val = s_f0.as_ref(),
     if let Some(var_name) = { let var_name_opt = match s_f0_val.clone() { mettail_runtime :: OrdVar(mettail_runtime :: Var :: Free(ref fv)) => { fv.pretty_name.clone() } _ => None };
 
-var_name_opt }, env_var(var_name, v), let t = (Int :: NumLit(v)).normalize();
+var_name_opt }, env_var(var_name, v), let t = Int :: NumLit(v);
 
 }

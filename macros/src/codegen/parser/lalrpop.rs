@@ -6,7 +6,7 @@
 #![allow(clippy::cmp_owned, clippy::useless_format)]
 
 use crate::ast::{GrammarItem, GrammarRule, TheoryDef};
-use crate::codegen::is_var_rule;
+use crate::codegen::{is_integer_rule, is_var_rule};
 use crate::utils::{has_native_type, native_type_to_string};
 
 /// Generates Var label for a category (first letter + "Var")
@@ -212,22 +212,14 @@ fn generate_tiered_production(
     if let Some(native_type) = has_native_type(category, theory) {
         let type_str = native_type_to_string(native_type);
         if type_str == "i32" || type_str == "i64" {
-            // Find the NumLit rule (for integer literals), not VarRef (for variables)
-            // Explicitly look for NumLit first
-            let numlit_label = other_rules.iter()
-                .find(|r| r.label.to_string() == "NumLit")
-                .map(|r| r.label.to_string())
-                .unwrap_or_else(|| {
-                    // Fallback: find any Var rule that's not VarRef
-                    other_rules.iter()
-                        .find(|r| is_var_rule(r) && r.label.to_string() != "VarRef")
-                        .map(|r| r.label.to_string())
-                        .unwrap_or_else(|| "NumLit".to_string())
-                });
-            production.push_str(&format!(
-                "    \"-\" <i:Integer> => {}::{}(-i),\n",
-                cat_str, numlit_label
-            ));
+            // Find the Integer rule (for integer literals)
+            if let Some(integer_rule) = other_rules.iter().find(|r| is_integer_rule(r)) {
+                let integer_label = integer_rule.label.to_string();
+                production.push_str(&format!(
+                    "    \"-\" <i:Integer> => {}::{}(-i),\n",
+                    cat_str, integer_label
+                ));
+            }
         }
     }
 
@@ -409,21 +401,12 @@ fn generate_rule_alternative_with_theory(rule: &GrammarRule, _theory: Option<&Th
                 // Terminal: just match the literal
                 alt.push_str(&format!("\"{}\" => {}::{}", term, rule.category, label));
             },
+            GrammarItem::NonTerminal(nt) if nt == "Integer" => {
+                // Integer keyword: parse Integer token directly for native integer literals
+                alt.push_str(&format!("<i:Integer> => {}::{}(i)", rule.category, label));
+            },
             GrammarItem::NonTerminal(nt) if nt == "Var" => {
-                // Special case: NumLit with native type should parse Integer token, not Var
-                if let Some(theory) = _theory {
-                    if let Some(native_type) = has_native_type(&rule.category, theory) {
-                        let type_str = native_type_to_string(native_type);
-                        if type_str == "i32" || type_str == "i64" {
-                            // For NumLit with native integer type, parse Integer token
-                            if label.to_string() == "NumLit" {
-                                alt.push_str(&format!("<i:Integer> => {}::{}(i)", rule.category, label));
-                                return alt;
-                            }
-                        }
-                    }
-                }
-                // Variable: need to parse identifier as variable node
+                // Variable: parse identifier as variable node
                 // Use get_or_create_var to ensure same name = same ID within a parse
                 alt.push_str(&format!("<v:Ident> => {}::{}(mettail_runtime::OrdVar(Var::Free(mettail_runtime::get_or_create_var(v))))",
                     rule.category, label));

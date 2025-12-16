@@ -1,6 +1,6 @@
 #![allow(clippy::cmp_owned, clippy::single_match)]
 
-use super::{display, generate_var_label, is_var_rule, subst, termgen};
+use super::{display, generate_var_label, is_integer_rule, is_var_rule, subst, termgen};
 use crate::ast::{GrammarItem, GrammarRule, TheoryDef, BuiltinOp};
 use proc_macro2::TokenStream;
 use quote::quote;
@@ -146,39 +146,25 @@ fn generate_variant(rule: &GrammarRule, theory: &TheoryDef) -> TokenStream {
     } else if fields.len() == 1 {
         #[allow(clippy::cmp_owned)]
         match &fields[0] {
-            FieldType::NonTerminal(ident) if ident.to_string() == "Var" => {
-                // Special case: Var field
-                // If this is NumLit with a native type, use the native type directly
-                // VarRef and all other Var rules use OrdVar
+            FieldType::NonTerminal(ident) if ident.to_string() == "Integer" => {
+                // Special case: Integer field - use the category's native type
                 let category = &rule.category;
-                let label_str = label.to_string();
                 
-                // Explicitly check: only NumLit with native type gets native type
-                if label_str == "NumLit" {
-                    let has_native = theory.exports.iter()
-                        .any(|e| e.name == *category && e.native_type.is_some());
-                    
-                    if has_native {
-                        // NumLit with native type -> use native type (i32)
-                        if let Some(native_type) = theory.exports.iter()
-                            .find(|e| e.name == *category)
-                            .and_then(|e| e.native_type.as_ref())
-                        {
-                            // Clone the type to avoid lifetime issues and use it in quote
-                            let native_type_cloned = native_type.clone();
-                            quote! { #label(#native_type_cloned) }
-                        } else {
-                            // Fallback (shouldn't happen)
-                            quote! { #label(mettail_runtime::OrdVar) }
-                        }
-                    } else {
-                        // NumLit without native type -> use OrdVar
-                        quote! { #label(mettail_runtime::OrdVar) }
-                    }
+                // Integer requires native type (should be validated earlier)
+                if let Some(native_type) = theory.exports.iter()
+                    .find(|e| e.name == *category)
+                    .and_then(|e| e.native_type.as_ref())
+                {
+                    let native_type_cloned = native_type.clone();
+                    quote! { #label(#native_type_cloned) }
                 } else {
-                    // VarRef or any other Var rule -> always use OrdVar
-                    quote! { #label(mettail_runtime::OrdVar) }
+                    // Fallback to i32 if native type not found
+                    quote! { #label(i32) }
                 }
+            },
+            FieldType::NonTerminal(ident) if ident.to_string() == "Var" => {
+                // Special case: Var field - always use OrdVar
+                quote! { #label(mettail_runtime::OrdVar) }
             },
             FieldType::NonTerminal(ident) => {
                 // Single non-terminal field
@@ -606,18 +592,18 @@ fn generate_eval_method(theory: &TheoryDef) -> TokenStream {
             let label = &rule.label;
             let label_str = label.to_string();
 
-            // Check if this is NumLit (literal with native type)
-            if label_str == "NumLit" {
+            // Check if this is an Integer rule (literal with native type)
+            if is_integer_rule(rule) {
                 match_arms.push(quote! {
                     #category::#label(n) => *n,
                 });
             }
             // Check if this is a Var rule (VarRef, etc.)
             else if is_var_rule(rule) {
+                // Use loop { panic!() } idiom for proper `!` type handling in quote!
+                let panic_msg = format!("Cannot evaluate {} - variables must be substituted via rewrites first", label);
                 match_arms.push(quote! {
-                    #category::#label(_) => {
-                        panic!("Cannot evaluate {} - variables must be substituted via rewrites first", stringify!(#label));
-                    }
+                    #category::#label(_) => loop { panic!(#panic_msg) },
                 });
             }
             // Check if this has semantics (operator)
@@ -719,15 +705,13 @@ fn generate_rewrite_application(theory: &TheoryDef) -> TokenStream {
                 .filter(|r| r.category.to_string() == category_str)
                 .collect();
             
-            // Find VarRef rule and NumLit rule for the rewrite
+            // Find VarRef rule and Integer rule for the rewrite
             // Look for any Var rule (not just "VarRef" - could be any name)
             let var_ref_rule = category_rules.iter().find(|r| is_var_rule(r));
-            // NumLit is specifically the rule named "NumLit" that has native type
-            let num_lit_rule = category_rules.iter().find(|r| {
-                r.label.to_string() == "NumLit"
-            });
+            // Integer rule is the one that uses Integer keyword (for native type literals)
+            let integer_rule = category_rules.iter().find(|r| is_integer_rule(r));
             
-            let num_lit_label = num_lit_rule.map(|r| &r.label);
+            let integer_label = integer_rule.map(|r| &r.label);
             
             // Generate match arms for all constructors
             let mut match_arms: Vec<TokenStream> = Vec::new();
@@ -743,7 +727,7 @@ fn generate_rewrite_application(theory: &TheoryDef) -> TokenStream {
                     .unwrap_or(false);
                 
                 if is_var_ref {
-                    if let Some(numlit_label) = num_lit_label {
+                    if let Some(int_label) = integer_label {
                         match_arms.push(quote! {
                             #category::#label(ord_var) => {
                                 let var_name: &str = match ord_var {
@@ -755,19 +739,19 @@ fn generate_rewrite_application(theory: &TheoryDef) -> TokenStream {
                                 };
                                 let val = env.get(var_name)
                                     .ok_or_else(|| format!("undefined variable: {}", var_name))?;
-                                Ok(#category::#numlit_label(*val))
+                                Ok(#category::#int_label(*val))
                             }
                         });
                         continue;
                     }
                 }
                 
-                // Check if this is NumLit - pass through (has native type value)
-                let is_num_lit = num_lit_rule
-                    .map(|nl| nl.label.to_string() == label_str)
+                // Check if this is an Integer rule - pass through (has native type value)
+                let is_integer = integer_rule
+                    .map(|ir| ir.label.to_string() == label_str)
                     .unwrap_or(false);
                 
-                if is_num_lit {
+                if is_integer {
                     match_arms.push(quote! {
                         #category::#label(n) => Ok(#category::#label(*n))
                     });

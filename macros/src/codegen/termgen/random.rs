@@ -97,7 +97,7 @@ fn generate_random_for_category(cat_name: &Ident, theory: &TheoryDef) -> TokenSt
 }
 
 /// Generate random depth 0 case (nullary constructors and variables)
-fn generate_random_depth_0(cat_name: &Ident, rules: &[&GrammarRule], theory: &TheoryDef) -> TokenStream {
+fn generate_random_depth_0(cat_name: &Ident, rules: &[&GrammarRule], _theory: &TheoryDef) -> TokenStream {
     let mut cases = Vec::new();
 
     for rule in rules {
@@ -128,46 +128,38 @@ fn generate_random_depth_0(cat_name: &Ident, rules: &[&GrammarRule], theory: &Th
         if non_terminals.is_empty() {
             // Nullary constructor
             cases.push(quote! { #cat_name::#label });
-        } else if non_terminals.len() == 1 {
-            // Check if it's a Var constructor
+        } else         if non_terminals.len() == 1 {
+            // Check if it's a Var or Integer constructor
             if let GrammarItem::NonTerminal(nt) = non_terminals[0] {
-                if nt.to_string() == "Var" {
-                    // Check if this is NumLit with a native type
-                    let label_str = label.to_string();
-                    let is_numlit = label_str == "NumLit";
-                    let has_native = theory.exports.iter()
-                        .any(|e| e.name == *cat_name && e.native_type.is_some());
-                    
-                    if has_native && is_numlit {
-                        // For NumLit with native types, generate random native values
-                        // For i32/i64, generate random integers
-                        cases.push(quote! {
-                            let val = rng.gen_range(-100i32..100i32);
-                            #cat_name::#label(val)
-                        });
-                    } else {
-                        // VarRef or other Var rules - generate variables
-                        cases.push(quote! {
-                            if !vars.is_empty() {
-                                let idx = rng.gen_range(0..vars.len());
-                                #cat_name::#label(
-                                    mettail_runtime::OrdVar(
-                                        mettail_runtime::Var::Free(
-                                            mettail_runtime::get_or_create_var(&vars[idx])
-                                        )
+                let nt_str = nt.to_string();
+                if nt_str == "Var" {
+                    // VarRef or other Var rules - generate variables
+                    cases.push(quote! {
+                        if !vars.is_empty() {
+                            let idx = rng.gen_range(0..vars.len());
+                            #cat_name::#label(
+                                mettail_runtime::OrdVar(
+                                    mettail_runtime::Var::Free(
+                                        mettail_runtime::get_or_create_var(&vars[idx])
                                     )
                                 )
-                            } else {
-                                #cat_name::#label(
-                                    mettail_runtime::OrdVar(
-                                        mettail_runtime::Var::Free(
-                                            mettail_runtime::get_or_create_var("_")
-                                        )
+                            )
+                        } else {
+                            #cat_name::#label(
+                                mettail_runtime::OrdVar(
+                                    mettail_runtime::Var::Free(
+                                        mettail_runtime::get_or_create_var("_")
                                     )
                                 )
-                            }
-                        });
-                    }
+                            )
+                        }
+                    });
+                } else if nt_str == "Integer" {
+                    // Integer literals - generate random native values
+                    cases.push(quote! {
+                        let val = rng.gen_range(-100i32..100i32);
+                        #cat_name::#label(val)
+                    });
                 }
             }
         }
@@ -244,8 +236,12 @@ fn generate_random_depth_d(
             continue;
         }
 
-        if non_terminals.len() == 1 && non_terminals[0].to_string() == "Var" {
-            continue; // Skip Var constructors at depth > 0
+        // Skip Var and Integer constructors at depth > 0 (they're depth 0 only)
+        if non_terminals.len() == 1 {
+            let nt_str = non_terminals[0].to_string();
+            if nt_str == "Var" || nt_str == "Integer" {
+                continue;
+            }
         }
 
         // Generate case for this constructor

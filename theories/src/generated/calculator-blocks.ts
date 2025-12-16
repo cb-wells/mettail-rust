@@ -29,9 +29,9 @@ const definitions = [
 		message0: "%1",
 		args0: [
 			{
-				type: "field_input",
-				name: "VAR",
-				text: "v",
+				type: "input_value",
+				name: "ARG1",
+				check: "Integer",
 			},
 		],
 		inputsInline: true,
