@@ -16,6 +16,7 @@ pub fn generate_ast(theory: &TheoryDef) -> TokenStream {
     let random_gen_impl = termgen::generate_random_generation(theory);
     let eval_impl = generate_eval_method(theory);
     let rewrite_impl = generate_rewrite_application(theory);
+    let env_impl = generate_env_infrastructure(theory);
 
     // Generate LALRPOP module reference
     let theory_name = &theory.name;
@@ -42,6 +43,8 @@ pub fn generate_ast(theory: &TheoryDef) -> TokenStream {
         #eval_impl
 
         #rewrite_impl
+
+        #env_impl
 
         #[cfg(not(test))]
         #[allow(unused_imports)]
@@ -873,6 +876,175 @@ fn generate_rewrite_application(theory: &TheoryDef) -> TokenStream {
 
     quote! {
         #(#impls)*
+    }
+}
+
+/// Generate environment infrastructure for theories with env_var conditions
+/// 
+/// This generates:
+/// - Environment struct (e.g., CalculatorEnv)
+/// - Environment methods (new, set, get, clear)
+/// - env_to_facts helper function
+/// - rewrite_to_normal_form helper function
+fn generate_env_infrastructure(theory: &TheoryDef) -> TokenStream {
+    use crate::ast::Condition;
+    use std::collections::HashSet;
+    use quote::format_ident;
+    
+    // Check if any rewrite uses env_var conditions
+    let mut env_info = Vec::new();
+    let mut seen_relations = HashSet::new();
+    
+    for rewrite in &theory.rewrites {
+        for condition in &rewrite.conditions {
+            if let Condition::EnvQuery { relation, args } = condition {
+                if args.len() >= 2 {
+                    let rel_name = relation.to_string();
+                    
+                    // Avoid duplicates
+                    if seen_relations.contains(&rel_name) {
+                        continue;
+                    }
+                    seen_relations.insert(rel_name.clone());
+                    
+                    // Extract category and native type from the rewrite
+                    let category = extract_category_from_rewrite_internal(rewrite, theory);
+                    if let Some(category) = category {
+                        if let Some(export) = theory.exports.iter().find(|e| e.name == category) {
+                            if let Some(native_type) = &export.native_type {
+                                env_info.push((category.clone(), native_type.clone(), relation.clone()));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    if env_info.is_empty() {
+        return quote! {};
+    }
+    
+    // Generate environment infrastructure for each (category, native_type, relation) tuple
+    // Currently we only support one env relation per theory, but the structure allows extension
+    let mut env_structs = Vec::new();
+    
+    for (category, native_type, relation) in env_info {
+        let theory_name = &theory.name;
+        let env_name = format_ident!("{}Env", theory_name);
+        let theory_name_lower = theory_name.to_string().to_lowercase();
+        let source_name = format_ident!("{}_source", theory_name_lower);
+        let cat_lower = category.to_string().to_lowercase();
+        let rw_rel = format_ident!("rw_{}", cat_lower);
+        let cat_rel = format_ident!("{}", cat_lower);
+        
+        env_structs.push(quote! {
+            use std::collections::HashMap;
+            
+            /// Environment for storing variable bindings
+            #[derive(Debug, Clone)]
+            pub struct #env_name {
+                vars: HashMap<String, #native_type>,
+            }
+            
+            impl #env_name {
+                /// Create a new empty environment
+                pub fn new() -> Self {
+                    #env_name {
+                        vars: HashMap::new(),
+                    }
+                }
+                
+                /// Store a variable binding
+                pub fn set(&mut self, name: String, value: #native_type) {
+                    self.vars.insert(name, value);
+                }
+                
+                /// Look up a variable value
+                pub fn get(&self, name: &str) -> Option<#native_type> {
+                    self.vars.get(name).copied()
+                }
+                
+                /// Clear all bindings
+                pub fn clear(&mut self) {
+                    self.vars.clear();
+                }
+            }
+            
+            impl Default for #env_name {
+                fn default() -> Self {
+                    Self::new()
+                }
+            }
+            
+            /// Convert environment to Ascent input facts
+            /// Returns a vector of (variable_name, value) tuples for the #relation relation
+            pub fn env_to_facts(env: &#env_name) -> Vec<(String, #native_type)> {
+                env.vars.iter().map(|(name, val)| (name.clone(), *val)).collect()
+            }
+            
+            /// Use Ascent to rewrite a term to normal form with environment
+            pub fn rewrite_to_normal_form(term: #category, env: &#env_name) -> Result<#category, String> {
+                use ascent::*;
+                
+                let env_facts = env_to_facts(env);
+                
+                // Run Ascent - seed #relation facts using a rule that iterates over the collection
+                let prog = ascent_run! {
+                    include_source!(#source_name);
+                    
+                    #cat_rel(term.clone());
+                    
+                    // Seed environment facts from the vector
+                    #relation(n.clone(), v) <-- for (n, v) in env_facts.clone();
+                };
+                
+                // Find normal form (term with no outgoing rewrites)
+                let rewrites: Vec<(#category, #category)> = prog.#rw_rel
+                    .iter()
+                    .map(|(from, to)| (from.clone(), to.clone()))
+                    .collect();
+                
+                // Start from initial term and follow rewrite chain to normal form
+                let mut current = term;
+                loop {
+                    // Find rewrite from current term
+                    if let Some((_, next)) = rewrites.iter().find(|(from, _)| from == &current) {
+                        current = next.clone();
+                    } else {
+                        // No more rewrites - this is the normal form
+                        break;
+                    }
+                }
+                
+                Ok(current)
+            }
+        });
+    }
+    
+    quote! {
+        #(#env_structs)*
+    }
+}
+
+/// Extract the category from a rewrite rule (from LHS)
+/// Internal helper function for environment generation
+fn extract_category_from_rewrite_internal(rewrite: &crate::ast::RewriteRule, theory: &TheoryDef) -> Option<proc_macro2::Ident> {
+    use crate::ast::Expr;
+    
+    // Try to extract category from LHS pattern
+    match &rewrite.left {
+        Expr::Apply { constructor, .. } => {
+            // Find the rule with this constructor
+            if let Some(rule) = theory.terms.iter().find(|r| r.label == *constructor) {
+                Some(rule.category.clone())
+            } else {
+                None
+            }
+        }
+        Expr::Var(_) => None,
+        Expr::Subst { .. } => None,
+        Expr::CollectionPattern { .. } => None,
     }
 }
 

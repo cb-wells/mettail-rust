@@ -5,7 +5,6 @@
 )]
 
 use mettail_macros::theory;
-use std::collections::HashMap;
 
 // Simple integer calculator theory: supports integer literals, + and -
 // Uses native i32 type for direct integer support
@@ -50,92 +49,10 @@ theory! {
 }
 
 //=============================================================================
-// ENVIRONMENT
-//=============================================================================
-
-/// Environment for storing variable bindings
-#[derive(Debug, Clone)]
-pub struct CalculatorEnv {
-    vars: HashMap<String, i32>,
-}
-
-impl CalculatorEnv {
-    /// Create a new empty environment
-    pub fn new() -> Self {
-        CalculatorEnv {
-            vars: HashMap::new(),
-        }
-    }
-
-    /// Store a variable binding
-    pub fn set(&mut self, name: String, value: i32) {
-        self.vars.insert(name, value);
-    }
-
-    /// Look up a variable value
-    pub fn get(&self, name: &str) -> Option<i32> {
-        self.vars.get(name).copied()
-    }
-
-    /// Clear all bindings
-    pub fn clear(&mut self) {
-        self.vars.clear();
-    }
-}
-
-impl Default for CalculatorEnv {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-/// Convert environment to Ascent input facts
-/// Returns a vector of (variable_name, value) tuples for the env_var relation
-pub fn env_to_facts(env: &CalculatorEnv) -> Vec<(String, i32)> {
-    env.vars.iter().map(|(name, val)| (name.clone(), *val)).collect()
-}
-
-//=============================================================================
 // EVALUATION
 //=============================================================================
-// Note: eval() method is now generated automatically by the theory! macro
-
-/// Use Ascent to rewrite a term to normal form
-fn rewrite_to_normal_form(term: Int, env: &CalculatorEnv) -> Result<Int, String> {
-    use ascent::*;
-    
-    let env_facts = env_to_facts(env);
-    
-    // Run Ascent - seed env_var facts using a rule that iterates over the collection
-    let prog = ascent_run! {
-        include_source!(calculator_source);
-        
-        int(term.clone());
-        
-        // Seed environment facts from the vector
-        env_var(n.clone(), v) <-- for (n, v) in env_facts.clone();
-    };
-    
-    // Find normal form (term with no outgoing rewrites)
-    let rewrites: Vec<(Int, Int)> = prog.rw_int
-        .iter()
-        .map(|(from, to)| (from.clone(), to.clone()))
-        .collect();
-    
-    // Start from initial term and follow rewrite chain to normal form
-    let mut current = term;
-    loop {
-        // Find rewrite from current term
-        if let Some((_, next)) = rewrites.iter().find(|(from, _)| from == &current) {
-            current = next.clone();
-        } else {
-            // No more rewrites - this is the normal form
-            break;
-        }
-    }
-    
-    Ok(current)
-}
+// Note: eval() method, CalculatorEnv, env_to_facts, and rewrite_to_normal_form
+// are now generated automatically by the theory! macro
 
 /// Parse and evaluate a statement (assignment or expression) with environment.
 /// Returns the computed value.
@@ -163,7 +80,7 @@ pub fn parse_and_eval_with_env(
             .parse(expr_part)
             .map_err(|e| format!("parse error: {:?}", e))?;
 
-        // Use Ascent to rewrite to normal form
+        // Use Ascent to rewrite to normal form (generated function)
         let normal_form = rewrite_to_normal_form(expr, env)?;
 
         // Check for remaining variables (undefined variables)
@@ -181,7 +98,7 @@ pub fn parse_and_eval_with_env(
             .parse(trimmed)
             .map_err(|e| format!("parse error: {:?}", e))?;
 
-        // Use Ascent to rewrite to normal form
+        // Use Ascent to rewrite to normal form (generated function)
         let normal_form = rewrite_to_normal_form(expr, env)?;
 
         // Check for remaining variables (undefined variables)
