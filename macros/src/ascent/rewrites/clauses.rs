@@ -211,7 +211,9 @@ fn generate_rewrite_clause(rule: &RewriteRule, theory: &TheoryDef) -> TokenStrea
                 });
                 
                 // Add val_binding to bindings so RHS can use it
-                bindings.insert(val_arg.to_string(), quote! { #val_binding_name });
+                // Note: Ascent binds relation values by reference, so we dereference here
+                // since native types like i32 need to be passed by value to constructors
+                bindings.insert(val_arg.to_string(), quote! { *#val_binding_name });
             }
         }
     }

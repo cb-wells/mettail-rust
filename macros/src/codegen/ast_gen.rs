@@ -636,7 +636,31 @@ fn generate_eval_method(theory: &TheoryDef) -> TokenStream {
                     continue;
                 }
             }
-            // Other constructors - skip (no semantics defined)
+            // Handle rules with recursive self-reference and Var (like Assign . Int ::= Var "=" Int)
+            // These evaluate to the value of the recursive argument
+            else {
+                // Find non-terminals in the rule
+                let non_terminals: Vec<_> = rule.items.iter()
+                    .filter_map(|item| match item {
+                        GrammarItem::NonTerminal(nt) => Some(nt.to_string()),
+                        _ => None,
+                    })
+                    .collect();
+                
+                // Check if this has Var and a recursive reference
+                let has_var = non_terminals.iter().any(|nt| nt == "Var");
+                let has_recursive = non_terminals.iter().any(|nt| *nt == category.to_string());
+                
+                if has_var && has_recursive {
+                    // This is like Assign - evaluate the recursive part
+                    // The constructor has (OrdVar, Box<T>) where T is the recursive part
+                    // Need to dereference the Box to call eval()
+                    match_arms.push(quote! {
+                        #category::#label(_, expr) => expr.as_ref().eval(),
+                    });
+                }
+                // Other constructors without semantics - skip
+            }
         }
 
         if !match_arms.is_empty() {
@@ -647,6 +671,7 @@ fn generate_eval_method(theory: &TheoryDef) -> TokenStream {
                     pub fn eval(&self) -> #native_type {
                         match self {
                             #(#match_arms)*
+                            _ => panic!("Cannot evaluate expression - contains unevaluated terms. Apply rewrites first."),
                         }
                     }
                 }

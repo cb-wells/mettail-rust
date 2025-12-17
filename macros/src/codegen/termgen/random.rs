@@ -329,21 +329,76 @@ fn generate_random_binary(
     arg2_cat: &Ident,
     theory: &TheoryDef,
 ) -> TokenStream {
-    if !is_exported(arg1_cat, theory) || !is_exported(arg2_cat, theory) {
+    let arg1_str = arg1_cat.to_string();
+    let arg2_str = arg2_cat.to_string();
+    
+    // Handle Var specially - it's a built-in type, generate directly as OrdVar
+    let is_arg1_var = arg1_str == "Var";
+    let is_arg2_var = arg2_str == "Var";
+    
+    // If both args are non-exported and not Var, skip this constructor
+    if !is_arg1_var && !is_exported(arg1_cat, theory) {
+        return quote! {};
+    }
+    if !is_arg2_var && !is_exported(arg2_cat, theory) {
         return quote! {};
     }
 
-    quote! {
-        let d1 = rng.gen_range(0..depth);
-        let d2 = if d1 == depth - 1 {
-            rng.gen_range(0..depth)
-        } else {
-            depth - 1
-        };
+    if is_arg1_var {
+        // First arg is Var, second is recursive
+        quote! {
+            let arg1 = if !vars.is_empty() {
+                let idx = rng.gen_range(0..vars.len());
+                mettail_runtime::OrdVar(
+                    mettail_runtime::Var::Free(
+                        mettail_runtime::get_or_create_var(&vars[idx])
+                    )
+                )
+            } else {
+                mettail_runtime::OrdVar(
+                    mettail_runtime::Var::Free(
+                        mettail_runtime::get_or_create_var("_")
+                    )
+                )
+            };
+            // Var is depth 0, so second arg can be depth - 1
+            let arg2 = Box::new(#arg2_cat::generate_random_at_depth_internal(vars, depth - 1, max_collection_width, rng, binding_depth));
+            #cat_name::#label(arg1, arg2)
+        }
+    } else if is_arg2_var {
+        // Second arg is Var, first is recursive
+        quote! {
+            let arg1 = Box::new(#arg1_cat::generate_random_at_depth_internal(vars, depth - 1, max_collection_width, rng, binding_depth));
+            let arg2 = if !vars.is_empty() {
+                let idx = rng.gen_range(0..vars.len());
+                mettail_runtime::OrdVar(
+                    mettail_runtime::Var::Free(
+                        mettail_runtime::get_or_create_var(&vars[idx])
+                    )
+                )
+            } else {
+                mettail_runtime::OrdVar(
+                    mettail_runtime::Var::Free(
+                        mettail_runtime::get_or_create_var("_")
+                    )
+                )
+            };
+            #cat_name::#label(arg1, arg2)
+        }
+    } else {
+        // Both are recursive categories
+        quote! {
+            let d1 = rng.gen_range(0..depth);
+            let d2 = if d1 == depth - 1 {
+                rng.gen_range(0..depth)
+            } else {
+                depth - 1
+            };
 
-        let arg1 = #arg1_cat::generate_random_at_depth_internal(vars, d1, max_collection_width, rng, binding_depth);
-        let arg2 = #arg2_cat::generate_random_at_depth_internal(vars, d2, max_collection_width, rng, binding_depth);
-        #cat_name::#label(Box::new(arg1), Box::new(arg2))
+            let arg1 = #arg1_cat::generate_random_at_depth_internal(vars, d1, max_collection_width, rng, binding_depth);
+            let arg2 = #arg2_cat::generate_random_at_depth_internal(vars, d2, max_collection_width, rng, binding_depth);
+            #cat_name::#label(Box::new(arg1), Box::new(arg2))
+        }
     }
 }
 

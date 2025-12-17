@@ -15,6 +15,7 @@ Integer: i32 = {
 };
 
 pub Int: Int = {
+    <f0:Ident> "=" <f1:IntInfix> => Int::Assign(mettail_runtime::OrdVar(Var::Free(mettail_runtime::get_or_create_var(f0))), Box::new(f1)),
     <IntInfix>
 };
 

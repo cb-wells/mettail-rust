@@ -126,6 +126,14 @@ pub fn generate_lalrpop_grammar(theory: &TheoryDef) -> String {
     grammar
 }
 
+/// Check if a rule starts with Var followed by a terminal (e.g., Var "=" Int)
+/// These rules need special handling to avoid ambiguity with bare VarRef rules
+fn is_var_terminal_rule(rule: &GrammarRule) -> bool {
+    rule.items.len() >= 2 &&
+    matches!(&rule.items[0], GrammarItem::NonTerminal(nt) if nt.to_string() == "Var") &&
+    matches!(&rule.items[1], GrammarItem::Terminal(_))
+}
+
 /// Generate a LALRPOP production for a category
 ///
 /// This handles precedence by creating tiered rules for infix operators
@@ -135,13 +143,17 @@ fn generate_category_production(category: &syn::Ident, rules: &[&GrammarRule], t
     // Checks if there's already a Var rule
     let has_var_rule = rules.iter().any(|r| is_var_rule(r));
 
-    // Classify rules by type
-    let (infix_rules, other_rules): (Vec<&GrammarRule>, Vec<&GrammarRule>) =
-        rules.iter().copied().partition(|r| is_infix_rule(r));
+    // Separate rules that start with Var+terminal (need special handling for ambiguity)
+    let (var_terminal_rules, non_var_terminal_rules): (Vec<&GrammarRule>, Vec<&GrammarRule>) =
+        rules.iter().copied().partition(|r| is_var_terminal_rule(r));
 
-    // If we have infix operators, generate tiered rules for precedence
-    if !infix_rules.is_empty() {
-        generate_tiered_production(category, &infix_rules, &other_rules, has_var_rule, theory)
+    // Classify remaining rules by type
+    let (infix_rules, other_rules): (Vec<&GrammarRule>, Vec<&GrammarRule>) =
+        non_var_terminal_rules.iter().copied().partition(|r| is_infix_rule(r));
+
+    // If we have infix operators or var+terminal rules, generate tiered rules for precedence
+    if !infix_rules.is_empty() || !var_terminal_rules.is_empty() {
+        generate_tiered_production(category, &infix_rules, &other_rules, &var_terminal_rules, has_var_rule, theory)
     } else {
         // No infix operators - generate simple production
         generate_simple_production(category, &other_rules, has_var_rule, theory)
@@ -177,14 +189,26 @@ fn generate_tiered_production(
     category: &syn::Ident,
     infix_rules: &[&GrammarRule],
     other_rules: &[&GrammarRule],
+    var_terminal_rules: &[&GrammarRule],
     has_var_rule: bool,
     theory: &TheoryDef,
 ) -> String {
     let cat_str = category.to_string();
     let mut production = String::new();
 
-    // Top-level rule just delegates to the infix tier
+    // Top-level rule: handle var+terminal rules first (most specific), then delegate to infix
     production.push_str(&format!("pub {}: {} = {{\n", cat_str, cat_str));
+    
+    // Add var+terminal rules at top level (highest specificity - tried first)
+    if !var_terminal_rules.is_empty() {
+        for rule in var_terminal_rules.iter() {
+            production.push_str("    ");
+            production.push_str(&generate_var_terminal_alternative(rule, &cat_str));
+            production.push_str(",\n");
+        }
+    }
+    
+    // Then delegate to infix tier
     production.push_str(&format!("    <{}Infix>\n", cat_str));
     production.push_str("};\n\n");
 
@@ -208,12 +232,19 @@ fn generate_tiered_production(
     // Add parenthesized expressions - reference the top-level rule
     production.push_str(&format!("    \"(\" <{}> \")\",\n", cat_str));
 
+    // Filter out var+terminal rules from other_rules (they're handled at top level)
+    let filtered_other_rules: Vec<&GrammarRule> = other_rules
+        .iter()
+        .filter(|r| !is_var_terminal_rule(r))
+        .copied()
+        .collect();
+
     // Add unary minus support for native integer types (before other rules for precedence)
     if let Some(native_type) = has_native_type(category, theory) {
         let type_str = native_type_to_string(native_type);
         if type_str == "i32" || type_str == "i64" {
             // Find the Integer rule (for integer literals)
-            if let Some(integer_rule) = other_rules.iter().find(|r| is_integer_rule(r)) {
+            if let Some(integer_rule) = filtered_other_rules.iter().find(|r| is_integer_rule(r)) {
                 let integer_label = integer_rule.label.to_string();
                 production.push_str(&format!(
                     "    \"-\" <i:Integer> => {}::{}(-i),\n",
@@ -223,12 +254,12 @@ fn generate_tiered_production(
         }
     }
 
-    // Add non-infix rules
-    for (i, rule) in other_rules.iter().enumerate() {
+    // Add non-infix rules (excluding var+terminal rules, which are handled at top level)
+    for (i, rule) in filtered_other_rules.iter().enumerate() {
         production.push_str("    ");
         production.push_str(&generate_rule_alternative_with_theory(rule, Some(theory)));
 
-        if i < other_rules.len() - 1 {
+        if i < filtered_other_rules.len() - 1 {
             production.push_str(",\n");
         } else {
             production.push('\n');
@@ -318,6 +349,53 @@ fn generate_infix_alternative(rule: &GrammarRule, cat_str: &str) -> String {
     let action = format!(" => {}::{}(Box::new(left), Box::new(right))", category, label);
 
     format!("{}{}", pattern, action)
+}
+
+/// Generate alternative for rules starting with Var followed by terminal (e.g., Var "=" Int)
+/// These rules use CatInfix for recursive references to avoid ambiguity with the top-level rule
+fn generate_var_terminal_alternative(rule: &GrammarRule, cat_str: &str) -> String {
+    let label = &rule.label;
+    let category = &rule.category;
+
+    let mut pattern = String::new();
+    let mut args = Vec::new();
+    let mut field_idx = 0;
+
+    for item in &rule.items {
+        match item {
+            GrammarItem::Terminal(term) => {
+                pattern.push_str(&format!(" \"{}\"", term));
+            },
+            GrammarItem::NonTerminal(nt) => {
+                let var_name = format!("f{}", field_idx);
+                
+                if nt.to_string() == "Var" {
+                    // Var should parse as Ident, then convert to OrdVar
+                    pattern.push_str(&format!(" <{}:Ident>", var_name));
+                    args.push(format!("mettail_runtime::OrdVar(Var::Free(mettail_runtime::get_or_create_var({})))", var_name));
+                } else if nt == category {
+                    // Recursive reference: use CatInfix to avoid circular reference
+                    pattern.push_str(&format!(" <{}:{}Infix>", var_name, cat_str));
+                    args.push(format!("Box::new({})", var_name));
+                } else {
+                    // Different category: use as-is
+                    pattern.push_str(&format!(" <{}:{}>", var_name, nt));
+                    args.push(format!("Box::new({})", var_name));
+                }
+                field_idx += 1;
+            },
+            GrammarItem::Collection { .. } => {
+                // Collections in var+terminal rules - unusual but skip for now
+            },
+            GrammarItem::Binder { .. } => {
+                // Binders in var+terminal rules - unusual but skip for now
+            },
+        }
+    }
+
+    // Construct the AST node
+    let args_str = args.join(", ");
+    format!("{} => {}::{}({})", pattern.trim(), category, label, args_str)
 }
 
 /// Generate simple production (no infix operators)
@@ -467,12 +545,13 @@ fn generate_sequence_alternative(rule: &GrammarRule) -> String {
             },
             GrammarItem::NonTerminal(nt) => {
                 let var_name = format!("f{}", field_idx);
-                pattern.push_str(&format!(" <{}:{}>", var_name, nt));
-
+                
                 if nt.to_string() == "Var" {
-                    // Wrap Var in OrdVar
-                    args.push(format!("mettail_runtime::OrdVar({})", var_name));
+                    // Var should parse as Ident, then convert to OrdVar
+                    pattern.push_str(&format!(" <{}:Ident>", var_name));
+                    args.push(format!("mettail_runtime::OrdVar(Var::Free(mettail_runtime::get_or_create_var({})))", var_name));
                 } else {
+                    pattern.push_str(&format!(" <{}:{}>", var_name, nt));
                     args.push(format!("Box::new({})", var_name));
                 }
                 field_idx += 1;
@@ -822,4 +901,103 @@ mod tests {
         assert_eq!(generate_var_label(&parse_quote!(Expr)), "EVar");
         assert_eq!(generate_var_label(&parse_quote!(Type)), "TVar");
     }
+
+    #[test]
+    fn test_var_terminal_rule_detection() {
+        // Test that rules starting with Var + terminal are detected
+        let assign_rule = GrammarRule {
+            label: parse_quote!(Assign),
+            category: parse_quote!(Int),
+            items: vec![
+                GrammarItem::NonTerminal(parse_quote!(Var)),
+                GrammarItem::Terminal("=".to_string()),
+                GrammarItem::NonTerminal(parse_quote!(Int)),
+            ],
+            bindings: vec![],
+        };
+        
+        println!("Testing Assign rule: items = {:?}", assign_rule.items);
+        println!("Item 0: {:?}", assign_rule.items[0]);
+        println!("Item 1: {:?}", assign_rule.items[1]);
+        
+        let is_var_term = is_var_terminal_rule(&assign_rule);
+        println!("is_var_terminal_rule: {}", is_var_term);
+        assert!(is_var_term, "Assign rule should be detected as var+terminal rule");
+        
+        // VarRef should NOT be detected as var+terminal (no terminal after Var)
+        let varref_rule = GrammarRule {
+            label: parse_quote!(VarRef),
+            category: parse_quote!(Int),
+            items: vec![
+                GrammarItem::NonTerminal(parse_quote!(Var)),
+            ],
+            bindings: vec![],
+        };
+        
+        assert!(!is_var_terminal_rule(&varref_rule), "VarRef should not be detected as var+terminal rule");
+    }
+
+    #[test]
+    fn test_calculator_like_grammar() {
+        // Test a calculator-like grammar with assignment
+        use crate::ast::Export;
+        
+        let theory = TheoryDef {
+            name: parse_quote!(Calculator),
+            params: vec![],
+            exports: vec![Export { name: parse_quote!(Int), native_type: Some(parse_quote!(i32)) }],
+            terms: vec![
+                GrammarRule {
+                    label: parse_quote!(VarRef),
+                    category: parse_quote!(Int),
+                    items: vec![GrammarItem::NonTerminal(parse_quote!(Var))],
+                    bindings: vec![],
+                },
+                GrammarRule {
+                    label: parse_quote!(NumLit),
+                    category: parse_quote!(Int),
+                    items: vec![GrammarItem::NonTerminal(parse_quote!(Integer))],
+                    bindings: vec![],
+                },
+                GrammarRule {
+                    label: parse_quote!(Add),
+                    category: parse_quote!(Int),
+                    items: vec![
+                        GrammarItem::NonTerminal(parse_quote!(Int)),
+                        GrammarItem::Terminal("+".to_string()),
+                        GrammarItem::NonTerminal(parse_quote!(Int)),
+                    ],
+                    bindings: vec![],
+                },
+                GrammarRule {
+                    label: parse_quote!(Assign),
+                    category: parse_quote!(Int),
+                    items: vec![
+                        GrammarItem::NonTerminal(parse_quote!(Var)),
+                        GrammarItem::Terminal("=".to_string()),
+                        GrammarItem::NonTerminal(parse_quote!(Int)),
+                    ],
+                    bindings: vec![],
+                },
+            ],
+            equations: vec![],
+            rewrites: vec![],
+            semantics: vec![],
+        };
+        
+        let grammar = generate_lalrpop_grammar(&theory);
+        println!("Generated Calculator grammar:\n{}", grammar);
+        
+        // Check that Assign is at the top level, not in IntAtom
+        assert!(grammar.contains("pub Int: Int = {"), "Should have top-level Int rule");
+        
+        // The Assign rule should appear at the top level before IntInfix
+        let int_rule_start = grammar.find("pub Int: Int = {").unwrap();
+        let int_rule_end = grammar.find("IntInfix: Int = {").unwrap();
+        let top_level_section = &grammar[int_rule_start..int_rule_end];
+        
+        println!("Top level section:\n{}", top_level_section);
+        assert!(top_level_section.contains("Assign"), "Assign should be at the top level");
+    }
+    
 }

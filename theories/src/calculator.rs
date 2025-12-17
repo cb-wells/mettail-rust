@@ -22,12 +22,26 @@ theory! {
 
         Add . Int ::= Int "+" Int ;
         Sub . Int ::= Int "-" Int ;
+        
+        // Assignment: x = expr evaluates expr and stores result
+        Assign . Int ::= Var "=" Int ;
     },
     equations {
     },
     rewrites {
         // Variable substitution: if env_var(x, v) then VarRef(x) => NumLit(v)
         if env_var(x, v) then (VarRef x) => (NumLit v);
+        
+        // Assignment evaluation: Assign x (NumLit v) => NumLit v
+        // (The REPL will extract x and v to update the environment)
+        (Assign x (NumLit v)) => (NumLit v);
+        
+        // Congruence rules: propagate rewrites through Add, Sub, and Assign
+        if S => T then (Add S R) => (Add T R);
+        if S => T then (Add L S) => (Add L T);
+        if S => T then (Sub S R) => (Sub T R);
+        if S => T then (Sub L S) => (Sub L T);
+        if S => T then (Assign x S) => (Assign x T);
     },
     semantics {
         Add: +,
@@ -85,7 +99,43 @@ pub fn env_to_facts(env: &CalculatorEnv) -> Vec<(String, i32)> {
 // EVALUATION
 //=============================================================================
 // Note: eval() method is now generated automatically by the theory! macro
-// Note: apply_rewrites_with_facts() is now generated automatically by the theory! macro
+
+/// Use Ascent to rewrite a term to normal form
+fn rewrite_to_normal_form(term: Int, env: &CalculatorEnv) -> Result<Int, String> {
+    use ascent::*;
+    
+    let env_facts = env_to_facts(env);
+    
+    // Run Ascent - seed env_var facts using a rule that iterates over the collection
+    let prog = ascent_run! {
+        include_source!(calculator_source);
+        
+        int(term.clone());
+        
+        // Seed environment facts from the vector
+        env_var(n.clone(), v) <-- for (n, v) in env_facts.clone();
+    };
+    
+    // Find normal form (term with no outgoing rewrites)
+    let rewrites: Vec<(Int, Int)> = prog.rw_int
+        .iter()
+        .map(|(from, to)| (from.clone(), to.clone()))
+        .collect();
+    
+    // Start from initial term and follow rewrite chain to normal form
+    let mut current = term;
+    loop {
+        // Find rewrite from current term
+        if let Some((_, next)) = rewrites.iter().find(|(from, _)| from == &current) {
+            current = next.clone();
+        } else {
+            // No more rewrites - this is the normal form
+            break;
+        }
+    }
+    
+    Ok(current)
+}
 
 /// Parse and evaluate a statement (assignment or expression) with environment.
 /// Returns the computed value.
@@ -113,15 +163,15 @@ pub fn parse_and_eval_with_env(
             .parse(expr_part)
             .map_err(|e| format!("parse error: {:?}", e))?;
 
-        // Apply rewrites to substitute variables using generated method
-        let rewritten = expr.apply_rewrites_with_facts(env_to_facts(env))?;
+        // Use Ascent to rewrite to normal form
+        let normal_form = rewrite_to_normal_form(expr, env)?;
 
         // Check for remaining variables (undefined variables)
-        if has_var_ref(&rewritten) {
+        if has_var_ref(&normal_form) {
             return Err("undefined variable in expression".to_string());
         }
 
-        let val = rewritten.eval();
+        let val = normal_form.eval();
         env.set(var_part.to_string(), val);
         Ok(val)
     } else {
@@ -131,19 +181,19 @@ pub fn parse_and_eval_with_env(
             .parse(trimmed)
             .map_err(|e| format!("parse error: {:?}", e))?;
 
-        // Apply rewrites to substitute variables using generated method
-        let rewritten = expr.apply_rewrites_with_facts(env_to_facts(env))?;
+        // Use Ascent to rewrite to normal form
+        let normal_form = rewrite_to_normal_form(expr, env)?;
 
         // Check for remaining variables (undefined variables)
-        if has_var_ref(&rewritten) {
+        if has_var_ref(&normal_form) {
             // Try to extract variable name for better error message
-            if let Some(var_name) = extract_var_name(&rewritten) {
+            if let Some(var_name) = extract_var_name(&normal_form) {
                 return Err(format!("undefined variable: {}", var_name));
             }
             return Err("undefined variable".to_string());
         }
 
-        Ok(rewritten.eval())
+        Ok(normal_form.eval())
     }
 }
 
@@ -154,6 +204,7 @@ fn has_var_ref(term: &Int) -> bool {
         Int::NumLit(_) => false,
         Int::Add(a, b) => has_var_ref(a) || has_var_ref(b),
         Int::Sub(a, b) => has_var_ref(a) || has_var_ref(b),
+        Int::Assign(_, expr) => has_var_ref(expr),
     }
 }
 
@@ -171,6 +222,7 @@ fn extract_var_name(term: &Int) -> Option<String> {
         Int::NumLit(_) => None,
         Int::Add(a, b) => extract_var_name(a).or_else(|| extract_var_name(b)),
         Int::Sub(a, b) => extract_var_name(a).or_else(|| extract_var_name(b)),
+        Int::Assign(_, expr) => extract_var_name(expr),
     }
 }
 

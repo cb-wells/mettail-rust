@@ -30,6 +30,10 @@ int(field_1.as_ref().clone()) <--
     int(t),
     if let Int :: Sub(field_0, field_1) = t;
 
+int(field_1.as_ref().clone()) <--
+    int(t),
+    if let Int :: Assign(field_0, field_1) = t;
+
 
     // Equation rules
 eq_int(t.clone(), t.clone()) <--
@@ -56,9 +60,45 @@ eq_int(Int :: Sub(Box :: new(x0.clone()), Box :: new(x1.clone())), Int :: Sub(Bo
 rw_int(s, t) <--
     int(s),
     if let Int :: VarRef(s_f0) = s,
-    let s_f0_val = s_f0.as_ref(),
-    if let Some(var_name) = { let var_name_opt = match s_f0_val.clone() { mettail_runtime :: OrdVar(mettail_runtime :: Var :: Free(ref fv)) => { fv.pretty_name.clone() } _ => None };
+    if let Some(var_name) = { let var_name_opt = match s_f0.clone() { mettail_runtime :: OrdVar(mettail_runtime :: Var :: Free(ref fv)) => { fv.pretty_name.clone() } _ => None };
 
-var_name_opt }, env_var(var_name, v), let t = Int :: NumLit(v);
+var_name_opt }, env_var(var_name, v), let t = Int :: NumLit(* v);
+
+rw_int(s, t) <--
+    int(s),
+    if let Int :: Assign(s_f0, s_f1) = s,
+    let s_f1_inner = s_f1.as_ref(),
+    if let Int :: NumLit(s_f1_inner_f0) = s_f1_inner,
+    let t = Int :: NumLit(s_f1_inner_f0.clone());
+
+rw_int(s, t) <--
+    int(s),
+    if let Int :: Add(s0, r) = s,
+    rw_int(* * s0, t0),
+    let t = Int :: Add(Box :: new(t0.clone()), r.clone());
+
+rw_int(s, t) <--
+    int(s),
+    if let Int :: Add(l, s0) = s,
+    rw_int(* * s0, t0),
+    let t = Int :: Add(l.clone(), Box :: new(t0.clone()));
+
+rw_int(s, t) <--
+    int(s),
+    if let Int :: Sub(s0, r) = s,
+    rw_int(* * s0, t0),
+    let t = Int :: Sub(Box :: new(t0.clone()), r.clone());
+
+rw_int(s, t) <--
+    int(s),
+    if let Int :: Sub(l, s0) = s,
+    rw_int(* * s0, t0),
+    let t = Int :: Sub(l.clone(), Box :: new(t0.clone()));
+
+rw_int(s, t) <--
+    int(s),
+    if let Int :: Assign(x, s0) = s,
+    rw_int(* * s0, t0),
+    let t = Int :: Assign(x.clone(), Box :: new(t0.clone()));
 
 }

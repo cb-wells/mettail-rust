@@ -135,21 +135,13 @@ fn generate_display_arm(rule: &GrammarRule, theory: &TheoryDef) -> TokenStream {
                         }
                         if let Some((_, field_name)) = field_iter.next() {
                             format_parts.push("{}".to_string());
-                            // Check if this category has a native type
-                            if has_native_type(&rule.category, theory).is_some() {
-                                // For native types, the field is the value directly (e.g., i32)
-                                format_args_tokens.push(quote! {
-                                    #field_name
-                                });
-                            } else {
-                                // For regular Var fields, extract from OrdVar
-                                format_args_tokens.push(quote! {
-                                    match &(#field_name).0 {
-                                        mettail_runtime::Var::Free(fv) => fv.pretty_name.as_ref().map(|s| s.as_str()).unwrap_or("_"),
-                                        mettail_runtime::Var::Bound(bv) => bv.pretty_name.as_ref().map(|s| s.as_str()).unwrap_or("_"),
-                                    }
-                                });
-                            }
+                            // Var fields are always OrdVar, need to extract the variable name
+                            format_args_tokens.push(quote! {
+                                match &(#field_name).0 {
+                                    mettail_runtime::Var::Free(fv) => fv.pretty_name.as_ref().map(|s| s.as_str()).unwrap_or("_"),
+                                    mettail_runtime::Var::Bound(bv) => bv.pretty_name.as_ref().map(|s| s.as_str()).unwrap_or("_"),
+                                }
+                            });
                         }
                     },
                     GrammarItem::NonTerminal(_) => {
