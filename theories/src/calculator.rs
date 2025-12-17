@@ -31,10 +31,6 @@ theory! {
         // Variable substitution: if env_var(x, v) then VarRef(x) => NumLit(v)
         if env_var(x, v) then (VarRef x) => (NumLit v);
         
-        // Assignment evaluation: Assign x (NumLit v) => NumLit v
-        // (The REPL will extract x and v to update the environment)
-        (Assign x (NumLit v)) => (NumLit v);
-        
         // Congruence rules: propagate rewrites through Add, Sub, and Assign
         if S => T then (Add S R) => (Add T R);
         if S => T then (Add L S) => (Add L T);
