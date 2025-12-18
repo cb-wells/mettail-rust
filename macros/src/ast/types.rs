@@ -61,10 +61,23 @@ pub enum Condition {
     },
 }
 
+/// Environment action to create facts when a rewrite fires
+#[derive(Debug, Clone)]
+pub enum EnvAction {
+    /// Create a fact: then env_var(x, v)
+    CreateFact {
+        /// Relation name (e.g., "env_var")
+        relation: Ident,
+        /// Arguments to the relation (e.g., ["x", "v"])
+        args: Vec<Ident>,
+    },
+}
+
 /// Rewrite rule with optional freshness conditions and optional congruence premise
 /// Base: (LHS) => (RHS) or if x # Q then (LHS) => (RHS)
 /// Congruence: if S => T then (LHS) => (RHS)
 /// Environment: if env_var(x, v) then (LHS) => (RHS)
+/// Fact creation: (LHS) => (RHS) then env_var(x, v)
 pub struct RewriteRule {
     pub conditions: Vec<Condition>,
     /// Optional congruence premise: (source_var, target_var)
@@ -72,6 +85,8 @@ pub struct RewriteRule {
     pub premise: Option<(Ident, Ident)>,
     pub left: Expr,
     pub right: Expr,
+    /// Environment actions to create facts when rewrite fires
+    pub env_actions: Vec<EnvAction>,
 }
 
 /// Semantic rule for operator evaluation
@@ -846,12 +861,49 @@ fn parse_rewrite_rule(input: ParseStream) -> SynResult<RewriteRule> {
     // Parse right-hand side
     let right = parse_expr(input)?;
 
+    // Parse optional environment actions: then env_var(x, v)
+    let mut env_actions = Vec::new();
+    while input.peek(Ident) {
+        // Check if next token is "then"
+        let lookahead = input.fork();
+        if let Ok(then_kw) = lookahead.parse::<Ident>() {
+            if then_kw == "then" {
+                input.parse::<Ident>()?; // consume "then"
+                
+                // Parse relation name and arguments: env_var(x, v)
+                let relation = input.parse::<Ident>()?;
+                let args_content;
+                syn::parenthesized!(args_content in input);
+                
+                let mut args = Vec::new();
+                while !args_content.is_empty() {
+                    args.push(args_content.parse::<Ident>()?);
+                    if args_content.peek(Token![,]) {
+                        let _ = args_content.parse::<Token![,]>()?;
+                    }
+                }
+                
+                env_actions.push(EnvAction::CreateFact { relation, args });
+            } else {
+                break;
+            }
+        } else {
+            break;
+        }
+    }
+
     // Optional semicolon
     if input.peek(Token![;]) {
         let _ = input.parse::<Token![;]>()?;
     }
 
-    Ok(RewriteRule { conditions, premise, left, right })
+    Ok(RewriteRule { 
+        conditions, 
+        premise, 
+        left, 
+        right,
+        env_actions,
+    })
 }
 
 fn parse_semantics(input: ParseStream) -> SynResult<Vec<SemanticRule>> {

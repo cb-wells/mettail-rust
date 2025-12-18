@@ -15,6 +15,7 @@ use super::generate_ascent_pattern;
 use super::rhs::generate_ascent_rhs;
 use crate::ascent::congruence::extract_category;
 use crate::ast::{Expr, RewriteRule, TheoryDef};
+use crate::utils::has_native_type;
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use std::collections::HashMap;
@@ -228,9 +229,88 @@ fn generate_rewrite_clause(rule: &RewriteRule, theory: &TheoryDef) -> TokenStrea
         clauses.push(quote! { let t = #rhs });
     }
 
-    quote! {
+    // Generate main rewrite clause
+    let main_clause = quote! {
         #rw_rel(s, t) <--
             #(#clauses),*;
+    };
+
+    // Generate fact creation clauses for env_actions
+    let mut fact_clauses = Vec::new();
+    for action in &rule.env_actions {
+        let crate::ast::EnvAction::CreateFact { relation, args } = action;
+        let rel_ident = format_ident!("{}", relation);
+        
+        // Build fact creation clause body - we need pattern matching but not RHS construction
+        // Only take clauses before "let t = ..." (the pattern matching part)
+        let mut fact_body_clauses: Vec<TokenStream> = clauses.iter()
+            .take_while(|c| {
+                let clause_str = c.to_string();
+                !clause_str.contains("let t =")
+            })
+            .cloned()
+            .collect();
+        
+        let mut fact_args = Vec::new();
+        let mut var_name_extractions = Vec::new();
+        
+        for arg_name in args {
+            let binding = bindings.get(&arg_name.to_string())
+                .expect(&format!("Variable '{}' not bound in rewrite rule", arg_name));
+            
+            // Check if this is a Var type (need to extract name from OrdVar)
+            if variable_categories.get(&arg_name.to_string())
+                .map(|cat| cat.to_string() == "Var")
+                .unwrap_or(false) {
+                // Extract variable name from OrdVar
+                // The binding is created from pattern matching: for Var fields, the binding is OrdVar.clone()
+                // So #binding is already OrdVar, we can match it directly
+                let var_name_ident = format_ident!("{}_name", arg_name);
+                let var_name_extraction = quote! {
+                    if let Some(#var_name_ident) = {
+                        let var_name_opt = match #binding {
+                            mettail_runtime::OrdVar(mettail_runtime::Var::Free(ref fv)) => {
+                                fv.pretty_name.clone()
+                            }
+                            _ => None
+                        };
+                        var_name_opt
+                    }
+                };
+                var_name_extractions.push(var_name_extraction);
+                fact_args.push(quote! { #var_name_ident });
+            } else {
+                // Check if this is a native type (like i32)
+                let is_native = if let Some(cat) = variable_categories.get(&arg_name.to_string()) {
+                    cat.to_string() == "Integer" || has_native_type(cat, theory).is_some()
+                } else {
+                    false
+                };
+                
+                if is_native {
+                    // Native type - binding is already the value (e.g., i32)
+                    fact_args.push(quote! { #binding });
+                } else {
+                    // Non-native type - use binding as-is
+                    fact_args.push(quote! { #binding });
+                }
+            }
+        }
+        
+        // Add variable name extractions to the body clauses
+        fact_body_clauses.extend(var_name_extractions);
+        
+        // Generate fact creation clause
+        // This creates facts when the pattern matches
+        fact_clauses.push(quote! {
+            #rel_ident(#(#fact_args),*) <--
+                #(#fact_body_clauses),*;
+        });
+    }
+
+    quote! {
+        #main_clause
+        #(#fact_clauses)*
     }
 }
 

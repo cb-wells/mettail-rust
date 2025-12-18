@@ -202,8 +202,26 @@ pub fn generate_rhs_construction(
                             }
                         });
 
-                    // Don't wrap collection fields or native value bindings in Box::new
-                    if is_collection_field || is_native_value_binding {
+                    // Check if this argument position corresponds to a Var field
+                    // Var fields are stored as OrdVar, not Box<OrdVar>, so don't wrap
+                    let is_var_field = grammar_rule
+                        .and_then(|rule| {
+                            rule.items
+                                .iter()
+                                .filter(|item| matches!(item, crate::ast::GrammarItem::NonTerminal(_)))
+                                .nth(i)
+                        })
+                        .and_then(|item| {
+                            if let crate::ast::GrammarItem::NonTerminal(cat) = item {
+                                Some(cat.to_string() == "Var")
+                            } else {
+                                None
+                            }
+                        })
+                        .unwrap_or(false);
+
+                    // Don't wrap collection fields, native value bindings, or Var fields in Box::new
+                    if is_collection_field || is_native_value_binding || is_var_field {
                         inner
                     } else {
                         quote! { Box::new(#inner) }

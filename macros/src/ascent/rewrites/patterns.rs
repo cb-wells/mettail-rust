@@ -82,8 +82,9 @@ pub fn generate_ascent_pattern(
                         variable_categories.insert(var_name, expected_category.clone());
                     }
                 } else {
-                    // Single occurrence - just bind (no need to track category)
-                    bindings.insert(var_name, binding);
+                    // Single occurrence - bind and track category (needed for env_actions)
+                    bindings.insert(var_name.clone(), binding);
+                    variable_categories.insert(var_name, expected_category.clone());
                 }
             }
         },

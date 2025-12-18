@@ -66,6 +66,20 @@ var_name_opt }, env_var(var_name, v), let t = Int :: NumLit(* v);
 
 rw_int(s, t) <--
     int(s),
+    if let Int :: Add(left, right) = s,
+    if let Int :: NumLit(a) = left.as_ref(),
+    if let Int :: NumLit(b) = right.as_ref(),
+    let t = Int :: NumLit(a + b);
+
+rw_int(s, t) <--
+    int(s),
+    if let Int :: Sub(left, right) = s,
+    if let Int :: NumLit(a) = left.as_ref(),
+    if let Int :: NumLit(b) = right.as_ref(),
+    let t = Int :: NumLit(a - b);
+
+rw_int(s, t) <--
+    int(s),
     if let Int :: Add(s0, r) = s,
     rw_int(* * s0, t0),
     let t = Int :: Add(Box :: new(t0.clone()), r.clone());

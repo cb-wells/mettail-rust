@@ -1,37 +1,42 @@
-use mettail_theories::calculator::{parse_and_eval, parse_and_eval_with_env, CalculatorEnv};
+use mettail_theories::calculator::{parse_and_eval_with_env, CalculatorEnv};
 
 #[test]
 fn test_numeric_literal() {
-    assert_eq!(parse_and_eval("3").unwrap(), 3);
+    let mut env = CalculatorEnv::new();
+    assert_eq!(parse_and_eval_with_env("3", &mut env).unwrap(), 3);
 }
 
 #[test]
 fn test_addition() {
-    assert_eq!(parse_and_eval("3 + 3").unwrap(), 6);
-    assert_eq!(parse_and_eval("10+5").unwrap(), 15);
+    let mut env = CalculatorEnv::new();
+    assert_eq!(parse_and_eval_with_env("3 + 3", &mut env).unwrap(), 6);
+    assert_eq!(parse_and_eval_with_env("10+5", &mut env).unwrap(), 15);
 }
 
 #[test]
 fn test_subtraction() {
-    assert_eq!(parse_and_eval("5-2").unwrap(), 3);
-    assert_eq!(parse_and_eval("10 - 7").unwrap(), 3);
+    let mut env = CalculatorEnv::new();
+    assert_eq!(parse_and_eval_with_env("5-2", &mut env).unwrap(), 3);
+    assert_eq!(parse_and_eval_with_env("10 - 7", &mut env).unwrap(), 3);
 }
 
 #[test]
 fn test_left_associativity() {
+    let mut env = CalculatorEnv::new();
     // (1+2)-3 == 0 and 1+2-3 parsed left-to-right -> (1+2)-3
-    assert_eq!(parse_and_eval("1+2-3").unwrap(), 0);
-    assert_eq!(parse_and_eval("(1+2)-3").unwrap(), 0);
+    assert_eq!(parse_and_eval_with_env("1+2-3", &mut env).unwrap(), 0);
+    assert_eq!(parse_and_eval_with_env("(1+2)-3", &mut env).unwrap(), 0);
 }
 
 #[test]
 fn test_negative_integers() {
-    assert_eq!(parse_and_eval("-5").unwrap(), -5);
-    assert_eq!(parse_and_eval("-10").unwrap(), -10);
-    assert_eq!(parse_and_eval("5 + -3").unwrap(), 2);
-    assert_eq!(parse_and_eval("5 - -3").unwrap(), 8);
-    assert_eq!(parse_and_eval("-5 + 3").unwrap(), -2);
-    assert_eq!(parse_and_eval("-5 - 3").unwrap(), -8);
+    let mut env = CalculatorEnv::new();
+    assert_eq!(parse_and_eval_with_env("-5", &mut env).unwrap(), -5);
+    assert_eq!(parse_and_eval_with_env("-10", &mut env).unwrap(), -10);
+    assert_eq!(parse_and_eval_with_env("5 + -3", &mut env).unwrap(), 2);
+    assert_eq!(parse_and_eval_with_env("5 - -3", &mut env).unwrap(), 8);
+    assert_eq!(parse_and_eval_with_env("-5 + 3", &mut env).unwrap(), -2);
+    assert_eq!(parse_and_eval_with_env("-5 - 3", &mut env).unwrap(), -8);
 }
 
 #[test]

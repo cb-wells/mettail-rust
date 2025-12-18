@@ -292,6 +292,21 @@ fn validate_rewrite_freshness(rw: &RewriteRule) -> Result<(), ValidationError> {
         }
     }
 
+    // Validate environment actions
+    for action in &rw.env_actions {
+        let crate::ast::EnvAction::CreateFact { args, .. } = action;
+        // All arguments in env_actions must be bound variables in the rewrite
+        for arg in args {
+            let arg_name = arg.to_string();
+            if !rewrite_vars.contains(&arg_name) {
+                return Err(ValidationError::FreshnessVariableNotInEquation {
+                    var: arg_name,
+                    span: arg.span(),
+                });
+            }
+        }
+    }
+
     Ok(())
 }
 

@@ -3,9 +3,10 @@ use mettail_theories::calculator::*;
 fn main() {
     println!("=== Simple arithmetic expressions ===");
     let expr_tests = vec!["3", "3 + 3", "5-2", "1+2-3", "(1+2)-3"];
+    let mut env = CalculatorEnv::new();
 
     for t in expr_tests {
-        match parse_and_eval(t) {
+        match parse_and_eval_with_env(t, &mut env) {
             Ok(v) => println!("Input: {:<10} Output: {}", t, v),
             Err(e) => println!("Input: {:<10} Error: {}", t, e),
         }

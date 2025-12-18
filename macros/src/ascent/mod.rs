@@ -150,6 +150,10 @@ pub fn generate_rewrite_rules(theory: &TheoryDef) -> TokenStream {
     // Generate base rewrite clauses (no premise)
     let base_rewrite_clauses = generate_rewrite_clauses(theory);
     rules.extend(base_rewrite_clauses);
+    
+    // Generate semantic evaluation rules (for operators with semantics)
+    let semantic_rules = generate_semantic_rules(theory);
+    rules.extend(semantic_rules);
 
     // Generate congruence rules (with premise: if S => T then ...)
     // For each collection congruence, generate projections and clauses
@@ -186,4 +190,65 @@ pub fn generate_rewrite_rules(theory: &TheoryDef) -> TokenStream {
     quote! {
         #(#rules)*
     }
+}
+
+/// Generate semantic evaluation rules for constructors with semantics
+/// For example: Add (NumLit a) (NumLit b) => NumLit(a + b)
+fn generate_semantic_rules(theory: &TheoryDef) -> Vec<TokenStream> {
+    use crate::ast::SemanticOperation;
+    
+    let mut rules = Vec::new();
+    
+    for semantic in &theory.semantics {
+        let constructor_name = &semantic.constructor;
+        
+        // Extract the operator
+        let op_token = match &semantic.operation {
+            SemanticOperation::Builtin(builtin_op) => {
+                use crate::ast::BuiltinOp;
+                match builtin_op {
+                    BuiltinOp::Add => quote! { + },
+                    BuiltinOp::Sub => quote! { - },
+                    BuiltinOp::Mul => quote! { * },
+                    BuiltinOp::Div => quote! { / },
+                    BuiltinOp::Rem => quote! { % },
+                    _ => continue, // Skip other operators
+                }
+            }
+        };
+        
+        // Find the rule with this constructor
+        if let Some(rule) = theory.terms.iter().find(|r| r.label == *constructor_name) {
+            // Check if this is a binary operator (should have exactly 2 non-terminal fields)
+            let non_terminals: Vec<_> = rule.items.iter().filter_map(|item| {
+                if let crate::ast::GrammarItem::NonTerminal(nt) = item {
+                    Some(nt)
+                } else {
+                    None
+                }
+            }).collect();
+            
+            if non_terminals.len() == 2 {
+                let category = &rule.category;
+                let label = &rule.label;
+                
+                // Generate rule with proper variable extraction in the head
+                let rw_rel = format_ident!("rw_{}", category.to_string().to_lowercase());
+                let cat_rel = format_ident!("{}", category.to_string().to_lowercase());
+                let num_lit = format_ident!("NumLit");
+                
+                // Pattern: rw_cat(s, t) with body that matches and extracts a, b
+                rules.push(quote! {
+                    #rw_rel(s, t) <--
+                        #cat_rel(s),
+                        if let #category::#label(left, right) = s,
+                        if let #category::#num_lit(a) = left.as_ref(),
+                        if let #category::#num_lit(b) = right.as_ref(),
+                        let t = #category::#num_lit(a #op_token b);
+                });
+            }
+        }
+    }
+    
+    rules
 }

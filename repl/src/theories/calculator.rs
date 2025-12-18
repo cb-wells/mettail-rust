@@ -41,24 +41,96 @@ impl Theory for CalculatorTheory {
         
         let trimmed = input.trim();
         
+        // Parse to Int AST
+        let parser = calculator::IntParser::new();
+        let expr = parser
+            .parse(trimmed)
+            .map_err(|e| anyhow::anyhow!("Parse error: {:?}", e))?;
+        
         // Check if it's an assignment
-        if trimmed.contains('=') {
-            // Handle assignment: parse, evaluate, update environment, return result as term
+        if let Int::Assign(var, rhs) = &expr {
+            let expr_clone = expr.clone();
+            // Handle assignment: evaluate RHS, update environment, return result
             CALC_ENV.with(|env| {
                 let mut env_ref = env.borrow_mut();
-                let result = parse_and_eval_with_env(trimmed, &mut env_ref)
-                    .map_err(|e| anyhow::anyhow!("Parse/eval error: {}", e))?;
-                // Return the evaluated result as a NumLit term
-                Ok(Box::new(CalcTerm(Int::NumLit(result))) as Box<dyn Term>)
+                
+                // Get environment facts
+                let env_facts = env_to_facts(&env_ref);
+                
+                // Use Ascent to evaluate the RHS
+                use ascent::*;
+                let prog = ascent_run! {
+                    include_source!(calculator_source);
+                    
+                    int(rhs.as_ref().clone());
+                    
+                    // Seed environment facts
+                    env_var(n.clone(), v) <-- for (n, v) in env_facts.clone();
+                };
+                
+                // Find the normal form of the RHS
+                let rewrites: Vec<(Int, Int)> = prog.rw_int
+                    .iter()
+                    .map(|(from, to)| (from.clone(), to.clone()))
+                    .collect();
+                
+                let mut current = rhs.as_ref().clone();
+                loop {
+                    if let Some((_, next)) = rewrites.iter().find(|(from, _)| from == &current) {
+                        current = next.clone();
+                    } else {
+                        break;
+                    }
+                }
+                
+                // Try to evaluate the normal form
+                // eval() panics if there are unevaluated terms, so we need to handle that
+                let result = std::panic::catch_unwind(|| current.eval())
+                    .map_err(|_| anyhow::anyhow!("Assignment RHS contains undefined variables"))?;
+                
+                // Update environment
+                if let Some(var_name) = match var {
+                    mettail_runtime::OrdVar(mettail_runtime::Var::Free(ref fv)) => fv.pretty_name.clone(),
+                    _ => None,
+                } {
+                    env_ref.set(var_name, result);
+                }
+                
+                // Return the assignment term
+                Ok(Box::new(CalcTerm(expr_clone)) as Box<dyn Term>)
             })
         } else {
-            // Parse to Int AST (don't evaluate yet)
-            let parser = calculator::IntParser::new();
-            let expr = parser
-                .parse(trimmed)
-                .map_err(|e| anyhow::anyhow!("Parse error: {:?}", e))?;
-            
-            Ok(Box::new(CalcTerm(expr)) as Box<dyn Term>)
+            // Not an assignment - evaluate the expression using Ascent to get normal form
+            CALC_ENV.with(|env| {
+                let env_facts = env_to_facts(&env.borrow());
+                
+                use ascent::*;
+                let prog = ascent_run! {
+                    include_source!(calculator_source);
+                    
+                    int(expr.clone());
+                    
+                    // Seed environment facts
+                    env_var(n.clone(), v) <-- for (n, v) in env_facts.clone();
+                };
+                
+                // Find the normal form of the expression
+                let rewrites: Vec<(Int, Int)> = prog.rw_int
+                    .iter()
+                    .map(|(from, to)| (from.clone(), to.clone()))
+                    .collect();
+                
+                let mut current = expr.clone();
+                loop {
+                    if let Some((_, next)) = rewrites.iter().find(|(from, _)| from == &current) {
+                        current = next.clone();
+                    } else {
+                        break;
+                    }
+                }
+                
+                Ok(Box::new(CalcTerm(current)) as Box<dyn Term>)
+            })
         }
     }
 
@@ -126,7 +198,15 @@ impl Theory for CalculatorTheory {
     }
 
     fn format_term(&self, term: &dyn Term) -> String {
-        format!("{}", term)
+        if let Some(calc_term) = term.as_any().downcast_ref::<CalcTerm>() {
+            // Try to evaluate the term
+            match std::panic::catch_unwind(|| calc_term.0.eval()) {
+                Ok(value) => format!("{}", value),
+                Err(_) => format!("{}", calc_term.0),
+            }
+        } else {
+            format!("{}", term)
+        }
     }
 }
 
