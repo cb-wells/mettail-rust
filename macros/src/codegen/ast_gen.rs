@@ -827,7 +827,7 @@ fn generate_rewrite_application(theory: &TheoryDef) -> TokenStream {
                         .map(|(idx, field_cat)| {
                             let field_name = &field_names[idx];
                             let field_cat_str = field_cat.to_string();
-                            
+
                             if field_cat_str == category_str && field_cat_str != "Var" {
                                 // Same category - recurse
                                 quote! { Box::new(Self::substitute_vars_recursive(#field_name.as_ref(), env)?) }
@@ -990,13 +990,13 @@ fn generate_env_infrastructure(theory: &TheoryDef) -> TokenStream {
 
         env_structs.push(quote! {
             use std::collections::HashMap;
-            
+
             /// Environment for storing variable bindings
             #[derive(Debug, Clone)]
             pub struct #env_name {
                 vars: HashMap<String, #native_type_clone>,
             }
-            
+
             impl #env_name {
                 /// Create a new empty environment
                 pub fn new() -> Self {
@@ -1004,57 +1004,57 @@ fn generate_env_infrastructure(theory: &TheoryDef) -> TokenStream {
                         vars: HashMap::new(),
                     }
                 }
-                
+
                 /// Store a variable binding
                 pub fn set(&mut self, name: String, value: #native_type_clone) {
                     self.vars.insert(name, value);
                 }
-                
+
                 /// Look up a variable value
                 pub fn get(&self, name: &str) -> Option<#native_type_clone> {
                     self.vars.get(name).copied()
                 }
-                
+
                 /// Clear all bindings
                 pub fn clear(&mut self) {
                     self.vars.clear();
                 }
             }
-            
+
             impl Default for #env_name {
                 fn default() -> Self {
                     Self::new()
                 }
             }
-            
+
             /// Convert environment to Ascent input facts
             /// Returns a vector of (variable_name, value) tuples for the #relation_clone relation
             pub fn env_to_facts(env: &#env_name) -> Vec<(String, #native_type_clone)> {
                 env.vars.iter().map(|(name, val)| (name.clone(), *val)).collect()
             }
-            
+
             /// Use Ascent to rewrite a term to normal form with environment
             pub fn rewrite_to_normal_form(term: #category_clone, env: &#env_name) -> Result<#category_clone, String> {
                 use ascent::*;
-                
+
                 let env_facts = env_to_facts(env);
-                
+
                 // Run Ascent - seed #relation facts using a rule that iterates over the collection
                 let prog = ascent_run! {
                     include_source!(#source_name);
-                    
+
                     #cat_rel(term.clone());
-                    
+
                     // Seed environment facts from the vector
                     #relation_clone(n.clone(), v) <-- for (n, v) in env_facts.clone();
                 };
-                
+
                 // Find normal form (term with no outgoing rewrites)
                 let rewrites: Vec<(#category_clone, #category_clone)> = prog.#rw_rel
                     .iter()
                     .map(|(from, to)| (from.clone(), to.clone()))
                     .collect();
-                
+
                 // Start from initial term and follow rewrite chain to normal form
                 let mut current = term;
                 loop {
@@ -1066,7 +1066,7 @@ fn generate_env_infrastructure(theory: &TheoryDef) -> TokenStream {
                         break;
                     }
                 }
-                
+
                 Ok(current)
             }
         });
