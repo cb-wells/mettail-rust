@@ -16,11 +16,7 @@ fn main() {
     let mut env = CalculatorEnv::new();
 
     println!("\nStoring variables:");
-    let assignments = vec![
-        "x = 3 + 2",
-        "y = 10 - 1",
-        "myVar = 100",
-    ];
+    let assignments = vec!["x = 3 + 2", "y = 10 - 1", "myVar = 100"];
 
     for assignment in assignments {
         match parse_and_eval_with_env(assignment, &mut env) {
@@ -40,12 +36,7 @@ fn main() {
     }
 
     println!("\nExpressions with variables:");
-    let expressions = vec![
-        "x + 2",
-        "y - 1",
-        "x + y",
-        "myVar - x - y",
-    ];
+    let expressions = vec!["x + 2", "y - 1", "x + y", "myVar - x - y"];
 
     for expr in expressions {
         match parse_and_eval_with_env(expr, &mut env) {
@@ -55,10 +46,7 @@ fn main() {
     }
 
     println!("\nAssignments with variables in RHS:");
-    let var_assignments = vec![
-        "z = x + y",
-        "w = myVar - z",
-    ];
+    let var_assignments = vec!["z = x + y", "w = myVar - z"];
 
     for assignment in var_assignments {
         match parse_and_eval_with_env(assignment, &mut env) {

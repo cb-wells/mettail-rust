@@ -644,7 +644,7 @@ fn generate_ascent_regular_pattern(
             Expr::Var(_) => {
                 // Check if field is Var type (stored as OrdVar, not Box<OrdVar>)
                 let is_var_field = field_category.to_string() == "Var";
-                
+
                 if is_var_field {
                     // Var fields are stored directly as OrdVar, no dereferencing needed
                     generate_ascent_pattern(
@@ -661,9 +661,9 @@ fn generate_ascent_regular_pattern(
                 } else {
                     // Check if field has native type (like i32)
                     // Integer is a special keyword for native integer types
-                    let is_native_type = field_category.to_string() == "Integer" 
+                    let is_native_type = field_category.to_string() == "Integer"
                         || has_native_type(&field_category, theory).is_some();
-                    
+
                     if is_native_type {
                         // For native types, bind directly without as_ref()
                         // Store binding for the variable (extract name from Var expression)
@@ -694,7 +694,7 @@ fn generate_ascent_regular_pattern(
             Expr::Apply { .. } => {
                 // Check if field is Var type (stored as OrdVar, not Box<OrdVar>)
                 let is_var_field = field_category.to_string() == "Var";
-                
+
                 if is_var_field {
                     // Var fields are stored directly as OrdVar
                     generate_ascent_pattern(

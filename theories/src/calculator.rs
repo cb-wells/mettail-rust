@@ -21,7 +21,7 @@ theory! {
 
         Add . Int ::= Int "+" Int ;
         Sub . Int ::= Int "-" Int ;
-        
+
         // Assignment: x = expr evaluates expr and stores result
         Assign . Int ::= Var "=" Int ;
     },
@@ -30,7 +30,7 @@ theory! {
     rewrites {
         // Variable substitution: if env_var(x, v) then VarRef(x) => NumLit(v)
         if env_var(x, v) then (VarRef x) => (NumLit v);
-        
+
         // Congruence rules: propagate rewrites through Add, Sub, and Assign
         if S => T then (Add S R) => (Add T R);
         if S => T then (Add L S) => (Add L T);

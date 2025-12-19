@@ -1,8 +1,8 @@
 use crate::examples::TheoryName;
 use crate::theory::{AscentResults, Rewrite, Term, TermInfo, Theory};
 use anyhow::Result;
-use std::fmt;
 use std::cell::RefCell;
+use std::fmt;
 
 // Import the theory definition from the theories crate
 use mettail_theories::calculator::*;
@@ -13,7 +13,6 @@ thread_local! {
 
 /// Calculator theory implementation for REPL
 pub struct CalculatorTheory;
-
 
 impl Theory for CalculatorTheory {
     fn name(&self) -> TheoryName {
@@ -38,64 +37,63 @@ impl Theory for CalculatorTheory {
 
     fn parse_term(&self, input: &str) -> Result<Box<dyn Term>> {
         mettail_runtime::clear_var_cache();
-        
+
         let trimmed = input.trim();
-        
+
         // Parse to Int AST
         let parser = calculator::IntParser::new();
         let expr = parser
             .parse(trimmed)
             .map_err(|e| anyhow::anyhow!("Parse error: {:?}", e))?;
-        
+
         // Check if it's an assignment
         if let Int::Assign(var, rhs) = &expr {
             let expr_clone = expr.clone();
             // Handle assignment: evaluate RHS, update environment, return result
             CALC_ENV.with(|env| {
                 let mut env_ref = env.borrow_mut();
-                
+
                 // Get environment facts
                 let env_facts = env_to_facts(&env_ref);
-                
+
                 // Use Ascent to evaluate the RHS
                 use ascent::*;
                 let prog = ascent_run! {
                     include_source!(calculator_source);
-                    
+
                     int(rhs.as_ref().clone());
-                    
+
                     // Seed environment facts
                     env_var(n.clone(), v) <-- for (n, v) in env_facts.clone();
                 };
-                
+
                 // Find the normal form of the RHS
-                let rewrites: Vec<(Int, Int)> = prog.rw_int
+                let rewrites: Vec<(Int, Int)> = prog
+                    .rw_int
                     .iter()
                     .map(|(from, to)| (from.clone(), to.clone()))
                     .collect();
-                
+
                 let mut current = rhs.as_ref().clone();
-                loop {
-                    if let Some((_, next)) = rewrites.iter().find(|(from, _)| from == &current) {
-                        current = next.clone();
-                    } else {
-                        break;
-                    }
+                while let Some((_, next)) = rewrites.iter().find(|(from, _)| from == &current) {
+                    current = next.clone();
                 }
-                
+
                 // Try to evaluate the normal form
                 // eval() panics if there are unevaluated terms, so we need to handle that
                 let result = std::panic::catch_unwind(|| current.eval())
                     .map_err(|_| anyhow::anyhow!("Assignment RHS contains undefined variables"))?;
-                
+
                 // Update environment
                 if let Some(var_name) = match var {
-                    mettail_runtime::OrdVar(mettail_runtime::Var::Free(ref fv)) => fv.pretty_name.clone(),
+                    mettail_runtime::OrdVar(mettail_runtime::Var::Free(ref fv)) => {
+                        fv.pretty_name.clone()
+                    },
                     _ => None,
                 } {
                     env_ref.set(var_name, result);
                 }
-                
+
                 // Return the assignment term
                 Ok(Box::new(CalcTerm(expr_clone)) as Box<dyn Term>)
             })
@@ -103,32 +101,29 @@ impl Theory for CalculatorTheory {
             // Not an assignment - evaluate the expression using Ascent to get normal form
             CALC_ENV.with(|env| {
                 let env_facts = env_to_facts(&env.borrow());
-                
+
                 use ascent::*;
                 let prog = ascent_run! {
                     include_source!(calculator_source);
-                    
+
                     int(expr.clone());
-                    
+
                     // Seed environment facts
                     env_var(n.clone(), v) <-- for (n, v) in env_facts.clone();
                 };
-                
+
                 // Find the normal form of the expression
-                let rewrites: Vec<(Int, Int)> = prog.rw_int
+                let rewrites: Vec<(Int, Int)> = prog
+                    .rw_int
                     .iter()
                     .map(|(from, to)| (from.clone(), to.clone()))
                     .collect();
-                
+
                 let mut current = expr.clone();
-                loop {
-                    if let Some((_, next)) = rewrites.iter().find(|(from, _)| from == &current) {
-                        current = next.clone();
-                    } else {
-                        break;
-                    }
+                while let Some((_, next)) = rewrites.iter().find(|(from, _)| from == &current) {
+                    current = next.clone();
                 }
-                
+
                 Ok(Box::new(CalcTerm(current)) as Box<dyn Term>)
             })
         }
@@ -136,50 +131,49 @@ impl Theory for CalculatorTheory {
 
     fn run_ascent(&self, term: Box<dyn Term>) -> Result<AscentResults> {
         use ascent::*;
-        
+
         let calc_term = term
             .as_any()
             .downcast_ref::<CalcTerm>()
             .ok_or_else(|| anyhow::anyhow!("Expected CalcTerm"))?;
-        
+
         let initial_int = calc_term.0.clone();
-        
+
         // Get environment facts from thread-local storage
-        let env_facts: Vec<(String, i32)> = CALC_ENV.with(|env| {
-            env_to_facts(&env.borrow())
-        });
-        
+        let env_facts: Vec<(String, i32)> = CALC_ENV.with(|env| env_to_facts(&env.borrow()));
+
         // Run Ascent with the generated source
         // Seed env_var facts using a rule that iterates over the collection
         let prog = ascent_run! {
             include_source!(calculator_source);
-            
+
             int(initial_int.clone());
-            
+
             // Seed environment facts from the vector
             env_var(n.clone(), v) <-- for (n, v) in env_facts.clone();
         };
-        
+
         // Extract results from Ascent relations
         let all_ints: Vec<Int> = prog.int.iter().map(|(i,)| i.clone()).collect();
-        let rewrites: Vec<(Int, Int)> = prog.rw_int
+        let rewrites: Vec<(Int, Int)> = prog
+            .rw_int
             .iter()
             .map(|(from, to)| (from.clone(), to.clone()))
             .collect();
-        
+
         // Build term info (similar to rhocalc/ambient)
         let mut term_infos = Vec::new();
         for int_term in &all_ints {
             let term_id = compute_term_id(int_term);
             let has_rewrites = rewrites.iter().any(|(from, _)| from == int_term);
-            
+
             term_infos.push(TermInfo {
                 term_id,
                 display: format!("{}", int_term),
                 is_normal_form: !has_rewrites,
             });
         }
-        
+
         // Build rewrite list
         let rewrite_list: Vec<Rewrite> = rewrites
             .iter()
@@ -189,7 +183,7 @@ impl Theory for CalculatorTheory {
                 rule_name: Some("var_substitution".to_string()),
             })
             .collect();
-        
+
         Ok(AscentResults {
             all_terms: term_infos,
             rewrites: rewrite_list,

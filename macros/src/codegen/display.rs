@@ -44,7 +44,11 @@ pub fn generate_display(theory: &TheoryDef) -> TokenStream {
 }
 
 /// Generate Display impl for a single category
-fn generate_display_impl(category: &syn::Ident, rules: &[&GrammarRule], theory: &TheoryDef) -> TokenStream {
+fn generate_display_impl(
+    category: &syn::Ident,
+    rules: &[&GrammarRule],
+    theory: &TheoryDef,
+) -> TokenStream {
     let mut match_arms: Vec<TokenStream> = rules
         .iter()
         .map(|rule| generate_display_arm(rule, theory))
@@ -68,8 +72,6 @@ fn generate_display_impl(category: &syn::Ident, rules: &[&GrammarRule], theory: 
         }
     }
 }
-
-
 
 /// Generate a match arm for displaying a single constructor
 fn generate_display_arm(rule: &GrammarRule, theory: &TheoryDef) -> TokenStream {
@@ -407,7 +409,10 @@ mod tests {
         let theory = TheoryDef {
             name: parse_quote!(Test),
             params: vec![],
-            exports: vec![Export { name: parse_quote!(Expr), native_type: None }],
+            exports: vec![Export {
+                name: parse_quote!(Expr),
+                native_type: None,
+            }],
             terms: vec![
                 GrammarRule {
                     label: parse_quote!(Zero),

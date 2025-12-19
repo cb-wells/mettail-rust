@@ -274,7 +274,7 @@ fn validate_rewrite_freshness(rw: &RewriteRule) -> Result<(), ValidationError> {
                         span: freshness.var.span(),
                     });
                 }
-            }
+            },
             crate::ast::Condition::EnvQuery { relation: _, args } => {
                 // Validate that the first arg (variable name) appears in the rewrite
                 // The second arg (value) is bound from the query, so it doesn't need to appear
@@ -288,7 +288,7 @@ fn validate_rewrite_freshness(rw: &RewriteRule) -> Result<(), ValidationError> {
                     }
                 }
                 // Other args (like the value) are bound from the query, so they don't need validation
-            }
+            },
         }
     }
 
@@ -353,7 +353,10 @@ mod tests {
         let theory = TheoryDef {
             name: parse_quote!(Test),
             params: vec![],
-            exports: vec![Export { name: parse_quote!(Elem), native_type: None }],
+            exports: vec![Export {
+                name: parse_quote!(Elem),
+                native_type: None,
+            }],
             terms: vec![GrammarRule {
                 label: parse_quote!(Zero),
                 category: parse_quote!(Elem),
@@ -373,7 +376,10 @@ mod tests {
         let theory = TheoryDef {
             name: parse_quote!(Test),
             params: vec![],
-            exports: vec![Export { name: parse_quote!(Elem), native_type: None }],
+            exports: vec![Export {
+                name: parse_quote!(Elem),
+                native_type: None,
+            }],
             terms: vec![GrammarRule {
                 label: parse_quote!(Quote),
                 category: parse_quote!(Name), // Not exported!
@@ -396,7 +402,10 @@ mod tests {
         let theory = TheoryDef {
             name: parse_quote!(Test),
             params: vec![],
-            exports: vec![Export { name: parse_quote!(Elem), native_type: None }],
+            exports: vec![Export {
+                name: parse_quote!(Elem),
+                native_type: None,
+            }],
             terms: vec![GrammarRule {
                 label: parse_quote!(Quote),
                 category: parse_quote!(Elem),
@@ -424,7 +433,16 @@ mod tests {
         let theory = TheoryDef {
             name: parse_quote!(Test),
             params: vec![],
-            exports: vec![Export { name: parse_quote!(Name), native_type: None }, Export { name: parse_quote!(Proc), native_type: None }],
+            exports: vec![
+                Export {
+                    name: parse_quote!(Name),
+                    native_type: None,
+                },
+                Export {
+                    name: parse_quote!(Proc),
+                    native_type: None,
+                },
+            ],
             terms: vec![
                 GrammarRule {
                     label: parse_quote!(NQuote),
@@ -492,7 +510,10 @@ mod tests {
         let theory = TheoryDef {
             name: parse_quote!(Test),
             params: vec![],
-            exports: vec![Export { name: parse_quote!(Name), native_type: None }],
+            exports: vec![Export {
+                name: parse_quote!(Name),
+                native_type: None,
+            }],
             terms: vec![GrammarRule {
                 label: parse_quote!(NZero),
                 category: parse_quote!(Name),
@@ -530,7 +551,10 @@ mod tests {
         let theory = TheoryDef {
             name: parse_quote!(Test),
             params: vec![],
-            exports: vec![Export { name: parse_quote!(Name), native_type: None }],
+            exports: vec![Export {
+                name: parse_quote!(Name),
+                native_type: None,
+            }],
             terms: vec![GrammarRule {
                 label: parse_quote!(NVar),
                 category: parse_quote!(Name),

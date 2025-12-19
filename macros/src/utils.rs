@@ -3,7 +3,9 @@ use syn::Ident;
 
 /// Check if a category has a native type and return it
 pub fn has_native_type<'a>(category: &Ident, theory: &'a TheoryDef) -> Option<&'a syn::Type> {
-    theory.exports.iter()
+    theory
+        .exports
+        .iter()
         .find(|e| e.name == *category)
         .and_then(|e| e.native_type.as_ref())
 }
@@ -61,8 +63,10 @@ pub fn print_rule(line: &str) -> String {
 
     // Normalize whitespace to fix TokenStream formatting issues
     let normalized = normalize_whitespace(line);
-    
-    let (head, body) = normalized.split_once("<- -").unwrap_or((normalized.trim(), ""));
+
+    let (head, body) = normalized
+        .split_once("<- -")
+        .unwrap_or((normalized.trim(), ""));
     let head_clauses = split_commas_outside_parens(head);
     let (head_last, head_rest) = head_clauses.split_last().unwrap_or((&"", &[]));
     let clauses = split_commas_outside_parens(body);

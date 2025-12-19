@@ -335,25 +335,19 @@ fn parse_exports(input: ParseStream) -> SynResult<Vec<Export>> {
         // Check for native type syntax: ![Type] as Name
         if content.peek(Token![!]) {
             let _ = content.parse::<Token![!]>()?;
-            
+
             // Parse [Type] - the brackets are part of the syntax, not the type
             let bracket_content;
             syn::bracketed!(bracket_content in content);
             let native_type = bracket_content.parse::<Type>()?;
-            
+
             let _ = content.parse::<Token![as]>()?;
             let name = content.parse::<Ident>()?;
-            exports.push(Export {
-                name,
-                native_type: Some(native_type),
-            });
+            exports.push(Export { name, native_type: Some(native_type) });
         } else {
             // Regular export: just a name
             let name = content.parse::<Ident>()?;
-            exports.push(Export {
-                name,
-                native_type: None,
-            });
+            exports.push(Export { name, native_type: None });
         }
 
         if content.peek(Token![;]) {
@@ -773,7 +767,7 @@ fn parse_rewrite_rule(input: ParseStream) -> SynResult<RewriteRule> {
             let relation = input.parse::<Ident>()?;
             let args_content;
             syn::parenthesized!(args_content in input);
-            
+
             let mut args = Vec::new();
             while !args_content.is_empty() {
                 args.push(args_content.parse::<Ident>()?);
@@ -781,12 +775,12 @@ fn parse_rewrite_rule(input: ParseStream) -> SynResult<RewriteRule> {
                     let _ = args_content.parse::<Token![,]>()?;
                 }
             }
-            
+
             let then_kw = input.parse::<Ident>()?;
             if then_kw != "then" {
                 return Err(syn::Error::new(then_kw.span(), "expected 'then'"));
             }
-            
+
             conditions.push(Condition::EnvQuery { relation, args });
         }
         // Allow either parenthesized freshness clause: if (x # ...rest) then
@@ -869,12 +863,12 @@ fn parse_rewrite_rule(input: ParseStream) -> SynResult<RewriteRule> {
         if let Ok(then_kw) = lookahead.parse::<Ident>() {
             if then_kw == "then" {
                 input.parse::<Ident>()?; // consume "then"
-                
+
                 // Parse relation name and arguments: env_var(x, v)
                 let relation = input.parse::<Ident>()?;
                 let args_content;
                 syn::parenthesized!(args_content in input);
-                
+
                 let mut args = Vec::new();
                 while !args_content.is_empty() {
                     args.push(args_content.parse::<Ident>()?);
@@ -882,7 +876,7 @@ fn parse_rewrite_rule(input: ParseStream) -> SynResult<RewriteRule> {
                         let _ = args_content.parse::<Token![,]>()?;
                     }
                 }
-                
+
                 env_actions.push(EnvAction::CreateFact { relation, args });
             } else {
                 break;
@@ -897,10 +891,10 @@ fn parse_rewrite_rule(input: ParseStream) -> SynResult<RewriteRule> {
         let _ = input.parse::<Token![;]>()?;
     }
 
-    Ok(RewriteRule { 
-        conditions, 
-        premise, 
-        left, 
+    Ok(RewriteRule {
+        conditions,
+        premise,
+        left,
         right,
         env_actions,
     })
@@ -920,7 +914,7 @@ fn parse_semantics(input: ParseStream) -> SynResult<Vec<SemanticRule>> {
         // Parse: Constructor: Operator
         let constructor = content.parse::<Ident>()?;
         let _ = content.parse::<Token![:]>()?;
-        
+
         // Parse operator symbol
         let op = if content.peek(Token![+]) {
             let _ = content.parse::<Token![+]>()?;

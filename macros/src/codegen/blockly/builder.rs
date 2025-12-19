@@ -1,33 +1,33 @@
 //! Block definition builder
-//! 
+//!
 //! Converts MeTTaIL grammar rules into Blockly block definitions
 
-use crate::ast::{GrammarRule, GrammarItem};
-use super::{BlockDefinition, BlockArg, ArgType, ConnectionType};
+use super::{ArgType, BlockArg, BlockDefinition, ConnectionType};
+use crate::ast::{GrammarItem, GrammarRule};
 
 /// Generate a Blockly block definition from a grammar rule
 pub fn generate_block_definition(rule: &GrammarRule, theory_name: &str) -> BlockDefinition {
     let label = rule.label.to_string();
     let category = rule.category.to_string();
-    
+
     // Generate block type: theory_category_label
     let block_type = format_block_type(&label, &category, theory_name);
-    
+
     // Generate tooltip
-    let tooltip = generate_tooltip(&rule);
-    
+    let tooltip = generate_tooltip(rule);
+
     // Generate message0 format string and arguments
     let (message, args) = generate_message_and_args(&rule.items);
-    
+
     // Determine connection type (value vs statement)
     let connection_type = determine_connection_type(&label, &category);
-    
+
     // Get color for this category
     let colour = super::colors::category_color(&category);
-    
+
     // Most blocks use inline inputs
     let inputs_inline = !has_statement_input(&args);
-    
+
     BlockDefinition {
         block_type,
         tooltip,
@@ -42,10 +42,10 @@ pub fn generate_block_definition(rule: &GrammarRule, theory_name: &str) -> Block
 /// Format block type identifier: lowercase with underscores
 fn format_block_type(label: &str, category: &str, _theory_name: &str) -> String {
     let category_prefix = extract_category_prefix(category);
-    
+
     // Convert label to snake_case: POutput -> output, NQuote -> quote
     let label_part = to_snake_case(label);
-    
+
     format!("{}_{}", category_prefix, label_part)
 }
 
@@ -58,7 +58,7 @@ fn extract_category_prefix(category: &str) -> String {
 fn to_snake_case(s: &str) -> String {
     let mut result = String::new();
     let mut chars = s.chars().peekable();
-    
+
     // Skip only single uppercase category prefix (P, N, E, etc.)
     let first = chars.next();
     if let Some(first_char) = first {
@@ -81,7 +81,7 @@ fn to_snake_case(s: &str) -> String {
             result.push(first_char);
         }
     }
-    
+
     let mut prev_was_lower = false;
     for ch in chars {
         if ch.is_uppercase() {
@@ -95,7 +95,7 @@ fn to_snake_case(s: &str) -> String {
             prev_was_lower = true;
         }
     }
-    
+
     result
 }
 
@@ -103,10 +103,10 @@ fn to_snake_case(s: &str) -> String {
 fn generate_tooltip(rule: &GrammarRule) -> String {
     let label = rule.label.to_string();
     let human_label = humanize_label(&label);
-    
+
     // Extract shape from terminals
     let shape = extract_shape(&rule.items);
-    
+
     if shape.is_empty() {
         human_label
     } else {
@@ -119,7 +119,7 @@ fn humanize_label(label: &str) -> String {
     // Remove single-letter category prefix (P, N, etc.)
     let mut chars = label.chars();
     let first = chars.next();
-    
+
     let without_prefix = if let Some(first_char) = first {
         if first_char.is_uppercase() {
             let rest: String = chars.collect();
@@ -135,11 +135,11 @@ fn humanize_label(label: &str) -> String {
     } else {
         return label.to_string();
     };
-    
+
     if without_prefix.is_empty() {
         return label.to_string();
     }
-    
+
     // Insert spaces before capitals
     let mut result = String::new();
     for (i, ch) in without_prefix.chars().enumerate() {
@@ -148,14 +148,14 @@ fn humanize_label(label: &str) -> String {
         }
         result.push(ch);
     }
-    
+
     result
 }
 
 /// Extract visual shape from terminals
 fn extract_shape(items: &[GrammarItem]) -> String {
     let mut shape = String::new();
-    
+
     for item in items {
         match item {
             GrammarItem::Terminal(s) => {
@@ -163,13 +163,13 @@ fn extract_shape(items: &[GrammarItem]) -> String {
                     shape.push(' ');
                 }
                 shape.push_str(s);
-            }
+            },
             GrammarItem::NonTerminal(_) | GrammarItem::Binder { .. } => {
                 if !shape.is_empty() {
                     shape.push(' ');
                 }
                 shape.push_str("...");
-            }
+            },
             GrammarItem::Collection { delimiters, .. } => {
                 if let Some((open, close)) = delimiters {
                     if !shape.is_empty() {
@@ -177,10 +177,10 @@ fn extract_shape(items: &[GrammarItem]) -> String {
                     }
                     shape.push_str(&format!("{} ... {}", open, close));
                 }
-            }
+            },
         }
     }
-    
+
     shape
 }
 
@@ -189,7 +189,7 @@ fn generate_message_and_args(items: &[GrammarItem]) -> (String, Vec<BlockArg>) {
     let mut message = String::new();
     let mut args = Vec::new();
     let mut arg_index = 1;
-    
+
     for item in items {
         match item {
             GrammarItem::Terminal(s) => {
@@ -198,66 +198,68 @@ fn generate_message_and_args(items: &[GrammarItem]) -> (String, Vec<BlockArg>) {
                     message.push(' ');
                 }
                 message.push_str(s);
-            }
-            
+            },
+
             GrammarItem::NonTerminal(category) => {
                 let cat_str = category.to_string();
-                
+
                 // Special handling for Var pseudo-terminal
                 if cat_str == "Var" {
                     if !message.is_empty() {
                         message.push(' ');
                     }
                     message.push_str(&format!("%{}", arg_index));
-                    
+
                     args.push(BlockArg {
                         arg_type: ArgType::FieldInput,
                         name: "VAR".to_string(),
                         check: None,
-                        text: Some(default_var_name(&category)),
+                        text: Some(default_var_name(category)),
                     });
-                    
+
                     arg_index += 1;
                     continue;
                 }
-                
+
                 // Add placeholder and create argument
                 if !message.is_empty() {
                     message.push(' ');
                 }
                 message.push_str(&format!("%{}", arg_index));
-                
+
                 let arg_name = generate_arg_name(arg_index, &cat_str, items);
                 let arg_type = determine_arg_type(arg_index, items);
-                
+
                 args.push(BlockArg {
                     arg_type,
                     name: arg_name,
                     check: Some(cat_str),
                     text: None,
                 });
-                
+
                 arg_index += 1;
-            }
-            
+            },
+
             GrammarItem::Binder { category: _ } => {
                 // Binders become text input fields
                 if !message.is_empty() {
                     message.push(' ');
                 }
                 message.push_str(&format!("%{}", arg_index));
-                
+
                 args.push(BlockArg {
                     arg_type: ArgType::FieldInput,
                     name: "VAR".to_string(),
                     check: None,
                     text: Some("x".to_string()),
                 });
-                
+
                 arg_index += 1;
-            }
-            
-            GrammarItem::Collection { coll_type: _, element_type, delimiters, .. } => {
+            },
+
+            GrammarItem::Collection {
+                coll_type: _, element_type, delimiters, ..
+            } => {
                 // Collections become statement inputs
                 if let Some((open, close)) = delimiters {
                     if !message.is_empty() {
@@ -270,7 +272,7 @@ fn generate_message_and_args(items: &[GrammarItem]) -> (String, Vec<BlockArg>) {
                     }
                     message.push_str(&format!("%{}", arg_index));
                 }
-                
+
                 let arg_name = pluralize(&element_type.to_string());
                 args.push(BlockArg {
                     arg_type: ArgType::InputStatement,
@@ -278,12 +280,12 @@ fn generate_message_and_args(items: &[GrammarItem]) -> (String, Vec<BlockArg>) {
                     check: Some(element_type.to_string()),
                     text: None,
                 });
-                
+
                 arg_index += 1;
-            }
+            },
         }
     }
-    
+
     (message, args)
 }
 
@@ -300,7 +302,7 @@ fn generate_arg_name(index: usize, category: &str, items: &[GrammarItem]) -> Str
             } else {
                 "MESSAGE".to_string()
             }
-        }
+        },
         _ => format!("ARG{}", index),
     }
 }
@@ -316,14 +318,14 @@ fn has_binder_before_index(items: &[GrammarItem], target_index: usize) -> bool {
                 if arg_count < target_index {
                     return true;
                 }
-            }
-            GrammarItem::NonTerminal(cat) if cat.to_string() != "Var" => {
+            },
+            GrammarItem::NonTerminal(cat) if *cat != "Var" => {
                 arg_count += 1;
-            }
+            },
             GrammarItem::Collection { .. } => {
                 arg_count += 1;
-            }
-            _ => {}
+            },
+            _ => {},
         }
     }
     false
@@ -358,18 +360,17 @@ fn pluralize(s: &str) -> String {
 
 /// Check if args contain statement input
 fn has_statement_input(args: &[BlockArg]) -> bool {
-    args.iter().any(|arg| arg.arg_type == ArgType::InputStatement)
+    args.iter()
+        .any(|arg| arg.arg_type == ArgType::InputStatement)
 }
 
 /// Determine connection type (value vs statement)
 fn determine_connection_type(label: &str, category: &str) -> ConnectionType {
     // Heuristic: Variables and certain constructors are value blocks
     if label.ends_with("Var") || label.ends_with("Zero") || label == "NQuote" {
-        return ConnectionType::Value {
-            output: category.to_string(),
-        };
+        return ConnectionType::Value { output: category.to_string() };
     }
-    
+
     // Proc blocks that look like statements
     if category == "Proc" {
         return ConnectionType::Statement {
@@ -377,17 +378,15 @@ fn determine_connection_type(label: &str, category: &str) -> ConnectionType {
             next: category.to_string(),
         };
     }
-    
+
     // Default: value output for other categories
-    ConnectionType::Value {
-        output: category.to_string(),
-    }
+    ConnectionType::Value { output: category.to_string() }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_to_snake_case() {
         assert_eq!(to_snake_case("POutput"), "output");
@@ -395,7 +394,7 @@ mod tests {
         assert_eq!(to_snake_case("PZero"), "zero");
         assert_eq!(to_snake_case("PDrop"), "drop");
     }
-    
+
     #[test]
     fn test_humanize_label() {
         assert_eq!(humanize_label("POutput"), "Output");
@@ -403,4 +402,3 @@ mod tests {
         assert_eq!(humanize_label("PInput"), "Input");
     }
 }
-

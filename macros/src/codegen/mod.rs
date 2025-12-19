@@ -8,8 +8,8 @@ mod display;
 mod subst;
 pub mod termgen;
 
-pub mod parser;
 pub mod blockly;
+pub mod parser;
 
 pub use ast_gen::*;
 
@@ -32,11 +32,16 @@ pub fn is_integer_rule(rule: &GrammarRule) -> bool {
 }
 
 /// Generate the Var variant label for a category
-/// 
+///
 /// Convention: First letter of category + "Var"
 /// Examples: Proc -> PVar, Name -> NVar, Term -> TVar
 pub fn generate_var_label(category: &Ident) -> Ident {
     let cat_str = category.to_string();
-    let first_letter = cat_str.chars().next().unwrap_or('V').to_uppercase().collect::<String>();
+    let first_letter = cat_str
+        .chars()
+        .next()
+        .unwrap_or('V')
+        .to_uppercase()
+        .collect::<String>();
     quote::format_ident!("{}Var", first_letter)
 }

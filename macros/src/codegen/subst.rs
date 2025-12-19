@@ -77,7 +77,6 @@ fn find_all_substitutable_categories(rules: &[GrammarRule]) -> std::collections:
     cats
 }
 
-
 fn generate_category_substitution(
     category: &Ident,
     rules: &[&GrammarRule],
@@ -254,10 +253,7 @@ fn is_var_constructor(rule: &GrammarRule) -> bool {
 }
 
 /// Generate substitution match arm for an auto-generated Var variant
-fn generate_auto_var_substitution_arm(
-    category: &Ident,
-    replacement_cat: &Ident,
-) -> TokenStream {
+fn generate_auto_var_substitution_arm(category: &Ident, replacement_cat: &Ident) -> TokenStream {
     // Generate Var label: first letter + "Var"
     let var_label = generate_var_label(category);
 
@@ -671,7 +667,10 @@ mod tests {
         let theory = TheoryDef {
             name: parse_quote!(Test),
             params: vec![],
-            exports: vec![Export { name: parse_quote!(Elem), native_type: None }],
+            exports: vec![Export {
+                name: parse_quote!(Elem),
+                native_type: None,
+            }],
             terms: vec![
                 GrammarRule {
                     label: parse_quote!(Zero),

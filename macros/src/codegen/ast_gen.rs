@@ -1,7 +1,7 @@
 #![allow(clippy::cmp_owned, clippy::single_match)]
 
 use super::{display, generate_var_label, is_integer_rule, is_var_rule, subst, termgen};
-use crate::ast::{GrammarItem, GrammarRule, TheoryDef, BuiltinOp};
+use crate::ast::{BuiltinOp, GrammarItem, GrammarRule, TheoryDef};
 use proc_macro2::TokenStream;
 use quote::quote;
 use std::collections::HashMap;
@@ -152,9 +152,11 @@ fn generate_variant(rule: &GrammarRule, theory: &TheoryDef) -> TokenStream {
             FieldType::NonTerminal(ident) if ident.to_string() == "Integer" => {
                 // Special case: Integer field - use the category's native type
                 let category = &rule.category;
-                
+
                 // Integer requires native type (should be validated earlier)
-                if let Some(native_type) = theory.exports.iter()
+                if let Some(native_type) = theory
+                    .exports
+                    .iter()
                     .find(|e| e.name == *category)
                     .and_then(|e| e.native_type.as_ref())
                 {
@@ -276,7 +278,6 @@ fn generate_binder_variant(rule: &GrammarRule) -> TokenStream {
         #label(#(#fields),*)
     }
 }
-
 
 /// For each constructor with a collection field, generates a helper function that automatically flattens nested collections of the same type.
 fn generate_flatten_helpers(theory: &TheoryDef) -> TokenStream {
@@ -558,7 +559,7 @@ fn generate_eval_method(theory: &TheoryDef) -> TokenStream {
 
     for export in &theory.exports {
         let category = &export.name;
-        
+
         // Only generate for native types
         let native_type = match export.native_type.as_ref() {
             Some(ty) => ty,
@@ -604,7 +605,10 @@ fn generate_eval_method(theory: &TheoryDef) -> TokenStream {
             // Check if this is a Var rule (VarRef, etc.)
             else if is_var_rule(rule) {
                 // Use loop { panic!() } idiom for proper `!` type handling in quote!
-                let panic_msg = format!("Cannot evaluate {} - variables must be substituted via rewrites first", label);
+                let panic_msg = format!(
+                    "Cannot evaluate {} - variables must be substituted via rewrites first",
+                    label
+                );
                 match_arms.push(quote! {
                     #category::#label(_) => loop { panic!(#panic_msg) },
                 });
@@ -612,7 +616,9 @@ fn generate_eval_method(theory: &TheoryDef) -> TokenStream {
             // Check if this has semantics (operator)
             else if let Some(op) = semantics_map.get(&label_str) {
                 // Count non-terminal arguments (excluding terminals)
-                let arg_count = rule.items.iter()
+                let arg_count = rule
+                    .items
+                    .iter()
                     .filter(|item| matches!(item, GrammarItem::NonTerminal(_)))
                     .count();
 
@@ -643,17 +649,19 @@ fn generate_eval_method(theory: &TheoryDef) -> TokenStream {
             // These evaluate to the value of the recursive argument
             else {
                 // Find non-terminals in the rule
-                let non_terminals: Vec<_> = rule.items.iter()
+                let non_terminals: Vec<_> = rule
+                    .items
+                    .iter()
                     .filter_map(|item| match item {
                         GrammarItem::NonTerminal(nt) => Some(nt.to_string()),
                         _ => None,
                     })
                     .collect();
-                
+
                 // Check if this has Var and a recursive reference
                 let has_var = non_terminals.iter().any(|nt| nt == "Var");
                 let has_recursive = non_terminals.iter().any(|nt| *nt == category.to_string());
-                
+
                 if has_var && has_recursive {
                     // This is like Assign - evaluate the recursive part
                     // The constructor has (OrdVar, Box<T>) where T is the recursive part
@@ -713,15 +721,16 @@ fn generate_rewrite_application(theory: &TheoryDef) -> TokenStream {
     for export in &theory.exports {
         let category = &export.name;
         let cat_str = category.to_string();
-        
+
         if !categories_with_rewrites.contains(&cat_str) {
             continue;
         }
 
-
         // Check if there are EnvQuery conditions to determine fact type
         let has_env_query = theory.rewrites.iter().any(|rw| {
-            rw.conditions.iter().any(|c| matches!(c, crate::ast::Condition::EnvQuery { .. }))
+            rw.conditions
+                .iter()
+                .any(|c| matches!(c, crate::ast::Condition::EnvQuery { .. }))
         });
 
         if has_env_query {
@@ -732,28 +741,28 @@ fn generate_rewrite_application(theory: &TheoryDef) -> TokenStream {
                 .iter()
                 .filter(|r| r.category.to_string() == category_str)
                 .collect();
-            
+
             // Find VarRef rule and Integer rule for the rewrite
             // Look for any Var rule (not just "VarRef" - could be any name)
             let var_ref_rule = category_rules.iter().find(|r| is_var_rule(r));
             // Integer rule is the one that uses Integer keyword (for native type literals)
             let integer_rule = category_rules.iter().find(|r| is_integer_rule(r));
-            
+
             let integer_label = integer_rule.map(|r| &r.label);
-            
+
             // Generate match arms for all constructors
             let mut match_arms: Vec<TokenStream> = Vec::new();
             let category_str = category.to_string();
-            
+
             for rule in &category_rules {
                 let label = &rule.label;
                 let label_str = label.to_string();
-                
+
                 // Check if this is VarRef - apply rewrite
                 let is_var_ref = var_ref_rule
                     .map(|vr| vr.label.to_string() == label_str)
                     .unwrap_or(false);
-                
+
                 if is_var_ref {
                     if let Some(int_label) = integer_label {
                         match_arms.push(quote! {
@@ -773,32 +782,32 @@ fn generate_rewrite_application(theory: &TheoryDef) -> TokenStream {
                         continue;
                     }
                 }
-                
+
                 // Check if this is an Integer rule - pass through (has native type value)
                 let is_integer = integer_rule
                     .map(|ir| ir.label.to_string() == label_str)
                     .unwrap_or(false);
-                
+
                 if is_integer {
                     match_arms.push(quote! {
                         #category::#label(n) => Ok(#category::#label(*n))
                     });
                     continue;
                 }
-                
+
                 // For other constructors (Add, Sub, etc.), collect fields
-                let all_fields: Vec<syn::Ident> = rule.items.iter()
-                    .filter_map(|item| {
-                        match item {
-                            GrammarItem::NonTerminal(cat) => Some(cat.clone()),
-                            GrammarItem::Collection { element_type, .. } => Some(element_type.clone()),
-                            _ => None,
-                        }
+                let all_fields: Vec<syn::Ident> = rule
+                    .items
+                    .iter()
+                    .filter_map(|item| match item {
+                        GrammarItem::NonTerminal(cat) => Some(cat.clone()),
+                        GrammarItem::Collection { element_type, .. } => Some(element_type.clone()),
+                        _ => None,
                     })
                     .collect();
-                
+
                 let field_count = all_fields.len();
-                
+
                 if field_count == 0 {
                     // Nullary constructor
                     match_arms.push(quote! {
@@ -807,9 +816,11 @@ fn generate_rewrite_application(theory: &TheoryDef) -> TokenStream {
                 } else {
                     // Constructor with fields - generate recursive match arm
                     let field_names: Vec<syn::Ident> = (0..field_count)
-                        .map(|i| syn::Ident::new(&format!("f{}", i), proc_macro2::Span::call_site()))
+                        .map(|i| {
+                            syn::Ident::new(&format!("f{}", i), proc_macro2::Span::call_site())
+                        })
                         .collect();
-                    
+
                     // Generate reconstruction expressions for each field
                     let reconstructed: Vec<TokenStream> = all_fields.iter()
                         .enumerate()
@@ -826,7 +837,7 @@ fn generate_rewrite_application(theory: &TheoryDef) -> TokenStream {
                             }
                         })
                         .collect();
-                    
+
                     match_arms.push(quote! {
                         #category::#label(#(#field_names),*) => {
                             Ok(#category::#label(#(#reconstructed),*))
@@ -834,20 +845,20 @@ fn generate_rewrite_application(theory: &TheoryDef) -> TokenStream {
                     });
                 }
             }
-            
+
             // Ensure we have at least some match arms (should always have VarRef and NumLit at minimum)
             if match_arms.is_empty() {
                 return quote! {
                     compile_error!("No match arms generated for category with env_var rewrites");
                 };
             }
-            
+
             // Generate function that accepts env_var facts: (String, i32)
             let impl_block = quote! {
                 impl #category {
                     /// Apply rewrites using environment facts.
                     /// Returns the normal form (most reduced term) after applying all rewrites.
-                    /// 
+                    ///
                     /// Implements the rewrite rule: if env_var(x, v) then (VarRef x) => (NumLit v)
                     pub fn apply_rewrites_with_facts<I>(&self, facts: I) -> Result<#category, String>
                     where
@@ -856,11 +867,11 @@ fn generate_rewrite_application(theory: &TheoryDef) -> TokenStream {
                         // Convert facts to HashMap for efficient lookup
                         use std::collections::HashMap;
                         let env: HashMap<String, i32> = facts.into_iter().collect();
-                        
+
                         // Apply rewrites recursively
                         Self::substitute_vars_recursive(self, &env)
                     }
-                    
+
                     /// Recursively substitute variables using environment facts
                     /// Implements the rewrite rule: if env_var(x, v) then (VarRef x) => (NumLit v)
                     fn substitute_vars_recursive(term: &#category, env: &HashMap<String, i32>) -> Result<#category, String> {
@@ -880,7 +891,7 @@ fn generate_rewrite_application(theory: &TheoryDef) -> TokenStream {
 }
 
 /// Generate environment infrastructure for theories with env_var conditions
-/// 
+///
 /// This generates:
 /// - Environment struct (e.g., CalculatorEnv)
 /// - Environment methods (new, set, get, clear)
@@ -888,37 +899,41 @@ fn generate_rewrite_application(theory: &TheoryDef) -> TokenStream {
 /// - rewrite_to_normal_form helper function
 fn generate_env_infrastructure(theory: &TheoryDef) -> TokenStream {
     use crate::ast::Condition;
-    use std::collections::HashSet;
     use quote::format_ident;
-    
+    use std::collections::HashSet;
+
     // Check if any rewrite uses env_var conditions OR env_actions
     let mut env_info = Vec::new();
     let mut seen_relations = HashSet::new();
     let mut has_env_actions = false;
-    
+
     for rewrite in &theory.rewrites {
         // Check for env_actions (fact creation)
         if !rewrite.env_actions.is_empty() {
             has_env_actions = true;
         }
-        
+
         for condition in &rewrite.conditions {
             if let Condition::EnvQuery { relation, args } = condition {
                 if args.len() >= 2 {
                     let rel_name = relation.to_string();
-                    
+
                     // Avoid duplicates
                     if seen_relations.contains(&rel_name) {
                         continue;
                     }
                     seen_relations.insert(rel_name.clone());
-                    
+
                     // Extract category and native type from the rewrite
                     let category = extract_category_from_rewrite_internal(rewrite, theory);
                     if let Some(category) = category {
                         if let Some(export) = theory.exports.iter().find(|e| e.name == category) {
                             if let Some(native_type) = &export.native_type {
-                                env_info.push((category.clone(), native_type.clone(), relation.clone()));
+                                env_info.push((
+                                    category.clone(),
+                                    native_type.clone(),
+                                    relation.clone(),
+                                ));
                             }
                         }
                     }
@@ -926,7 +941,7 @@ fn generate_env_infrastructure(theory: &TheoryDef) -> TokenStream {
             }
         }
     }
-    
+
     // Also check env_actions for relations
     if has_env_actions {
         for rewrite in &theory.rewrites {
@@ -940,7 +955,11 @@ fn generate_env_infrastructure(theory: &TheoryDef) -> TokenStream {
                     if let Some(category) = category {
                         if let Some(export) = theory.exports.iter().find(|e| e.name == category) {
                             if let Some(native_type) = &export.native_type {
-                                env_info.push((category.clone(), native_type.clone(), relation.clone()));
+                                env_info.push((
+                                    category.clone(),
+                                    native_type.clone(),
+                                    relation.clone(),
+                                ));
                             }
                         }
                     }
@@ -948,15 +967,15 @@ fn generate_env_infrastructure(theory: &TheoryDef) -> TokenStream {
             }
         }
     }
-    
+
     if env_info.is_empty() {
         return quote! {};
     }
-    
+
     // Generate environment infrastructure for each (category, native_type, relation) tuple
     // Currently we only support one env relation per theory, but the structure allows extension
     let mut env_structs = Vec::new();
-    
+
     for (category, native_type, relation) in &env_info {
         let theory_name = &theory.name;
         let env_name = format_ident!("{}Env", theory_name);
@@ -968,7 +987,7 @@ fn generate_env_infrastructure(theory: &TheoryDef) -> TokenStream {
         let category_clone = category.clone();
         let native_type_clone = native_type.clone();
         let relation_clone = relation.clone();
-        
+
         env_structs.push(quote! {
             use std::collections::HashMap;
             
@@ -1052,186 +1071,188 @@ fn generate_env_infrastructure(theory: &TheoryDef) -> TokenStream {
             }
         });
     }
-    
+
     // Generate parse_and_eval_with_env function
     // This function handles parsing, rewriting, and value extraction automatically
     let mut parse_eval_functions = Vec::new();
-        for (category, native_type, _relation) in &env_info {
-            let theory_name = &theory.name;
-            let theory_name_lower = theory_name.to_string().to_lowercase();
-            let parser_mod = format_ident!("{}", theory_name_lower);
-            let cat_parser = format_ident!("{}Parser", category);
-            let env_name = format_ident!("{}Env", theory_name);
-            
-            // Find assignment-like constructors (Var + recursive category)
-            let assignment_constructors: Vec<_> = theory.terms
-                .iter()
-                .filter(|rule| {
-                    rule.category == *category &&
-                    rule.items.iter().any(|item| {
+    for (category, native_type, _relation) in &env_info {
+        let theory_name = &theory.name;
+        let theory_name_lower = theory_name.to_string().to_lowercase();
+        let parser_mod = format_ident!("{}", theory_name_lower);
+        let cat_parser = format_ident!("{}Parser", category);
+        let env_name = format_ident!("{}Env", theory_name);
+
+        // Find assignment-like constructors (Var + recursive category)
+        let assignment_constructors: Vec<_> = theory
+            .terms
+            .iter()
+            .filter(|rule| {
+                rule.category == *category
+                    && rule.items.iter().any(|item| {
                         if let GrammarItem::NonTerminal(nt) = item {
                             nt.to_string() == "Var"
                         } else {
                             false
                         }
-                    }) &&
-                    rule.items.iter().any(|item| {
+                    })
+                    && rule.items.iter().any(|item| {
                         if let GrammarItem::NonTerminal(nt) = item {
                             nt == category
                         } else {
                             false
                         }
                     })
-                })
-                .map(|rule| &rule.label)
-                .collect();
-            
-            // Helper function for checking undefined variables
-            // We need to generate match arms for all constructors that might contain VarRef
-            let mut check_var_ref_arms = Vec::new();
-            
-            // Add specific cases for common constructors
-            for rule in theory.terms.iter().filter(|r| r.category == *category) {
-                let label = &rule.label;
-                let has_var_field = rule.items.iter().any(|item| {
+            })
+            .map(|rule| &rule.label)
+            .collect();
+
+        // Helper function for checking undefined variables
+        // We need to generate match arms for all constructors that might contain VarRef
+        let mut check_var_ref_arms = Vec::new();
+
+        // Add specific cases for common constructors
+        for rule in theory.terms.iter().filter(|r| r.category == *category) {
+            let label = &rule.label;
+            let has_var_field = rule.items.iter().any(|item| {
+                if let GrammarItem::NonTerminal(nt) = item {
+                    nt.to_string() == "Var"
+                } else {
+                    false
+                }
+            });
+
+            let recursive_fields: Vec<_> = rule
+                .items
+                .iter()
+                .enumerate()
+                .filter_map(|(i, item)| {
                     if let GrammarItem::NonTerminal(nt) = item {
-                        nt.to_string() == "Var"
-                    } else {
-                        false
-                    }
-                });
-                
-                let recursive_fields: Vec<_> = rule.items.iter()
-                    .enumerate()
-                    .filter_map(|(i, item)| {
-                        if let GrammarItem::NonTerminal(nt) = item {
-                            if nt == category {
-                                Some(i)
-                            } else {
-                                None
-                            }
+                        if nt == category {
+                            Some(i)
                         } else {
                             None
                         }
-                    })
-                    .collect();
-                
-                if has_var_field && recursive_fields.len() == 1 {
-                    // Assign-like: (Var, Box<Category>) - only check the recursive field
-                    check_var_ref_arms.push(quote! {
-                        #category::#label(_, f1) => check_var_ref(f1),
-                    });
-                } else if recursive_fields.len() == 2 {
-                    // Binary operators like Add, Sub: (Box<Category>, Box<Category>)
-                    check_var_ref_arms.push(quote! {
-                        #category::#label(f0, f1) => check_var_ref(f0) || check_var_ref(f1),
-                    });
-                } else if recursive_fields.len() == 1 {
-                    // Single recursive field
-                    check_var_ref_arms.push(quote! {
-                        #category::#label(f0) => check_var_ref(f0),
-                    });
-                } else {
-                    // No recursive fields or unit constructor
-                    check_var_ref_arms.push(quote! {
-                        #category::#label(..) => false,
-                    });
-                }
-            }
-            
-            let check_var_ref_fn = quote! {
-                fn check_var_ref(term: &#category) -> bool {
-                    match term {
-                        #category::VarRef(_) => true,
-                        #category::NumLit(_) => false,
-                        #(#check_var_ref_arms)*
-                        _ => false,
+                    } else {
+                        None
                     }
-                }
-            };
-            
-            // Generate value extraction logic
-            // Build match arms for assignment constructors
-            let mut assign_match_arms = Vec::new();
-            for assign_label in &assignment_constructors {
-                assign_match_arms.push(quote! {
-                    #category::#assign_label(var, rhs) => {
-                        // Extract variable name from OrdVar
-                        let var_name = match var {
-                            mettail_runtime::OrdVar(mettail_runtime::Var::Free(ref fv)) => {
-                                fv.pretty_name.clone()
-                            },
-                            _ => None,
-                        };
-                        
-                        // Check if RHS is a NumLit (after rewriting)
-                        let val = match rhs.as_ref() {
-                            #category::NumLit(v) => *v,
-                            _ => {
-                                // RHS still has variables or isn't fully evaluated
-                                // Check for undefined variables
-                                if check_var_ref(rhs) {
-                                    return Err("undefined variable in expression".to_string());
-                                }
-                                // Try to evaluate the RHS
-                                rhs.eval()
-                            }
-                        };
-                        
-                        // Update environment if we have a variable name
-                        if let Some(name) = var_name {
-                            env.set(name, val);
-                        }
-                        
-                        val
-                    }
+                })
+                .collect();
+
+            if has_var_field && recursive_fields.len() == 1 {
+                // Assign-like: (Var, Box<Category>) - only check the recursive field
+                check_var_ref_arms.push(quote! {
+                    #category::#label(_, f1) => check_var_ref(f1),
+                });
+            } else if recursive_fields.len() == 2 {
+                // Binary operators like Add, Sub: (Box<Category>, Box<Category>)
+                check_var_ref_arms.push(quote! {
+                    #category::#label(f0, f1) => check_var_ref(f0) || check_var_ref(f1),
+                });
+            } else if recursive_fields.len() == 1 {
+                // Single recursive field
+                check_var_ref_arms.push(quote! {
+                    #category::#label(f0) => check_var_ref(f0),
+                });
+            } else {
+                // No recursive fields or unit constructor
+                check_var_ref_arms.push(quote! {
+                    #category::#label(..) => false,
                 });
             }
-            
-            
-            parse_eval_functions.push(quote! {
-                /// Parse and evaluate a statement (assignment or expression) with environment.
-                /// Returns the computed value.
-                /// This function is automatically generated for theories with declarative fact creation.
-                pub fn parse_and_eval_with_env(
-                    input: &str,
-                    env: &mut #env_name,
-                ) -> Result<#native_type, String> {
-                    #check_var_ref_fn
-                    
-                    mettail_runtime::clear_var_cache();
+        }
 
-                    let trimmed = input.trim();
+        let check_var_ref_fn = quote! {
+            fn check_var_ref(term: &#category) -> bool {
+                match term {
+                    #category::VarRef(_) => true,
+                    #category::NumLit(_) => false,
+                    #(#check_var_ref_arms)*
+                    _ => false,
+                }
+            }
+        };
 
-                    // Parse the input (handles both assignments and expressions)
-                    let parser = #parser_mod::#cat_parser::new();
-                    let term = parser
-                        .parse(trimmed)
-                        .map_err(|e| format!("parse error: {:?}", e))?;
+        // Generate value extraction logic
+        // Build match arms for assignment constructors
+        let mut assign_match_arms = Vec::new();
+        for assign_label in &assignment_constructors {
+            assign_match_arms.push(quote! {
+                #category::#assign_label(var, rhs) => {
+                    // Extract variable name from OrdVar
+                    let var_name = match var {
+                        mettail_runtime::OrdVar(mettail_runtime::Var::Free(ref fv)) => {
+                            fv.pretty_name.clone()
+                        },
+                        _ => None,
+                    };
 
-                    // Use Ascent to rewrite to normal form (generated function)
-                    // This will create env_var facts via rewrite rules with env_actions
-                    let normal_form = rewrite_to_normal_form(term, env)?;
-
-                    // Extract value from the normal form
-                    let val = match &normal_form {
-                        #(#assign_match_arms,)*
+                    // Check if RHS is a NumLit (after rewriting)
+                    let val = match rhs.as_ref() {
                         #category::NumLit(v) => *v,
                         _ => {
-                            // Fallback: try to evaluate the whole term
-                            // Check for undefined variables first
-                            if check_var_ref(&normal_form) {
+                            // RHS still has variables or isn't fully evaluated
+                            // Check for undefined variables
+                            if check_var_ref(rhs) {
                                 return Err("undefined variable in expression".to_string());
                             }
-                            normal_form.eval()
+                            // Try to evaluate the RHS
+                            rhs.eval()
                         }
                     };
 
-                    Ok(val)
+                    // Update environment if we have a variable name
+                    if let Some(name) = var_name {
+                        env.set(name, val);
+                    }
+
+                    val
                 }
             });
         }
-    
+
+        parse_eval_functions.push(quote! {
+            /// Parse and evaluate a statement (assignment or expression) with environment.
+            /// Returns the computed value.
+            /// This function is automatically generated for theories with declarative fact creation.
+            pub fn parse_and_eval_with_env(
+                input: &str,
+                env: &mut #env_name,
+            ) -> Result<#native_type, String> {
+                #check_var_ref_fn
+
+                mettail_runtime::clear_var_cache();
+
+                let trimmed = input.trim();
+
+                // Parse the input (handles both assignments and expressions)
+                let parser = #parser_mod::#cat_parser::new();
+                let term = parser
+                    .parse(trimmed)
+                    .map_err(|e| format!("parse error: {:?}", e))?;
+
+                // Use Ascent to rewrite to normal form (generated function)
+                // This will create env_var facts via rewrite rules with env_actions
+                let normal_form = rewrite_to_normal_form(term, env)?;
+
+                // Extract value from the normal form
+                let val = match &normal_form {
+                    #(#assign_match_arms,)*
+                    #category::NumLit(v) => *v,
+                    _ => {
+                        // Fallback: try to evaluate the whole term
+                        // Check for undefined variables first
+                        if check_var_ref(&normal_form) {
+                            return Err("undefined variable in expression".to_string());
+                        }
+                        normal_form.eval()
+                    }
+                };
+
+                Ok(val)
+            }
+        });
+    }
+
     quote! {
         #(#env_structs)*
         #(#parse_eval_functions)*
@@ -1240,19 +1261,22 @@ fn generate_env_infrastructure(theory: &TheoryDef) -> TokenStream {
 
 /// Extract the category from a rewrite rule (from LHS)
 /// Internal helper function for environment generation
-fn extract_category_from_rewrite_internal(rewrite: &crate::ast::RewriteRule, theory: &TheoryDef) -> Option<proc_macro2::Ident> {
+fn extract_category_from_rewrite_internal(
+    rewrite: &crate::ast::RewriteRule,
+    theory: &TheoryDef,
+) -> Option<proc_macro2::Ident> {
     use crate::ast::Expr;
-    
+
     // Try to extract category from LHS pattern
     match &rewrite.left {
         Expr::Apply { constructor, .. } => {
             // Find the rule with this constructor
-            if let Some(rule) = theory.terms.iter().find(|r| r.label == *constructor) {
-                Some(rule.category.clone())
-            } else {
-                None
-            }
-        }
+            theory
+                .terms
+                .iter()
+                .find(|r| r.label == *constructor)
+                .map(|rule| rule.category.clone())
+        },
         Expr::Var(_) => None,
         Expr::Subst { .. } => None,
         Expr::CollectionPattern { .. } => None,
@@ -1270,7 +1294,10 @@ mod tests {
         let theory = TheoryDef {
             name: parse_quote!(Test),
             params: vec![],
-            exports: vec![Export { name: parse_quote!(Elem), native_type: None }],
+            exports: vec![Export {
+                name: parse_quote!(Elem),
+                native_type: None,
+            }],
             terms: vec![
                 GrammarRule {
                     label: parse_quote!(Zero),
@@ -1308,7 +1335,16 @@ mod tests {
         let theory = TheoryDef {
             name: parse_quote!(Test),
             params: vec![],
-            exports: vec![Export { name: parse_quote!(Proc), native_type: None }, Export { name: parse_quote!(Name), native_type: None }],
+            exports: vec![
+                Export {
+                    name: parse_quote!(Proc),
+                    native_type: None,
+                },
+                Export {
+                    name: parse_quote!(Name),
+                    native_type: None,
+                },
+            ],
             terms: vec![
                 GrammarRule {
                     label: parse_quote!(PZero),
@@ -1345,9 +1381,18 @@ mod tests {
             name: parse_quote!(Test),
             params: vec![],
             exports: vec![
-                Export { name: parse_quote!(Proc), native_type: None },
-                Export { name: parse_quote!(Name), native_type: None },
-                Export { name: parse_quote!(Term), native_type: None },
+                Export {
+                    name: parse_quote!(Proc),
+                    native_type: None,
+                },
+                Export {
+                    name: parse_quote!(Name),
+                    native_type: None,
+                },
+                Export {
+                    name: parse_quote!(Term),
+                    native_type: None,
+                },
             ],
             terms: vec![
                 GrammarRule {
@@ -1424,7 +1469,10 @@ mod tests {
         let theory = TheoryDef {
             name: parse_quote!(Test),
             params: vec![],
-            exports: vec![Export { name: parse_quote!(Proc), native_type: None }],
+            exports: vec![Export {
+                name: parse_quote!(Proc),
+                native_type: None,
+            }],
             terms: vec![
                 GrammarRule {
                     label: parse_quote!(PZero),

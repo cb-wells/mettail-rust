@@ -165,21 +165,21 @@ fn generate_rewrite_clause(rule: &RewriteRule, theory: &TheoryDef) -> TokenStrea
                 clauses.push(quote! {
                     if is_fresh(&#var_binding, &#term_binding)
                 });
-            }
+            },
             crate::ast::Condition::EnvQuery { relation, args } => {
                 // Generate Ascent clause that queries the environment relation
                 // Example: if env_var(x, v) then (VarRef x) => (NumLit v)
                 // Pattern: (VarRef x) binds x to OrdVar
                 // Condition: env_var(x, v) means query env_var with x's name, bind v to the value
                 // RHS: (NumLit v) uses v which is bound from the query
-                
+
                 if args.len() < 2 {
                     panic!("EnvQuery condition requires at least 2 arguments (variable name and value)");
                 }
-                
-                let var_arg = &args[0];  // x - bound from LHS pattern
-                let val_arg = &args[1];  // v - will be bound from env_var query
-                
+
+                let var_arg = &args[0]; // x - bound from LHS pattern
+                let val_arg = &args[1]; // v - will be bound from env_var query
+
                 let var_binding = bindings.get(&var_arg.to_string()).unwrap_or_else(|| {
                     panic!(
                         "EnvQuery variable '{}' not bound. Available bindings: {:?}",
@@ -187,7 +187,7 @@ fn generate_rewrite_clause(rule: &RewriteRule, theory: &TheoryDef) -> TokenStrea
                         bindings.keys().collect::<Vec<_>>()
                     )
                 });
-                
+
                 // Extract variable name from OrdVar
                 // OrdVar contains Var::Free(FreeVar) which has pretty_name
                 let var_name_extraction = quote! {
@@ -201,7 +201,7 @@ fn generate_rewrite_clause(rule: &RewriteRule, theory: &TheoryDef) -> TokenStrea
                         var_name_opt
                     }
                 };
-                
+
                 // Generate clause: env_var(var_name, val) where:
                 // - var_name is extracted from the OrdVar (x binding)
                 // - val is bound from the query and will be used in RHS as v
@@ -210,18 +210,18 @@ fn generate_rewrite_clause(rule: &RewriteRule, theory: &TheoryDef) -> TokenStrea
                     if let Some(var_name) = #var_name_extraction,
                     #relation(var_name, #val_binding_name)
                 });
-                
+
                 // Add val_binding to bindings so RHS can use it
                 // Note: Ascent binds relation values by reference, so we dereference here
                 // since native types like i32 need to be passed by value to constructors
                 bindings.insert(val_arg.to_string(), quote! { *#val_binding_name });
-            }
+            },
         }
     }
 
     // Generate RHS
     let rhs = generate_ascent_rhs(&rule.right, &bindings, theory);
-    
+
     // Only call normalize() if the category has collection constructors
     if category_has_collections(&lhs_category, theory) {
         clauses.push(quote! { let t = (#rhs).normalize() });
@@ -240,28 +240,32 @@ fn generate_rewrite_clause(rule: &RewriteRule, theory: &TheoryDef) -> TokenStrea
     for action in &rule.env_actions {
         let crate::ast::EnvAction::CreateFact { relation, args } = action;
         let rel_ident = format_ident!("{}", relation);
-        
+
         // Build fact creation clause body - we need pattern matching but not RHS construction
         // Only take clauses before "let t = ..." (the pattern matching part)
-        let mut fact_body_clauses: Vec<TokenStream> = clauses.iter()
+        let mut fact_body_clauses: Vec<TokenStream> = clauses
+            .iter()
             .take_while(|c| {
                 let clause_str = c.to_string();
                 !clause_str.contains("let t =")
             })
             .cloned()
             .collect();
-        
+
         let mut fact_args = Vec::new();
         let mut var_name_extractions = Vec::new();
-        
+
         for arg_name in args {
-            let binding = bindings.get(&arg_name.to_string())
+            let binding = bindings
+                .get(&arg_name.to_string())
                 .expect(&format!("Variable '{}' not bound in rewrite rule", arg_name));
-            
+
             // Check if this is a Var type (need to extract name from OrdVar)
-            if variable_categories.get(&arg_name.to_string())
+            if variable_categories
+                .get(&arg_name.to_string())
                 .map(|cat| cat.to_string() == "Var")
-                .unwrap_or(false) {
+                .unwrap_or(false)
+            {
                 // Extract variable name from OrdVar
                 // The binding is created from pattern matching: for Var fields, the binding is OrdVar.clone()
                 // So #binding is already OrdVar, we can match it directly
@@ -286,7 +290,7 @@ fn generate_rewrite_clause(rule: &RewriteRule, theory: &TheoryDef) -> TokenStrea
                 } else {
                     false
                 };
-                
+
                 if is_native {
                     // Native type - binding is already the value (e.g., i32)
                     fact_args.push(quote! { #binding });
@@ -296,10 +300,10 @@ fn generate_rewrite_clause(rule: &RewriteRule, theory: &TheoryDef) -> TokenStrea
                 }
             }
         }
-        
+
         // Add variable name extractions to the body clauses
         fact_body_clauses.extend(var_name_extractions);
-        
+
         // Generate fact creation clause
         // This creates facts when the pattern matches
         fact_clauses.push(quote! {

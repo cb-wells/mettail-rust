@@ -160,7 +160,11 @@ fn generate_category_generation_method(cat_name: Ident, theory: &TheoryDef) -> T
 }
 
 /// Generate depth 0 cases (nullary constructors and variables)
-fn generate_depth_0_cases(cat_name: &Ident, rules: &[&GrammarRule], theory: &TheoryDef) -> TokenStream {
+fn generate_depth_0_cases(
+    cat_name: &Ident,
+    rules: &[&GrammarRule],
+    theory: &TheoryDef,
+) -> TokenStream {
     let mut cases = Vec::new();
 
     for rule in rules {
@@ -192,9 +196,11 @@ fn generate_depth_0_cases(cat_name: &Ident, rules: &[&GrammarRule], theory: &The
                     // Check if this is NumLit with a native type
                     let label_str = label.to_string();
                     let is_numlit = label_str == "NumLit";
-                    let has_native = theory.exports.iter()
+                    let has_native = theory
+                        .exports
+                        .iter()
                         .any(|e| e.name == *cat_name && e.native_type.is_some());
-                    
+
                     if has_native && is_numlit {
                         // For NumLit with native types, generate native values
                         // For i32/i64, generate some sample integers

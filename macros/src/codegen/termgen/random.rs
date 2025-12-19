@@ -97,7 +97,11 @@ fn generate_random_for_category(cat_name: &Ident, theory: &TheoryDef) -> TokenSt
 }
 
 /// Generate random depth 0 case (nullary constructors and variables)
-fn generate_random_depth_0(cat_name: &Ident, rules: &[&GrammarRule], _theory: &TheoryDef) -> TokenStream {
+fn generate_random_depth_0(
+    cat_name: &Ident,
+    rules: &[&GrammarRule],
+    _theory: &TheoryDef,
+) -> TokenStream {
     let mut cases = Vec::new();
 
     for rule in rules {
@@ -128,7 +132,7 @@ fn generate_random_depth_0(cat_name: &Ident, rules: &[&GrammarRule], _theory: &T
         if non_terminals.is_empty() {
             // Nullary constructor
             cases.push(quote! { #cat_name::#label });
-        } else         if non_terminals.len() == 1 {
+        } else if non_terminals.len() == 1 {
             // Check if it's a Var or Integer constructor
             if let GrammarItem::NonTerminal(nt) = non_terminals[0] {
                 let nt_str = nt.to_string();
@@ -331,11 +335,11 @@ fn generate_random_binary(
 ) -> TokenStream {
     let arg1_str = arg1_cat.to_string();
     let arg2_str = arg2_cat.to_string();
-    
+
     // Handle Var specially - it's a built-in type, generate directly as OrdVar
     let is_arg1_var = arg1_str == "Var";
     let is_arg2_var = arg2_str == "Var";
-    
+
     // If both args are non-exported and not Var, skip this constructor
     if !is_arg1_var && !is_exported(arg1_cat, theory) {
         return quote! {};

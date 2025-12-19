@@ -150,9 +150,8 @@ pub fn generate_rhs_construction(
 
             // Check if this is a NumLit constructor for a native type
             // If so, and if args are variables, we might need to evaluate them
-            let is_native_literal = native_type_opt.is_some() 
-                && constructor.to_string() == "NumLit"
-                && args.len() == 1;
+            let is_native_literal =
+                native_type_opt.is_some() && *constructor == "NumLit" && args.len() == 1;
 
             let rhs_args: Vec<TokenStream> = args
                 .iter()
@@ -192,7 +191,8 @@ pub fn generate_rhs_construction(
                     // use it directly (it's already the native type from env_var relation)
                     // Note: For EnvQuery bindings, the value is already the native type (i32), not an Int enum
                     // We need to mark this so we don't wrap it in Box::new
-                    let is_native_value_binding = is_native_literal && i == 0
+                    let is_native_value_binding = is_native_literal
+                        && i == 0
                         && matches!(arg, Expr::Var(_))
                         && bindings.contains_key(&{
                             if let Expr::Var(var) = arg {
@@ -208,12 +208,14 @@ pub fn generate_rhs_construction(
                         .and_then(|rule| {
                             rule.items
                                 .iter()
-                                .filter(|item| matches!(item, crate::ast::GrammarItem::NonTerminal(_)))
+                                .filter(|item| {
+                                    matches!(item, crate::ast::GrammarItem::NonTerminal(_))
+                                })
                                 .nth(i)
                         })
                         .and_then(|item| {
                             if let crate::ast::GrammarItem::NonTerminal(cat) = item {
-                                Some(cat.to_string() == "Var")
+                                Some(*cat == "Var")
                             } else {
                                 None
                             }
