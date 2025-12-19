@@ -43,13 +43,3 @@ theory! {
         Sub: -,
     }
 }
-
-//=============================================================================
-// EVALUATION
-//=============================================================================
-// Note: eval() method, CalculatorEnv, env_to_facts, rewrite_to_normal_form,
-// and parse_and_eval_with_env are now generated automatically by the theory! macro
-//
-// For simple expressions without variables, use parse_and_eval_with_env with an empty environment:
-//   let mut env = CalculatorEnv::new();
-//   parse_and_eval_with_env("3 + 5", &mut env)?;
