@@ -259,16 +259,17 @@ fn generate_regular_deconstruction(
         .collect();
 
     // Generate subterm facts for each non-terminal field
-    // Skip 'Var' fields as Var is a runtime type, not an exported category
+    // Skip 'Var' and 'Integer' fields as they are built-in types, not exported categories
     let subterm_facts: Vec<TokenStream> = non_terminals
         .iter()
         .zip(&field_names)
         .filter_map(|((_, field_type), field_name)| {
-            // Skip Var - it's a special runtime type, not a category
-            if field_type.to_string() == "Var" {
+            let field_type_str = field_type.to_string();
+            // Skip Var and Integer - they are special built-in types, not categories
+            if field_type_str == "Var" || field_type_str == "Integer" {
                 return None;
             }
-            let field_type_lower = format_ident!("{}", field_type.to_string().to_lowercase());
+            let field_type_lower = format_ident!("{}", field_type_str.to_lowercase());
             // In Ascent pattern matching, fields are &Box<T>
             // Clone the Box to get Box<T>, then use as_ref() to get &T, then clone to get T
             Some(quote! {

@@ -27,15 +27,15 @@ theory! {
     },
     equations {
         (PNew x (PNew y P)) == (PNew y (PNew x P));
-        if x # ...rest then 
+        if x # ...rest then
         (PPar {(PNew x P), ...rest}) == (PNew x (PPar {P, ...rest}));
-        if x # P then 
+        if x # P then
         (PIn N (PNew x P)) == (PNew x (PIn N P));
-        if x # P then 
+        if x # P then
         (POut N (PNew x P)) == (PNew x (POut N P));
-        if x # P then 
+        if x # P then
         (POpen N (PNew x P)) == (PNew x (POpen N P));
-        if x # P then 
+        if x # P then
         (PAmb N (PNew x P)) == (PNew x (PAmb N P));
     },
     rewrites {

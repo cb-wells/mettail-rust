@@ -1,3 +1,29 @@
+use crate::ast::TheoryDef;
+use syn::Ident;
+
+/// Check if a category has a native type and return it
+pub fn has_native_type<'a>(category: &Ident, theory: &'a TheoryDef) -> Option<&'a syn::Type> {
+    theory
+        .exports
+        .iter()
+        .find(|e| e.name == *category)
+        .and_then(|e| e.native_type.as_ref())
+}
+
+/// Get native type as string for comparison
+pub fn native_type_to_string(native_type: &syn::Type) -> String {
+    match native_type {
+        syn::Type::Path(type_path) => {
+            if let Some(segment) = type_path.path.segments.last() {
+                segment.ident.to_string()
+            } else {
+                "unknown".to_string()
+            }
+        },
+        _ => "unknown".to_string(),
+    }
+}
+
 pub fn split_commas_outside_parens(s: &str) -> Vec<&str> {
     let mut result = Vec::new();
     let mut depth = 0;
@@ -37,8 +63,10 @@ pub fn print_rule(line: &str) -> String {
 
     // Normalize whitespace to fix TokenStream formatting issues
     let normalized = normalize_whitespace(line);
-    
-    let (head, body) = normalized.split_once("<- -").unwrap_or((normalized.trim(), ""));
+
+    let (head, body) = normalized
+        .split_once("<- -")
+        .unwrap_or((normalized.trim(), ""));
     let head_clauses = split_commas_outside_parens(head);
     let (head_last, head_rest) = head_clauses.split_last().unwrap_or((&"", &[]));
     let clauses = split_commas_outside_parens(body);

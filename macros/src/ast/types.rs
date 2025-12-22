@@ -4,7 +4,7 @@ use syn::{
 };
 
 /// Top-level theory definition
-/// theory! { name: Foo, params: ..., exports { ... }, terms { ... }, equations { ... }, rewrites { ... } }
+/// theory! { name: Foo, params: ..., exports { ... }, terms { ... }, equations { ... }, rewrites { ... }, semantics { ... } }
 pub struct TheoryDef {
     pub name: Ident,
     #[allow(dead_code)]
@@ -13,6 +13,7 @@ pub struct TheoryDef {
     pub terms: Vec<GrammarRule>,
     pub equations: Vec<Equation>,
     pub rewrites: Vec<RewriteRule>,
+    pub semantics: Vec<SemanticRule>,
 }
 
 /// Theory parameter (for generic theories)
@@ -40,21 +41,82 @@ pub enum FreshnessTarget {
     CollectionRest(Ident),
 }
 
+#[derive(Debug, Clone)]
 pub struct FreshnessCondition {
     pub var: Ident,
     pub term: FreshnessTarget,
 }
 
+/// Condition types for rewrite rules
+#[derive(Debug, Clone)]
+pub enum Condition {
+    /// Freshness condition: if x # Q then
+    Freshness(FreshnessCondition),
+    /// Environment query condition: if env_var(x, v) then
+    EnvQuery {
+        /// Relation name (e.g., "env_var")
+        relation: Ident,
+        /// Arguments to the relation (e.g., ["x", "v"])
+        args: Vec<Ident>,
+    },
+}
+
+/// Environment action to create facts when a rewrite fires
+#[derive(Debug, Clone)]
+pub enum EnvAction {
+    /// Create a fact: then env_var(x, v)
+    CreateFact {
+        /// Relation name (e.g., "env_var")
+        relation: Ident,
+        /// Arguments to the relation (e.g., ["x", "v"])
+        args: Vec<Ident>,
+    },
+}
+
 /// Rewrite rule with optional freshness conditions and optional congruence premise
 /// Base: (LHS) => (RHS) or if x # Q then (LHS) => (RHS)
 /// Congruence: if S => T then (LHS) => (RHS)
+/// Environment: if env_var(x, v) then (LHS) => (RHS)
+/// Fact creation: (LHS) => (RHS) then env_var(x, v)
 pub struct RewriteRule {
-    pub conditions: Vec<FreshnessCondition>,
+    pub conditions: Vec<Condition>,
     /// Optional congruence premise: (source_var, target_var)
     /// if S => T then ... represents Some(("S", "T"))
     pub premise: Option<(Ident, Ident)>,
     pub left: Expr,
     pub right: Expr,
+    /// Environment actions to create facts when rewrite fires
+    pub env_actions: Vec<EnvAction>,
+}
+
+/// Semantic rule for operator evaluation
+/// semantics { Add: +, Sub: -, ... }
+#[derive(Debug, Clone)]
+pub struct SemanticRule {
+    pub constructor: Ident,
+    pub operation: SemanticOperation,
+}
+
+/// Semantic operation type
+#[derive(Debug, Clone)]
+pub enum SemanticOperation {
+    /// Built-in operations: Add, Sub, Mul, Div, etc.
+    Builtin(BuiltinOp),
+}
+
+/// Built-in operator types
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BuiltinOp {
+    Add,    // +
+    Sub,    // -
+    Mul,    // *
+    Div,    // /
+    Rem,    // %
+    BitAnd, // &
+    BitOr,  // |
+    BitXor, // ^
+    Shl,    // <<
+    Shr,    // >>
 }
 
 /// Expression in equations (AST patterns)
@@ -85,10 +147,12 @@ pub enum Expr {
     },
 }
 
-/// Export: just a category name
-/// exports { Elem; Name; }
+/// Export: category name, optionally with native Rust type
+/// exports { Elem; Name; ![i32] as Int; }
 pub struct Export {
     pub name: Ident,
+    /// Optional native Rust type (e.g., `i32` for `![i32] as Int`)
+    pub native_type: Option<Type>,
 }
 
 /// Grammar rule
@@ -201,6 +265,18 @@ impl Parse for TheoryDef {
             Vec::new()
         };
 
+        // Parse: semantics { ... }
+        let semantics = if input.peek(Ident) {
+            let lookahead = input.fork().parse::<Ident>()?;
+            if lookahead == "semantics" {
+                parse_semantics(input)?
+            } else {
+                Vec::new()
+            }
+        } else {
+            Vec::new()
+        };
+
         Ok(TheoryDef {
             name,
             params,
@@ -208,6 +284,7 @@ impl Parse for TheoryDef {
             terms,
             equations,
             rewrites,
+            semantics,
         })
     }
 }
@@ -255,8 +332,23 @@ fn parse_exports(input: ParseStream) -> SynResult<Vec<Export>> {
 
     let mut exports = Vec::new();
     while !content.is_empty() {
-        let name = content.parse::<Ident>()?;
-        exports.push(Export { name });
+        // Check for native type syntax: ![Type] as Name
+        if content.peek(Token![!]) {
+            let _ = content.parse::<Token![!]>()?;
+
+            // Parse [Type] - the brackets are part of the syntax, not the type
+            let bracket_content;
+            syn::bracketed!(bracket_content in content);
+            let native_type = bracket_content.parse::<Type>()?;
+
+            let _ = content.parse::<Token![as]>()?;
+            let name = content.parse::<Ident>()?;
+            exports.push(Export { name, native_type: Some(native_type) });
+        } else {
+            // Regular export: just a name
+            let name = content.parse::<Ident>()?;
+            exports.push(Export { name, native_type: None });
+        }
 
         if content.peek(Token![;]) {
             let _ = content.parse::<Token![;]>()?;
@@ -669,9 +761,31 @@ fn parse_rewrite_rule(input: ParseStream) -> SynResult<RewriteRule> {
     while input.peek(Token![if]) {
         let _ = input.parse::<Token![if]>()?;
 
+        // Check if this is an environment query: if env_var(x, v) then
+        if input.peek(Ident) && input.peek2(syn::token::Paren) {
+            // Parse: env_var(x, v)
+            let relation = input.parse::<Ident>()?;
+            let args_content;
+            syn::parenthesized!(args_content in input);
+
+            let mut args = Vec::new();
+            while !args_content.is_empty() {
+                args.push(args_content.parse::<Ident>()?);
+                if args_content.peek(Token![,]) {
+                    let _ = args_content.parse::<Token![,]>()?;
+                }
+            }
+
+            let then_kw = input.parse::<Ident>()?;
+            if then_kw != "then" {
+                return Err(syn::Error::new(then_kw.span(), "expected 'then'"));
+            }
+
+            conditions.push(Condition::EnvQuery { relation, args });
+        }
         // Allow either parenthesized freshness clause: if (x # ...rest) then
         // or the original forms: if x # P then  OR congruence: if S => T then
-        if input.peek(syn::token::Paren) {
+        else if input.peek(syn::token::Paren) {
             let paren_content;
             syn::parenthesized!(paren_content in input);
 
@@ -693,7 +807,7 @@ fn parse_rewrite_rule(input: ParseStream) -> SynResult<RewriteRule> {
                 return Err(syn::Error::new(then_kw.span(), "expected 'then'"));
             }
 
-            conditions.push(FreshnessCondition { var, term });
+            conditions.push(Condition::Freshness(FreshnessCondition { var, term }));
         } else {
             // Not parenthesized - could be congruence premise or freshness
             let var = input.parse::<Ident>()?;
@@ -726,7 +840,7 @@ fn parse_rewrite_rule(input: ParseStream) -> SynResult<RewriteRule> {
                     return Err(syn::Error::new(then_kw.span(), "expected 'then'"));
                 }
 
-                conditions.push(FreshnessCondition { var, term });
+                conditions.push(Condition::Freshness(FreshnessCondition { var, term }));
             }
         }
     }
@@ -741,12 +855,125 @@ fn parse_rewrite_rule(input: ParseStream) -> SynResult<RewriteRule> {
     // Parse right-hand side
     let right = parse_expr(input)?;
 
+    // Parse optional environment actions: then env_var(x, v)
+    let mut env_actions = Vec::new();
+    while input.peek(Ident) {
+        // Check if next token is "then"
+        let lookahead = input.fork();
+        if let Ok(then_kw) = lookahead.parse::<Ident>() {
+            if then_kw == "then" {
+                input.parse::<Ident>()?; // consume "then"
+
+                // Parse relation name and arguments: env_var(x, v)
+                let relation = input.parse::<Ident>()?;
+                let args_content;
+                syn::parenthesized!(args_content in input);
+
+                let mut args = Vec::new();
+                while !args_content.is_empty() {
+                    args.push(args_content.parse::<Ident>()?);
+                    if args_content.peek(Token![,]) {
+                        let _ = args_content.parse::<Token![,]>()?;
+                    }
+                }
+
+                env_actions.push(EnvAction::CreateFact { relation, args });
+            } else {
+                break;
+            }
+        } else {
+            break;
+        }
+    }
+
     // Optional semicolon
     if input.peek(Token![;]) {
         let _ = input.parse::<Token![;]>()?;
     }
 
-    Ok(RewriteRule { conditions, premise, left, right })
+    Ok(RewriteRule {
+        conditions,
+        premise,
+        left,
+        right,
+        env_actions,
+    })
+}
+
+fn parse_semantics(input: ParseStream) -> SynResult<Vec<SemanticRule>> {
+    let semantics_ident = input.parse::<Ident>()?;
+    if semantics_ident != "semantics" {
+        return Err(syn::Error::new(semantics_ident.span(), "expected 'semantics'"));
+    }
+
+    let content;
+    syn::braced!(content in input);
+
+    let mut rules = Vec::new();
+    while !content.is_empty() {
+        // Parse: Constructor: Operator
+        let constructor = content.parse::<Ident>()?;
+        let _ = content.parse::<Token![:]>()?;
+
+        // Parse operator symbol
+        let op = if content.peek(Token![+]) {
+            let _ = content.parse::<Token![+]>()?;
+            BuiltinOp::Add
+        } else if content.peek(Token![-]) {
+            let _ = content.parse::<Token![-]>()?;
+            BuiltinOp::Sub
+        } else if content.peek(Token![*]) {
+            let _ = content.parse::<Token![*]>()?;
+            BuiltinOp::Mul
+        } else if content.peek(Token![/]) {
+            let _ = content.parse::<Token![/]>()?;
+            BuiltinOp::Div
+        } else if content.peek(Token![%]) {
+            let _ = content.parse::<Token![%]>()?;
+            BuiltinOp::Rem
+        } else if content.peek(Token![&]) {
+            let _ = content.parse::<Token![&]>()?;
+            BuiltinOp::BitAnd
+        } else if content.peek(Token![|]) {
+            let _ = content.parse::<Token![|]>()?;
+            BuiltinOp::BitOr
+        } else if content.peek(Token![^]) {
+            let _ = content.parse::<Token![^]>()?;
+            BuiltinOp::BitXor
+        } else if content.peek(Token![<]) && content.peek2(Token![<]) {
+            let _ = content.parse::<Token![<]>()?;
+            let _ = content.parse::<Token![<]>()?;
+            BuiltinOp::Shl
+        } else if content.peek(Token![>]) && content.peek2(Token![>]) {
+            let _ = content.parse::<Token![>]>()?;
+            let _ = content.parse::<Token![>]>()?;
+            BuiltinOp::Shr
+        } else {
+            return Err(syn::Error::new(
+                content.span(),
+                "expected operator symbol (+, -, *, /, %, &, |, ^, <<, >>)",
+            ));
+        };
+
+        rules.push(SemanticRule {
+            constructor,
+            operation: SemanticOperation::Builtin(op),
+        });
+
+        // Optional comma or semicolon
+        if content.peek(Token![,]) {
+            let _ = content.parse::<Token![,]>()?;
+        } else if content.peek(Token![;]) {
+            let _ = content.parse::<Token![;]>()?;
+        }
+    }
+
+    // Optional comma after closing brace
+    if input.peek(Token![,]) {
+        let _ = input.parse::<Token![,]>()?;
+    }
+
+    Ok(rules)
 }
 
 #[cfg(test)]

@@ -3,8 +3,8 @@
 // This example shows how to use a theory defined in the theories crate
 // to parse terms and run Ascent rewrite rules.
 
-use ascent_byods_rels::*;
 use ascent::*;
+use ascent_byods_rels::*;
 use mettail_theories::rhocalc::*;
 use std::time::Instant;
 

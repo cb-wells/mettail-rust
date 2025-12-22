@@ -1,5 +1,6 @@
 use crate::ascent::congruence;
 use crate::ast::{Expr, TheoryDef};
+use crate::utils::{has_native_type, native_type_to_string};
 use proc_macro2::TokenStream;
 use quote::quote;
 use std::collections::HashMap;
@@ -138,11 +139,19 @@ pub fn generate_rhs_construction(
         Expr::Apply { constructor, args } => {
             let category = congruence::extract_category(expr, theory).unwrap();
 
+            // Check if this category has a native type - if so, we might need special handling
+            let native_type_opt = has_native_type(&category, theory);
+
             // Check if this constructor has collection fields
             let grammar_rule = theory
                 .terms
                 .iter()
                 .find(|r| r.label == *constructor && r.category == category);
+
+            // Check if this is a NumLit constructor for a native type
+            // If so, and if args are variables, we might need to evaluate them
+            let is_native_literal =
+                native_type_opt.is_some() && *constructor == "NumLit" && args.len() == 1;
 
             let rhs_args: Vec<TokenStream> = args
                 .iter()
@@ -178,14 +187,63 @@ pub fn generate_rhs_construction(
                             generate_ascent_rhs(arg, bindings, theory)
                         };
 
-                    // Don't wrap collection fields in Box::new
-                    if is_collection_field {
+                    // Special handling for native type NumLit: if arg is a variable bound to a native value,
+                    // use it directly (it's already the native type from env_var relation)
+                    // Note: For EnvQuery bindings, the value is already the native type (i32), not an Int enum
+                    // We need to mark this so we don't wrap it in Box::new
+                    let is_native_value_binding = is_native_literal
+                        && i == 0
+                        && matches!(arg, Expr::Var(_))
+                        && bindings.contains_key(&{
+                            if let Expr::Var(var) = arg {
+                                var.to_string()
+                            } else {
+                                String::new()
+                            }
+                        });
+
+                    // Check if this argument position corresponds to a Var field
+                    // Var fields are stored as OrdVar, not Box<OrdVar>, so don't wrap
+                    let is_var_field = grammar_rule
+                        .and_then(|rule| {
+                            rule.items
+                                .iter()
+                                .filter(|item| {
+                                    matches!(item, crate::ast::GrammarItem::NonTerminal(_))
+                                })
+                                .nth(i)
+                        })
+                        .and_then(|item| {
+                            if let crate::ast::GrammarItem::NonTerminal(cat) = item {
+                                Some(*cat == "Var")
+                            } else {
+                                None
+                            }
+                        })
+                        .unwrap_or(false);
+
+                    // Don't wrap collection fields, native value bindings, or Var fields in Box::new
+                    if is_collection_field || is_native_value_binding || is_var_field {
                         inner
                     } else {
                         quote! { Box::new(#inner) }
                     }
                 })
                 .collect();
+
+            // If this is NumLit for native type and we have a single native value, construct directly
+            if is_native_literal && rhs_args.len() == 1 {
+                if let Some(native_type) = native_type_opt {
+                    let type_str = native_type_to_string(native_type);
+                    if type_str == "i32" || type_str == "i64" {
+                        // For integer types, NumLit takes the native value directly
+                        let native_val = &rhs_args[0];
+                        return quote! {
+                            #category::NumLit(#native_val)
+                        };
+                    }
+                }
+            }
 
             quote! {
                 #category::#constructor(#(#rhs_args),*)

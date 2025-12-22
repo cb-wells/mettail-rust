@@ -103,8 +103,11 @@ fn generate_congruence_rules(theory: &TheoryDef) -> Vec<TokenStream> {
             continue;
         }
 
-        // Skip constructors with Var arguments - Var is not a user-defined category
-        if args.iter().any(|cat| cat.to_string() == "Var") {
+        // Skip constructors with Var or Integer arguments - they are built-in types, not user-defined categories
+        if args.iter().any(|cat| {
+            let cat_str = cat.to_string();
+            cat_str == "Var" || cat_str == "Integer"
+        }) {
             continue;
         }
 

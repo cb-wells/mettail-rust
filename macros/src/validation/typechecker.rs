@@ -368,7 +368,10 @@ mod tests {
         TheoryDef {
             name: parse_quote!(Test),
             params: vec![],
-            exports: vec![Export { name: parse_quote!(Elem) }],
+            exports: vec![Export {
+                name: parse_quote!(Elem),
+                native_type: None,
+            }],
             terms: vec![
                 GrammarRule {
                     label: parse_quote!(Zero),
@@ -389,6 +392,7 @@ mod tests {
             ],
             equations: vec![],
             rewrites: vec![],
+            semantics: vec![],
         }
     }
 

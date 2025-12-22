@@ -47,7 +47,7 @@ pub fn validate_theory(theory: &TheoryDef) -> Result<(), ValidationError> {
                 GrammarItem::NonTerminal(ident) => {
                     let ref_name = ident.to_string();
                     // Built-in types are always valid
-                    if ref_name == "Var" {
+                    if ref_name == "Var" || ref_name == "Integer" {
                         continue;
                     }
                     // Must be either exported or defined (or both)
@@ -240,37 +240,70 @@ fn validate_rewrite_freshness(rw: &RewriteRule) -> Result<(), ValidationError> {
     collect_vars(&rw.left, &mut rewrite_vars);
     collect_vars(&rw.right, &mut rewrite_vars);
 
-    // Validate each freshness condition
+    // Validate each condition
     for cond in &rw.conditions {
-        let var_name = cond.var.to_string();
-        let (term_name, term_span) = match &cond.term {
-            crate::ast::FreshnessTarget::Var(id) => (id.to_string(), id.span()),
-            crate::ast::FreshnessTarget::CollectionRest(id) => (id.to_string(), id.span()),
-        };
+        match cond {
+            crate::ast::Condition::Freshness(freshness) => {
+                let var_name = freshness.var.to_string();
+                let (term_name, term_span) = match &freshness.term {
+                    crate::ast::FreshnessTarget::Var(id) => (id.to_string(), id.span()),
+                    crate::ast::FreshnessTarget::CollectionRest(id) => (id.to_string(), id.span()),
+                };
 
-        // Check that the variable appears in the rewrite
-        if !rewrite_vars.contains(&var_name) {
-            return Err(ValidationError::FreshnessVariableNotInEquation {
-                var: var_name,
-                span: cond.var.span(),
-            });
+                // Check that the variable appears in the rewrite
+                if !rewrite_vars.contains(&var_name) {
+                    return Err(ValidationError::FreshnessVariableNotInEquation {
+                        var: var_name,
+                        span: freshness.var.span(),
+                    });
+                }
+
+                // Check that the term variable appears in the rewrite
+                if !rewrite_vars.contains(&term_name) {
+                    return Err(ValidationError::FreshnessTermNotInEquation {
+                        var: var_name,
+                        term: term_name,
+                        span: term_span,
+                    });
+                }
+
+                // Check that x != term (can't be fresh in itself)
+                if var_name == term_name {
+                    return Err(ValidationError::FreshnessSelfReference {
+                        var: var_name,
+                        span: freshness.var.span(),
+                    });
+                }
+            },
+            crate::ast::Condition::EnvQuery { relation: _, args } => {
+                // Validate that the first arg (variable name) appears in the rewrite
+                // The second arg (value) is bound from the query, so it doesn't need to appear
+                if let Some(first_arg) = args.first() {
+                    let arg_name = first_arg.to_string();
+                    if !rewrite_vars.contains(&arg_name) {
+                        return Err(ValidationError::FreshnessVariableNotInEquation {
+                            var: arg_name,
+                            span: first_arg.span(),
+                        });
+                    }
+                }
+                // Other args (like the value) are bound from the query, so they don't need validation
+            },
         }
+    }
 
-        // Check that the term variable appears in the rewrite
-        if !rewrite_vars.contains(&term_name) {
-            return Err(ValidationError::FreshnessTermNotInEquation {
-                var: var_name,
-                term: term_name,
-                span: term_span,
-            });
-        }
-
-        // Check that x != term (can't be fresh in itself)
-        if var_name == term_name {
-            return Err(ValidationError::FreshnessSelfReference {
-                var: var_name,
-                span: cond.var.span(),
-            });
+    // Validate environment actions
+    for action in &rw.env_actions {
+        let crate::ast::EnvAction::CreateFact { args, .. } = action;
+        // All arguments in env_actions must be bound variables in the rewrite
+        for arg in args {
+            let arg_name = arg.to_string();
+            if !rewrite_vars.contains(&arg_name) {
+                return Err(ValidationError::FreshnessVariableNotInEquation {
+                    var: arg_name,
+                    span: arg.span(),
+                });
+            }
         }
     }
 
@@ -320,7 +353,10 @@ mod tests {
         let theory = TheoryDef {
             name: parse_quote!(Test),
             params: vec![],
-            exports: vec![Export { name: parse_quote!(Elem) }],
+            exports: vec![Export {
+                name: parse_quote!(Elem),
+                native_type: None,
+            }],
             terms: vec![GrammarRule {
                 label: parse_quote!(Zero),
                 category: parse_quote!(Elem),
@@ -329,6 +365,7 @@ mod tests {
             }],
             equations: vec![],
             rewrites: vec![],
+            semantics: vec![],
         };
 
         assert!(validate_theory(&theory).is_ok());
@@ -339,7 +376,10 @@ mod tests {
         let theory = TheoryDef {
             name: parse_quote!(Test),
             params: vec![],
-            exports: vec![Export { name: parse_quote!(Elem) }],
+            exports: vec![Export {
+                name: parse_quote!(Elem),
+                native_type: None,
+            }],
             terms: vec![GrammarRule {
                 label: parse_quote!(Quote),
                 category: parse_quote!(Name), // Not exported!
@@ -351,6 +391,7 @@ mod tests {
             }],
             equations: vec![],
             rewrites: vec![],
+            semantics: vec![],
         };
 
         assert!(validate_theory(&theory).is_err());
@@ -361,7 +402,10 @@ mod tests {
         let theory = TheoryDef {
             name: parse_quote!(Test),
             params: vec![],
-            exports: vec![Export { name: parse_quote!(Elem) }],
+            exports: vec![Export {
+                name: parse_quote!(Elem),
+                native_type: None,
+            }],
             terms: vec![GrammarRule {
                 label: parse_quote!(Quote),
                 category: parse_quote!(Elem),
@@ -373,6 +417,7 @@ mod tests {
             }],
             equations: vec![],
             rewrites: vec![],
+            semantics: vec![],
         };
 
         let result = validate_theory(&theory);
@@ -388,7 +433,16 @@ mod tests {
         let theory = TheoryDef {
             name: parse_quote!(Test),
             params: vec![],
-            exports: vec![Export { name: parse_quote!(Name) }, Export { name: parse_quote!(Proc) }],
+            exports: vec![
+                Export {
+                    name: parse_quote!(Name),
+                    native_type: None,
+                },
+                Export {
+                    name: parse_quote!(Proc),
+                    native_type: None,
+                },
+            ],
             terms: vec![
                 GrammarRule {
                     label: parse_quote!(NQuote),
@@ -439,6 +493,7 @@ mod tests {
                 right: Expr::Var(parse_quote!(P)),
             }],
             rewrites: vec![],
+            semantics: vec![],
         };
 
         // Should pass - x and P both appear in equation, types match
@@ -455,7 +510,10 @@ mod tests {
         let theory = TheoryDef {
             name: parse_quote!(Test),
             params: vec![],
-            exports: vec![Export { name: parse_quote!(Name) }],
+            exports: vec![Export {
+                name: parse_quote!(Name),
+                native_type: None,
+            }],
             terms: vec![GrammarRule {
                 label: parse_quote!(NZero),
                 category: parse_quote!(Name),
@@ -478,6 +536,7 @@ mod tests {
                 },
             }],
             rewrites: vec![],
+            semantics: vec![],
         };
 
         let result = validate_theory(&theory);
@@ -492,7 +551,10 @@ mod tests {
         let theory = TheoryDef {
             name: parse_quote!(Test),
             params: vec![],
-            exports: vec![Export { name: parse_quote!(Name) }],
+            exports: vec![Export {
+                name: parse_quote!(Name),
+                native_type: None,
+            }],
             terms: vec![GrammarRule {
                 label: parse_quote!(NVar),
                 category: parse_quote!(Name),
@@ -512,6 +574,7 @@ mod tests {
                 },
             }],
             rewrites: vec![],
+            semantics: vec![],
         };
 
         let result = validate_theory(&theory);

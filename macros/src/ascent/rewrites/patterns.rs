@@ -13,6 +13,7 @@
 
 use crate::ascent::congruence;
 use crate::ast::{Expr, TheoryDef};
+use crate::utils::has_native_type;
 use proc_macro2::TokenStream;
 use quote::quote;
 use std::collections::HashMap;
@@ -81,8 +82,9 @@ pub fn generate_ascent_pattern(
                         variable_categories.insert(var_name, expected_category.clone());
                     }
                 } else {
-                    // Single occurrence - just bind (no need to track category)
-                    bindings.insert(var_name, binding);
+                    // Single occurrence - bind and track category (needed for env_actions)
+                    bindings.insert(var_name.clone(), binding);
+                    variable_categories.insert(var_name, expected_category.clone());
                 }
             }
         },
@@ -640,42 +642,91 @@ fn generate_ascent_regular_pattern(
                 }
             },
             Expr::Var(_) => {
-                // Variable - need to dereference the Box
-                let inner_var = quote::format_ident!("{}_val", field_name);
-                clauses.push(quote! {
-                    let #inner_var = #field_name.as_ref()
-                });
+                // Check if field is Var type (stored as OrdVar, not Box<OrdVar>)
+                let is_var_field = field_category.to_string() == "Var";
 
-                generate_ascent_pattern(
-                    arg,
-                    &inner_var,
-                    &field_category,
-                    theory,
-                    bindings,
-                    variable_categories,
-                    clauses,
-                    duplicate_vars,
-                    equational_checks,
-                );
+                if is_var_field {
+                    // Var fields are stored directly as OrdVar, no dereferencing needed
+                    generate_ascent_pattern(
+                        arg,
+                        field_name,
+                        &field_category,
+                        theory,
+                        bindings,
+                        variable_categories,
+                        clauses,
+                        duplicate_vars,
+                        equational_checks,
+                    );
+                } else {
+                    // Check if field has native type (like i32)
+                    // Integer is a special keyword for native integer types
+                    let is_native_type = field_category.to_string() == "Integer"
+                        || has_native_type(&field_category, theory).is_some();
+
+                    if is_native_type {
+                        // For native types, bind directly without as_ref()
+                        // Store binding for the variable (extract name from Var expression)
+                        if let Expr::Var(var_name) = arg {
+                            bindings.insert(var_name.to_string(), quote! { #field_name.clone() });
+                        }
+                    } else {
+                        // Regular field - need to dereference the Box
+                        let inner_var = quote::format_ident!("{}_val", field_name);
+                        clauses.push(quote! {
+                            let #inner_var = #field_name.as_ref()
+                        });
+
+                        generate_ascent_pattern(
+                            arg,
+                            &inner_var,
+                            &field_category,
+                            theory,
+                            bindings,
+                            variable_categories,
+                            clauses,
+                            duplicate_vars,
+                            equational_checks,
+                        );
+                    }
+                }
             },
             Expr::Apply { .. } => {
-                // Nested constructor - create inner term and recurse
-                let inner_var = quote::format_ident!("{}_inner", field_name);
-                clauses.push(quote! {
-                    let #inner_var = #field_name.as_ref()
-                });
+                // Check if field is Var type (stored as OrdVar, not Box<OrdVar>)
+                let is_var_field = field_category.to_string() == "Var";
 
-                generate_ascent_pattern(
-                    arg,
-                    &inner_var,
-                    &field_category,
-                    theory,
-                    bindings,
-                    variable_categories,
-                    clauses,
-                    duplicate_vars,
-                    equational_checks,
-                );
+                if is_var_field {
+                    // Var fields are stored directly as OrdVar
+                    generate_ascent_pattern(
+                        arg,
+                        field_name,
+                        &field_category,
+                        theory,
+                        bindings,
+                        variable_categories,
+                        clauses,
+                        duplicate_vars,
+                        equational_checks,
+                    );
+                } else {
+                    // Nested constructor - create inner term and recurse
+                    let inner_var = quote::format_ident!("{}_inner", field_name);
+                    clauses.push(quote! {
+                        let #inner_var = #field_name.as_ref()
+                    });
+
+                    generate_ascent_pattern(
+                        arg,
+                        &inner_var,
+                        &field_category,
+                        theory,
+                        bindings,
+                        variable_categories,
+                        clauses,
+                        duplicate_vars,
+                        equational_checks,
+                    );
+                }
             },
             Expr::Subst { .. } => {
                 panic!("Substitution in LHS");

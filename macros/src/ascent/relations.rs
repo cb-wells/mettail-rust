@@ -46,6 +46,10 @@ pub fn generate_relations(theory: &TheoryDef) -> TokenStream {
     let projection_relations = generate_collection_projection_relations(theory);
     relations.extend(projection_relations);
 
+    // Environment relations (for EnvQuery conditions)
+    let env_relations = generate_env_relations(theory);
+    relations.extend(env_relations);
+
     quote! {
         #(#relations)*
     }
@@ -81,4 +85,72 @@ fn generate_collection_projection_relations(theory: &TheoryDef) -> Vec<TokenStre
     }
 
     relations
+}
+
+/// Generate environment relations for EnvQuery conditions
+///
+/// For each EnvQuery condition in rewrite rules, generate the corresponding relation.
+/// Example: `if env_var(x, v) then ...` generates `relation env_var(String, i32);`
+fn generate_env_relations(theory: &TheoryDef) -> Vec<TokenStream> {
+    use crate::ast::Condition;
+    use std::collections::HashSet;
+
+    let mut relations = Vec::new();
+    let mut seen_relations = HashSet::new();
+
+    // Find all EnvQuery conditions in rewrite rules
+    for rewrite in &theory.rewrites {
+        for condition in &rewrite.conditions {
+            if let Condition::EnvQuery { relation, args: _ } = condition {
+                let rel_name = relation.to_string();
+
+                // Avoid duplicates
+                if seen_relations.contains(&rel_name) {
+                    continue;
+                }
+                seen_relations.insert(rel_name.clone());
+
+                // Determine the relation type based on the category and native type
+                // For calculator: env_var(x, v) where x is String (var name) and v is i32 (value)
+                // We need to find which category this applies to and get its native type
+                let category = extract_category_from_rewrite(rewrite, theory);
+                if let Some(category) = category {
+                    if let Some(export) = theory.exports.iter().find(|e| e.name == category) {
+                        if let Some(native_type) = &export.native_type {
+                            // Generate relation: env_var(String, native_type)
+                            // First arg is always String (variable name), second is the native type (value)
+                            relations.push(quote! {
+                                relation #relation(String, #native_type);
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    relations
+}
+
+/// Extract the category from a rewrite rule (from LHS)
+fn extract_category_from_rewrite(
+    rewrite: &crate::ast::RewriteRule,
+    theory: &TheoryDef,
+) -> Option<proc_macro2::Ident> {
+    use crate::ast::Expr;
+
+    // Try to extract category from LHS pattern
+    match &rewrite.left {
+        Expr::Apply { constructor, .. } => {
+            // Find the rule with this constructor
+            theory
+                .terms
+                .iter()
+                .find(|r| r.label == *constructor)
+                .map(|rule| rule.category.clone())
+        },
+        Expr::Var(_) => None,
+        Expr::Subst { .. } => None,
+        Expr::CollectionPattern { .. } => None,
+    }
 }

@@ -29,6 +29,10 @@ path = "../examples/rhocalc_demo.rs"
 name = "ambient_demo"
 path = "../examples/ambient_demo.rs"
 
+[[example]]
+name = "calculator_demo"
+path = "../examples/calculator_demo.rs"
+
 [[bin]]
 name = "ambient_tests"
 path = "../examples/ambient_tests.rs"
