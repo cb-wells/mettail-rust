@@ -1,4 +1,4 @@
-use mettail_theories::calculator::{parse_and_eval_with_env, CalculatorEnv};
+use mettail_theories::calculator::{parse_and_eval_with_env, CalculatorEnv, Int};
 
 #[test]
 fn test_numeric_literal() {
@@ -44,7 +44,7 @@ fn test_simple_assignment() {
     let mut env = CalculatorEnv::new();
     assert_eq!(parse_and_eval_with_env("x = 3 + 2", &mut env).unwrap(), 5);
     // Verify variable was stored
-    assert_eq!(env.get("x"), Some(5));
+    assert_eq!(env.get("x"), Some(Int::NumLit(5)));
 }
 
 #[test]
@@ -58,18 +58,18 @@ fn test_variable_lookup() {
 fn test_reassignment() {
     let mut env = CalculatorEnv::new();
     parse_and_eval_with_env("y = 3", &mut env).unwrap();
-    assert_eq!(env.get("y"), Some(3));
+    assert_eq!(env.get("y"), Some(Int::NumLit(3)));
     parse_and_eval_with_env("y = 10", &mut env).unwrap();
-    assert_eq!(env.get("y"), Some(10));
+    assert_eq!(env.get("y"), Some(Int::NumLit(10)));
 }
 
 #[test]
 fn test_multiple_assignments() {
     let mut env = CalculatorEnv::new();
     parse_and_eval_with_env("x = 3 + 2", &mut env).unwrap();
-    assert_eq!(env.get("x"), Some(5));
+    assert_eq!(env.get("x"), Some(Int::NumLit(5)));
     parse_and_eval_with_env("y = 10 - 1", &mut env).unwrap();
-    assert_eq!(env.get("y"), Some(9));
+    assert_eq!(env.get("y"), Some(Int::NumLit(9)));
 }
 
 #[test]
@@ -85,8 +85,8 @@ fn test_assignment_with_variable_reference() {
     let mut env = CalculatorEnv::new();
     parse_and_eval_with_env("x = 3 + 2", &mut env).unwrap();
     assert_eq!(parse_and_eval_with_env("y = x - 4 + 8", &mut env).unwrap(), 9);
-    assert_eq!(env.get("x"), Some(5));
-    assert_eq!(env.get("y"), Some(9));
+    assert_eq!(env.get("x"), Some(Int::NumLit(5)));
+    assert_eq!(env.get("y"), Some(Int::NumLit(9)));
 }
 
 #[test]

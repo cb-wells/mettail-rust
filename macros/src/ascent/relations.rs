@@ -6,7 +6,7 @@
 use crate::ascent::congruence::get_constructor_collection_element_type;
 use crate::ast::TheoryDef;
 use proc_macro2::TokenStream;
-use quote::{format_ident, quote};
+use quote::{format_ident, quote, quote_spanned};
 
 /// Generate all relation declarations for a theory
 pub fn generate_relations(theory: &TheoryDef) -> TokenStream {
@@ -90,13 +90,15 @@ fn generate_collection_projection_relations(theory: &TheoryDef) -> Vec<TokenStre
 /// Generate environment relations for EnvQuery conditions
 ///
 /// For each EnvQuery condition in rewrite rules, generate the corresponding relation.
-/// Example: `if env_var(x, v) then ...` generates `relation env_var(String, i32);`
+/// Example: `if env_var(x, v) then ...` generates `relation env_var(String, Int);`
+/// Works with both native types (i32) and custom category types (Proc, Expr, etc.)
 fn generate_env_relations(theory: &TheoryDef) -> Vec<TokenStream> {
     use crate::ast::Condition;
     use std::collections::HashSet;
 
     let mut relations = Vec::new();
     let mut seen_relations = HashSet::new();
+    let mut errors = Vec::new();
 
     // Find all EnvQuery conditions in rewrite rules
     for rewrite in &theory.rewrites {
@@ -110,23 +112,47 @@ fn generate_env_relations(theory: &TheoryDef) -> Vec<TokenStream> {
                 }
                 seen_relations.insert(rel_name.clone());
 
-                // Determine the relation type based on the category and native type
-                // For calculator: env_var(x, v) where x is String (var name) and v is i32 (value)
-                // We need to find which category this applies to and get its native type
+                // Determine the relation type based on the category
+                // First arg is always String (variable name), second is the value type
+                // For native types, use the native type directly; for custom types, use the category
                 let category = extract_category_from_rewrite(rewrite, theory);
-                if let Some(category) = category {
-                    if let Some(export) = theory.exports.iter().find(|e| e.name == category) {
-                        if let Some(native_type) = &export.native_type {
-                            // Generate relation: env_var(String, native_type)
-                            // First arg is always String (variable name), second is the native type (value)
-                            relations.push(quote! {
-                                relation #relation(String, #native_type);
-                            });
+                match category {
+                    Some(category) => {
+                        // Verify the category is exported
+                        if let Some(export) = theory.exports.iter().find(|e| e.name == category) {
+                            // Check if category has native type - if so, use native type; otherwise use category
+                            if let Some(native_type) = &export.native_type {
+                                // For native types, use the native type directly (e.g., i32 instead of Int)
+                                relations.push(quote! {
+                                    relation #relation(String, #native_type);
+                                });
+                            } else {
+                                // For custom types, use the category type (e.g., Proc, Expr)
+                                relations.push(quote! {
+                                    relation #relation(String, #category);
+                                });
+                            }
+                        } else {
+                            let span = relation.span();
+                            let msg = format!("category '{}' is not exported in theory '{}'", category, theory.name);
+                            errors.push(quote_spanned! {span=> compile_error!(#msg); });
                         }
-                    }
+                    },
+                    None => {
+                        let span = relation.span();
+                        let msg = format!("cannot extract category from rewrite rule for environment relation '{}'. Environment relations must be used with rewrite rules that have a constructor on the left-hand side.", rel_name);
+                        errors.push(quote_spanned! {span=> compile_error!(#msg); });
+                    },
                 }
             }
         }
+    }
+
+    // Emit all errors at once
+    if !errors.is_empty() {
+        return vec![quote! {
+            #(#errors)*
+        }];
     }
 
     relations

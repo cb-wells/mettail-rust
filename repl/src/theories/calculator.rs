@@ -8,7 +8,7 @@ use std::fmt;
 use mettail_theories::calculator::*;
 
 thread_local! {
-    static CALC_ENV: RefCell<CalculatorEnv> = RefCell::new(CalculatorEnv::new());
+    static CALC_ENV: RefCell<CalculatorIntEnv> = RefCell::new(CalculatorIntEnv::new());
 }
 
 /// Calculator theory implementation for REPL
@@ -53,8 +53,17 @@ impl Theory for CalculatorTheory {
             CALC_ENV.with(|env| {
                 let mut env_ref = env.borrow_mut();
 
-                // Get environment facts
-                let env_facts = env_to_facts(&env_ref);
+                // Get environment facts - convert Int enum to i32 for Ascent
+                let env_facts: Vec<(String, i32)> = env_ref.env_to_facts()
+                    .into_iter()
+                    .map(|(name, val)| {
+                        // Extract i32 from Int enum (NumLit variant)
+                        match val {
+                            Int::NumLit(v) => Ok((name, v)),
+                            _ => Err(anyhow::anyhow!("Environment value must be a NumLit")),
+                        }
+                    })
+                    .collect::<Result<Vec<_>>>()?;
 
                 // Use Ascent to evaluate the RHS
                 use ascent::*;
@@ -91,7 +100,7 @@ impl Theory for CalculatorTheory {
                     },
                     _ => None,
                 } {
-                    env_ref.set(var_name, result);
+                    env_ref.set(var_name, Int::NumLit(result));
                 }
 
                 // Return the assignment term
@@ -100,7 +109,18 @@ impl Theory for CalculatorTheory {
         } else {
             // Not an assignment - evaluate the expression using Ascent to get normal form
             CALC_ENV.with(|env| {
-                let env_facts = env_to_facts(&env.borrow());
+                let env_facts: Vec<(String, i32)> = env.borrow().env_to_facts()
+                    .into_iter()
+                    .map(|(name, val)| {
+                        // Extract i32 from Int enum (NumLit variant)
+                        let i32_val = match val {
+                            Int::NumLit(v) => v,
+                            _ => return Err(anyhow::anyhow!("Environment value must be a NumLit"))?,
+                        };
+                        Ok((name, i32_val))
+                    })
+                    .collect::<Result<Vec<_>>>()
+                    .map_err(|e| anyhow::anyhow!("Failed to convert environment: {}", e))?;
 
                 use ascent::*;
                 let prog = ascent_run! {
@@ -139,8 +159,21 @@ impl Theory for CalculatorTheory {
 
         let initial_int = calc_term.0.clone();
 
-        // Get environment facts from thread-local storage
-        let env_facts: Vec<(String, i32)> = CALC_ENV.with(|env| env_to_facts(&env.borrow()));
+        // Get environment facts from thread-local storage - convert Int enum to i32 for Ascent
+        let env_facts: Vec<(String, i32)> = CALC_ENV.with(|env| {
+            env.borrow().env_to_facts()
+                .into_iter()
+                .map(|(name, val)| {
+                    // Extract i32 from Int enum (NumLit variant)
+                    let i32_val = match val {
+                        Int::NumLit(v) => v,
+                        _ => return Err(anyhow::anyhow!("Environment value must be a NumLit"))?,
+                    };
+                    Ok((name, i32_val))
+                })
+                .collect::<Result<Vec<_>>>()
+        })
+        .map_err(|e| anyhow::anyhow!("Failed to convert environment: {}", e))?;
 
         // Run Ascent with the generated source
         // Seed env_var facts using a rule that iterates over the collection
