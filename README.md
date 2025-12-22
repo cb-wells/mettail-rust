@@ -38,7 +38,7 @@ theory! {
 
     terms {
         PZero . Proc ::= "0" ;
-        PInput . Proc ::= "for" "(" Name "->" <Name> ")" "{" Proc "}" ;
+        PInput . Proc ::= "for" "(" Name "<-" <Name> ")" "{" Proc "}" ;
         POutput . Proc ::= Name "!" "(" Proc ")" ;
         PPar . Proc ::= HashBag(Proc) sep "," delim "{" "}" ;  // AC operation
         PDrop . Proc ::= "*" Name ;
