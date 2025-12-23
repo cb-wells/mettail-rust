@@ -46,107 +46,73 @@ impl Theory for CalculatorTheory {
             .parse(trimmed)
             .map_err(|e| anyhow::anyhow!("Parse error: {:?}", e))?;
 
-        // Check if it's an assignment
+        // Handle assignments: evaluate RHS and update environment, but return the term
+        // so rewrites can still be shown
         if let Int::Assign(var, rhs) = &expr {
-            let expr_clone = expr.clone();
-            // Handle assignment: evaluate RHS, update environment, return result
-            CALC_ENV.with(|env| {
-                let mut env_ref = env.borrow_mut();
-
-                // Get environment facts - convert Int enum to i32 for Ascent
-                let env_facts: Vec<(String, i32)> = env_ref.env_to_facts()
+            // Get current environment
+            let env_facts: Vec<(String, i32)> = CALC_ENV.with(|env| {
+                env.borrow().env_to_facts()
                     .into_iter()
                     .map(|(name, val)| {
-                        // Extract i32 from Int enum (NumLit variant)
-                        match val {
-                            Int::NumLit(v) => Ok((name, v)),
-                            _ => Err(anyhow::anyhow!("Environment value must be a NumLit")),
-                        }
-                    })
-                    .collect::<Result<Vec<_>>>()?;
-
-                // Use Ascent to evaluate the RHS
-                use ascent::*;
-                let prog = ascent_run! {
-                    include_source!(calculator_source);
-
-                    int(rhs.as_ref().clone());
-
-                    // Seed environment facts
-                    env_var(n.clone(), v) <-- for (n, v) in env_facts.clone();
-                };
-
-                // Find the normal form of the RHS
-                let rewrites: Vec<(Int, Int)> = prog
-                    .rw_int
-                    .iter()
-                    .map(|(from, to)| (from.clone(), to.clone()))
-                    .collect();
-
-                let mut current = rhs.as_ref().clone();
-                while let Some((_, next)) = rewrites.iter().find(|(from, _)| from == &current) {
-                    current = next.clone();
-                }
-
-                // Try to evaluate the normal form
-                // eval() panics if there are unevaluated terms, so we need to handle that
-                let result = std::panic::catch_unwind(|| current.eval())
-                    .map_err(|_| anyhow::anyhow!("Assignment RHS contains undefined variables"))?;
-
-                // Update environment
-                if let Some(var_name) = match var {
-                    mettail_runtime::OrdVar(mettail_runtime::Var::Free(ref fv)) => {
-                        fv.pretty_name.clone()
-                    },
-                    _ => None,
-                } {
-                    env_ref.set(var_name, Int::NumLit(result));
-                }
-
-                // Return the assignment term
-                Ok(Box::new(CalcTerm(expr_clone)) as Box<dyn Term>)
-            })
-        } else {
-            // Not an assignment - evaluate the expression using Ascent to get normal form
-            CALC_ENV.with(|env| {
-                let env_facts: Vec<(String, i32)> = env.borrow().env_to_facts()
-                    .into_iter()
-                    .map(|(name, val)| {
-                        // Extract i32 from Int enum (NumLit variant)
                         let i32_val = match val {
                             Int::NumLit(v) => v,
-                            _ => return Err(anyhow::anyhow!("Environment value must be a NumLit"))?,
+                            _ => return Err(anyhow::anyhow!("Environment value must be a NumLit")),
                         };
                         Ok((name, i32_val))
                     })
                     .collect::<Result<Vec<_>>>()
-                    .map_err(|e| anyhow::anyhow!("Failed to convert environment: {}", e))?;
-
-                use ascent::*;
-                let prog = ascent_run! {
-                    include_source!(calculator_source);
-
-                    int(expr.clone());
-
-                    // Seed environment facts
-                    env_var(n.clone(), v) <-- for (n, v) in env_facts.clone();
-                };
-
-                // Find the normal form of the expression
-                let rewrites: Vec<(Int, Int)> = prog
-                    .rw_int
-                    .iter()
-                    .map(|(from, to)| (from.clone(), to.clone()))
-                    .collect();
-
-                let mut current = expr.clone();
-                while let Some((_, next)) = rewrites.iter().find(|(from, _)| from == &current) {
-                    current = next.clone();
-                }
-
-                Ok(Box::new(CalcTerm(current)) as Box<dyn Term>)
             })
+            .map_err(|e| anyhow::anyhow!("Failed to convert environment: {}", e))?;
+
+            // Evaluate RHS using Ascent
+            use ascent::*;
+            let prog = ascent_run! {
+                include_source!(calculator_source);
+
+                int(rhs.as_ref().clone());
+
+                env_var(n.clone(), v) <-- for (n, v) in env_facts.clone();
+            };
+
+            // Find normal form of RHS
+            let rewrites: Vec<(Int, Int)> = prog
+                .rw_int
+                .iter()
+                .map(|(from, to)| (from.clone(), to.clone()))
+                .collect();
+
+            let mut current = rhs.as_ref().clone();
+            while let Some((_, next)) = rewrites.iter().find(|(from, _)| from == &current) {
+                current = next.clone();
+            }
+
+            // Extract value from normal form
+            let val = match &current {
+                Int::NumLit(v) => *v,
+                _ => {
+                    // Try to evaluate if not a NumLit
+                    if has_var_ref(&current) {
+                        return Err(anyhow::anyhow!("Assignment RHS contains undefined variables"));
+                    }
+                    current.eval()
+                }
+            };
+
+            // Update environment
+            if let Some(var_name) = match var {
+                mettail_runtime::OrdVar(mettail_runtime::Var::Free(ref fv)) => {
+                    fv.pretty_name.clone()
+                }
+                _ => None,
+            } {
+                CALC_ENV.with(|env| {
+                    env.borrow_mut().set(var_name, Int::NumLit(val));
+                });
+            }
         }
+
+        // Return the parsed term (not evaluated) so rewrites can be shown
+        Ok(Box::new(CalcTerm(expr)) as Box<dyn Term>)
     }
 
     fn run_ascent(&self, term: Box<dyn Term>) -> Result<AscentResults> {
@@ -207,13 +173,46 @@ impl Theory for CalculatorTheory {
             });
         }
 
-        // Build rewrite list
+        // Build rewrite list with proper labeling
         let rewrite_list: Vec<Rewrite> = rewrites
             .iter()
-            .map(|(from, to)| Rewrite {
-                from_id: compute_term_id(from),
-                to_id: compute_term_id(to),
-                rule_name: Some("var_substitution".to_string()),
+            .map(|(from, to)| {
+                // Determine the rule name based on the rewrite pattern
+                let rule_name = match (from, to) {
+                    // Semantic rewrites: Add/Sub with NumLit operands -> NumLit result
+                    (Int::Add(left, right), Int::NumLit(_)) => {
+                        if matches!(left.as_ref(), Int::NumLit(_))
+                            && matches!(right.as_ref(), Int::NumLit(_))
+                        {
+                            Some("add".to_string())
+                        } else {
+                            Some("var_substitution".to_string())
+                        }
+                    }
+                    (Int::Sub(left, right), Int::NumLit(_)) => {
+                        if matches!(left.as_ref(), Int::NumLit(_))
+                            && matches!(right.as_ref(), Int::NumLit(_))
+                        {
+                            Some("subtract".to_string())
+                        } else {
+                            Some("var_substitution".to_string())
+                        }
+                    }
+                    // Variable substitution: VarRef -> NumLit
+                    (Int::VarRef(_), Int::NumLit(_)) => Some("var_substitution".to_string()),
+                    // Congruence rewrites (propagating through Add/Sub/Assign)
+                    (Int::Add(_, _), Int::Add(_, _)) => Some("congruence".to_string()),
+                    (Int::Sub(_, _), Int::Sub(_, _)) => Some("congruence".to_string()),
+                    (Int::Assign(_, _), Int::Assign(_, _)) => Some("congruence".to_string()),
+                    // Default fallback
+                    _ => Some("rewrite".to_string()),
+                };
+
+                Rewrite {
+                    from_id: compute_term_id(from),
+                    to_id: compute_term_id(to),
+                    rule_name,
+                }
             })
             .collect();
 

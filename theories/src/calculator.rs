@@ -151,7 +151,7 @@ pub fn parse_and_eval_with_env(
 }
 
 /// Helper function to check if a term contains a VarRef (undefined variable)
-fn has_var_ref(term: &Int) -> bool {
+pub fn has_var_ref(term: &Int) -> bool {
     match term {
         Int::VarRef(_) => true,
         Int::NumLit(_) => false,
