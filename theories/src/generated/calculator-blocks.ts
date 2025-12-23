@@ -81,28 +81,6 @@ const definitions = [
 		inputsInline: true,
 		output: "Int",
 		colour: "51b0e0",
-	},
-
-	// Assign: ... = ...
-	{
-		type: "int_assign",
-		tooltip: "Assign: ... = ...",
-		message0: "%1 = %2",
-		args0: [
-			{
-				type: "field_input",
-				name: "VAR",
-				text: "v",
-			},
-			{
-				type: "input_value",
-				name: "ARG2",
-				check: "Int",
-			},
-		],
-		inputsInline: true,
-		output: "Int",
-		colour: "51b0e0",
 	}
 ];
 

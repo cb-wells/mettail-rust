@@ -14,7 +14,7 @@ theory! {
         ![i32] as Int
     },
     terms {
-        // Variables parse as VarRef nodes
+        // Variables parse as VarRef nodes (explicitly declared for native type)
         VarRef . Int ::= Var ;
         // Integer literals - uses Integer keyword for native integer type
         NumLit . Int ::= Integer ;
@@ -22,21 +22,17 @@ theory! {
         Add . Int ::= Int "+" Int ;
         Sub . Int ::= Int "-" Int ;
 
-        // Assignment: x = expr evaluates expr and stores result
-        Assign . Int ::= Var "=" Int ;
+        // Assign is now automatically generated for all categories
     },
     equations {
     },
     rewrites {
-        // Variable substitution: if env_var(x, v) then VarRef(x) => NumLit(v)
-        if env_var(x, v) then (VarRef x) => (NumLit v);
-
-        // Congruence rules: propagate rewrites through Add, Sub, and Assign
+        // Variable substitution and Assign congruence are now auto-generated
+        // Congruence rules: propagate rewrites through Add and Sub
         if S => T then (Add S R) => (Add T R);
         if S => T then (Add L S) => (Add L T);
         if S => T then (Sub S R) => (Sub T R);
         if S => T then (Sub L S) => (Sub L T);
-        if S => T then (Assign x S) => (Assign x T);
     },
     semantics {
         Add: +,
@@ -85,8 +81,8 @@ pub fn parse_and_eval_with_env(
 
         int(term.clone());
 
-        // Seed environment facts
-        env_var(n.clone(), v) <-- for (n, v) in env_facts.clone();
+        // Seed environment facts (use category-specific relation name)
+        env_var_int(n.clone(), v) <-- for (n, v) in env_facts.clone();
     };
 
     // Find normal form (term with no outgoing rewrites)
@@ -109,17 +105,29 @@ pub fn parse_and_eval_with_env(
 
     // Handle assignments: extract value and update environment
     if let Int::Assign(var, rhs) = &current {
-        // Extract value from RHS (should be a NumLit after rewriting)
-        let val = match rhs.as_ref() {
+        // The RHS might still need rewriting (congruence rules may not fully rewrite nested expressions)
+        // So we recursively rewrite the RHS to its normal form
+        let mut rhs_current = rhs.as_ref().clone();
+        loop {
+            // Find rewrite from current RHS term
+            if let Some((_, next)) = rewrites.iter().find(|(from, _)| from == &rhs_current) {
+                rhs_current = next.clone();
+            } else {
+                // No more rewrites - this is the normal form
+                break;
+            }
+        }
+
+        // Extract value from fully rewritten RHS (should be a NumLit)
+        let val = match &rhs_current {
             Int::NumLit(v) => *v,
             _ => {
-                // Try to evaluate if not a NumLit
                 // Check for undefined variables first by looking for VarRef
-                if has_var_ref(rhs) {
+                if has_var_ref(&rhs_current) {
                     return Err("undefined variable in expression".to_string());
                 }
                 // Try to evaluate
-                rhs.eval()
+                rhs_current.eval()
             }
         };
 

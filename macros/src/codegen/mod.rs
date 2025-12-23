@@ -13,7 +13,7 @@ pub mod parser;
 
 pub use ast_gen::*;
 
-use crate::ast::{GrammarItem, GrammarRule};
+use crate::ast::{GrammarItem, GrammarRule, TheoryDef};
 use syn::Ident;
 
 /// Checks if a rule is a Var rule (single item, NonTerminal "Var")
@@ -29,6 +29,24 @@ pub fn is_var_rule(rule: &GrammarRule) -> bool {
 pub fn is_integer_rule(rule: &GrammarRule) -> bool {
     rule.items.len() == 1
         && matches!(&rule.items[0], GrammarItem::NonTerminal(ident) if ident.to_string() == "Integer")
+}
+
+/// Checks if a rule is an Assign rule (Var "=" Category)
+/// Example: `Assign . Int ::= Var "=" Int ;`
+#[allow(clippy::cmp_owned)]
+pub fn is_assign_rule(rule: &GrammarRule) -> bool {
+    rule.items.len() == 3
+        && matches!(&rule.items[0], GrammarItem::NonTerminal(ident) if ident.to_string() == "Var")
+        && matches!(&rule.items[1], GrammarItem::Terminal(term) if term == "=")
+        && matches!(&rule.items[2], GrammarItem::NonTerminal(ident) if ident == &rule.category)
+}
+
+/// Check if a category has an Assign rule in the theory
+pub fn has_assign_rule(category: &Ident, theory: &TheoryDef) -> bool {
+    theory
+        .terms
+        .iter()
+        .any(|rule| rule.category == *category && is_assign_rule(rule))
 }
 
 /// Generate the Var variant label for a category

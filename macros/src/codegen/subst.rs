@@ -139,6 +139,20 @@ fn generate_substitute_method(
         match_arms.push(var_arm);
     }
 
+    // Add Assign substitution arm (substitute in RHS only, not in variable name)
+    // Assign variants are auto-generated for all categories
+    match_arms.push(quote! {
+        #category::Assign(var, rhs) => {
+            // Extract FreeVar from OrdVar for substitution
+            if let mettail_runtime::OrdVar(mettail_runtime::Var::Free(ref fv)) = var {
+                #category::Assign(var.clone(), Box::new(rhs.as_ref().substitute(fv, replacement)))
+            } else {
+                // Bound variable - no substitution needed
+                self.clone()
+            }
+        }
+    });
+
     quote! {
         pub fn substitute(
             &self,
@@ -171,6 +185,20 @@ fn generate_cross_category_substitute_method(
         let var_arm = generate_auto_var_substitution_arm(category, binder_cat);
         match_arms.push(var_arm);
     }
+
+    // Add Assign substitution arm (substitute in RHS only, not in variable name)
+    let method_name_for_rhs = quote::format_ident!("substitute_{}", binder_cat.to_string().to_lowercase());
+    match_arms.push(quote! {
+        #category::Assign(var, rhs) => {
+            // Extract FreeVar from OrdVar for substitution
+            if let mettail_runtime::OrdVar(mettail_runtime::Var::Free(ref fv)) = var {
+                #category::Assign(var.clone(), Box::new(rhs.as_ref().#method_name_for_rhs(fv, replacement)))
+            } else {
+                // Bound variable - no substitution needed
+                self.clone()
+            }
+        }
+    });
 
     quote! {
         /// Substitute `replacement` (of type #binder_cat) for free occurrences of `var` in this term

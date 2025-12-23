@@ -7,8 +7,7 @@ export const categoryInfo = {
 			"VarRef",
 			"NumLit",
 			"Add",
-			"Sub",
-			"Assign"
+			"Sub"
 		],
 		colour: "51b0e0",
 	}

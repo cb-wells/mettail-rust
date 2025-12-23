@@ -6,7 +6,7 @@
 #![allow(clippy::cmp_owned, clippy::useless_format)]
 
 use crate::ast::{GrammarItem, GrammarRule, TheoryDef};
-use crate::codegen::{is_integer_rule, is_var_rule};
+use crate::codegen::{has_assign_rule, is_integer_rule, is_var_rule};
 use crate::utils::{has_native_type, native_type_to_string};
 
 /// Generates Var label for a category (first letter + "Var")
@@ -133,6 +133,36 @@ fn is_var_terminal_rule(rule: &GrammarRule) -> bool {
         && matches!(&rule.items[1], GrammarItem::Terminal(_))
 }
 
+/// Check if a category is used as the first item in other categories' rules
+/// This is used to avoid ambiguity when generating assignments.
+/// If a category appears as the first item (e.g., `Name` in `Name "[" Proc "]"`),
+/// then assignments for that category would create ambiguity (e.g., `x = ...` vs `x[...]`).
+/// 
+/// Note: We check the FIRST item, not just first non-terminal, because terminals
+/// before a non-terminal don't prevent ambiguity. For example, `"@" "(" Proc ")"`
+/// doesn't create ambiguity for Proc assignments because `"@"` comes first.
+fn is_category_referenced_as_first(category: &syn::Ident, theory: &TheoryDef) -> bool {
+    let cat_str = category.to_string();
+    // Check if this category appears as the FIRST item in any rule that's NOT in this category
+    for rule in &theory.terms {
+        // Skip rules in the same category
+        if rule.category.to_string() == cat_str {
+            continue;
+        }
+        // Check if the first item is this category (as a non-terminal)
+        if let Some(first_item) = rule.items.first() {
+            if let GrammarItem::NonTerminal(nt) = first_item {
+                let nt_str = nt.to_string();
+                // Skip built-in types (Var, Integer) - they don't cause ambiguity
+                if nt_str != "Var" && nt_str != "Integer" && nt_str == cat_str {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
 /// Generate a LALRPOP production for a category
 ///
 /// This handles precedence by creating tiered rules for infix operators
@@ -208,8 +238,22 @@ fn generate_tiered_production(
     let cat_str = category.to_string();
     let mut production = String::new();
 
-    // Top-level rule: handle var+terminal rules first (most specific), then delegate to infix
+    // Top-level rule: handle assignments and var+terminal rules first (most specific), then delegate to infix
     production.push_str(&format!("pub {}: {} = {{\n", cat_str, cat_str));
+
+    // Automatically add assignment parsing if no explicit Assign rule exists
+    // Only generate assignments for exported categories that are NOT used as the first
+    // non-terminal in other categories' rules (to avoid ambiguity)
+    let has_assign = has_assign_rule(category, theory);
+    let is_exported = theory.exports.iter().any(|e| e.name == *category);
+    let is_first_in_other = is_category_referenced_as_first(category, theory);
+    if !has_assign && is_exported && !is_first_in_other {
+        // Add automatic assignment: <v:Ident> "=" <expr:CategoryInfix> => Category::Assign(...)
+        production.push_str(&format!(
+            "    <v:Ident> \"=\" <expr:{}Infix> => {}::Assign(mettail_runtime::OrdVar(Var::Free(mettail_runtime::get_or_create_var(v))), Box::new(expr)),\n",
+            cat_str, cat_str
+        ));
+    }
 
     // Add var+terminal rules at top level (highest specificity - tried first)
     if !var_terminal_rules.is_empty() {
@@ -415,9 +459,24 @@ fn generate_simple_production(
     theory: &TheoryDef,
 ) -> String {
     let mut production = String::new();
+    let cat_str = category.to_string();
 
     // Production header: pub CategoryName: CategoryName = {
     production.push_str(&format!("pub {}: {} = {{\n", category, category));
+
+    // Automatically add assignment parsing if no explicit Assign rule exists
+    // Only generate assignments for exported categories that are NOT used as the first
+    // non-terminal in other categories' rules (to avoid ambiguity)
+    let has_assign = has_assign_rule(category, theory);
+    let is_exported = theory.exports.iter().any(|e| e.name == *category);
+    let is_first_in_other = is_category_referenced_as_first(category, theory);
+    if !has_assign && is_exported && !is_first_in_other {
+        // For simple productions (no infix), use the category directly for RHS
+        production.push_str(&format!(
+            "    <v:Ident> \"=\" <expr:{}> => {}::Assign(mettail_runtime::OrdVar(Var::Free(mettail_runtime::get_or_create_var(v))), Box::new(expr)),\n",
+            cat_str, cat_str
+        ));
+    }
 
     // Generate alternative for each rule
     for (i, rule) in rules.iter().enumerate() {

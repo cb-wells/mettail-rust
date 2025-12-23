@@ -71,7 +71,7 @@ impl Theory for CalculatorTheory {
 
                 int(rhs.as_ref().clone());
 
-                env_var(n.clone(), v) <-- for (n, v) in env_facts.clone();
+                env_var_int(n.clone(), v) <-- for (n, v) in env_facts.clone();
             };
 
             // Find normal form of RHS
@@ -149,7 +149,7 @@ impl Theory for CalculatorTheory {
             int(initial_int.clone());
 
             // Seed environment facts from the vector
-            env_var(n.clone(), v) <-- for (n, v) in env_facts.clone();
+            env_var_int(n.clone(), v) <-- for (n, v) in env_facts.clone();
         };
 
         // Extract results from Ascent relations
@@ -209,8 +209,8 @@ impl Theory for CalculatorTheory {
                 };
 
                 Rewrite {
-                    from_id: compute_term_id(from),
-                    to_id: compute_term_id(to),
+                    from_id: compute_term_id(&from),
+                    to_id: compute_term_id(&to),
                     rule_name,
                 }
             })

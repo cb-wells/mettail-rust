@@ -1,6 +1,6 @@
 #![allow(clippy::cmp_owned, clippy::single_match)]
 
-use super::{display, generate_var_label, is_integer_rule, is_var_rule, subst, termgen};
+use super::{display, generate_var_label, has_assign_rule, is_integer_rule, is_var_rule, subst, termgen};
 use crate::ast::{BuiltinOp, GrammarItem, GrammarRule, TheoryDef};
 use proc_macro2::TokenStream;
 use quote::quote;
@@ -93,6 +93,14 @@ fn generate_ast_enums(theory: &TheoryDef) -> TokenStream {
                     #var_label(mettail_runtime::OrdVar)
                 });
             }
+        }
+
+        // Automatically add Assign variant if it doesn't already exist
+        let has_assign = has_assign_rule(cat_name, theory);
+        if !has_assign {
+            variants.push(quote! {
+                Assign(mettail_runtime::OrdVar, Box<#cat_name>)
+            });
         }
 
         quote! {
@@ -890,13 +898,14 @@ fn generate_rewrite_application(theory: &TheoryDef) -> TokenStream {
     }
 }
 
-/// Generate environment infrastructure for theories with env_var conditions
+/// Generate environment infrastructure for all theories
 ///
-/// This generates:
-/// - Environment struct (e.g., CalculatorEnv)
+/// This generates environment structs for ALL exported categories (automatically):
+/// - Environment struct (e.g., CalculatorIntEnv, RhoCalcProcEnv)
 /// - Environment methods (new, set, get, clear)
 /// - env_to_facts helper function
-/// - rewrite_to_normal_form helper function
+/// 
+/// This enables automatic assignment and variable retrieval for every category.
 fn generate_env_infrastructure(theory: &TheoryDef) -> TokenStream {
     use quote::format_ident;
 

@@ -20,6 +20,10 @@ relation rw_name(Name, Name);
 
 relation ppar_contains(Proc, Proc);
 
+relation env_var_proc(String, Proc);
+
+relation env_var_name(String, Name);
+
 
     // Category rules
 proc(c1) <--
@@ -41,6 +45,10 @@ proc(body.clone()) <--
     if let Proc :: PInput(field_0, scope_field) = t,
     let body = (* scope_field.inner().unsafe_body).clone();
 
+proc(rhs.as_ref().clone()) <--
+    proc(t),
+    if let Proc :: Assign(_, rhs) = t;
+
 ppar_contains(parent.clone(), elem.clone()) <--
     proc(parent),
     if let Proc :: PPar(ref bag_field) = parent,
@@ -56,6 +64,10 @@ name(c1) <--
 proc(field_0.as_ref().clone()) <--
     name(t),
     if let Name :: NQuote(field_0) = t;
+
+name(rhs.as_ref().clone()) <--
+    name(t),
+    if let Name :: Assign(_, rhs) = t;
 
 
     // Equation rules
@@ -167,5 +179,17 @@ b }, let result = Proc :: PPar({ let mut bag_result = remaining;
 Proc :: insert_into_ppar(& mut bag_result, rhs_term);
 
 bag_result }).normalize();
+
+rw_proc(assign_s, assign_t) <--
+    proc(assign_s),
+    if let Proc :: Assign(x, s) = assign_s,
+    rw_proc((* * s).clone(), t),
+    let assign_t = Proc :: Assign(x.clone(), Box :: new(t.clone()));
+
+rw_name(assign_s, assign_t) <--
+    name(assign_s),
+    if let Name :: Assign(x, s) = assign_s,
+    rw_name((* * s).clone(), t),
+    let assign_t = Name :: Assign(x.clone(), Box :: new(t.clone()));
 
 }

@@ -62,6 +62,17 @@ fn generate_display_impl(
         match_arms.push(var_arm);
     }
 
+    // Add Assign display arm: <var_name> = <rhs>
+    match_arms.push(quote! {
+        #category::Assign(ord_var, rhs) => {
+            let var_name = match &ord_var.0 {
+                mettail_runtime::Var::Free(fv) => fv.pretty_name.as_ref().map(|s| s.as_str()).unwrap_or("_"),
+                mettail_runtime::Var::Bound(bv) => bv.pretty_name.as_ref().map(|s| s.as_str()).unwrap_or("_"),
+            };
+            write!(f, "{} = {}", var_name, rhs)
+        }
+    });
+
     quote! {
         impl std::fmt::Display for #category {
             fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
