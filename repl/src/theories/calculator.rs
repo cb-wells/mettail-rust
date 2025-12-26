@@ -91,7 +91,7 @@ impl Theory for CalculatorTheory {
                 Int::NumLit(v) => *v,
                 _ => {
                     // Try to evaluate if not a NumLit
-                    if has_var_ref(&current) {
+                    if has_var_ref_int(&current) {
                         return Err(anyhow::anyhow!("Assignment RHS contains undefined variables"));
                     }
                     current.eval()
